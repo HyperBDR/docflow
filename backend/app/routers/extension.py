@@ -27,6 +27,7 @@ class TokenOut(BaseModel):
     token: str
     expires_in: int
     api_url: str
+    web_url: str
 
 
 def expired(value) -> bool:
@@ -53,7 +54,10 @@ def exchange_pair(payload: PairExchange, db: Session = Depends(get_db)):
     db.add(ExtensionToken(user_id=pair.user_id, token_hash=hash_token(raw), expires_at=expires_in(days=settings.extension_token_days)))
     pair.used = True
     db.commit()
-    return TokenOut(token=raw, expires_in=settings.extension_token_days * 86400, api_url=settings.public_base_url)
+    return TokenOut(
+        token=raw, expires_in=settings.extension_token_days * 86400,
+        api_url=settings.public_base_url, web_url=settings.web_origin,
+    )
 
 
 @router.delete("/tokens", status_code=204)

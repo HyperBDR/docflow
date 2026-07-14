@@ -71,6 +71,9 @@ class Demo(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200), default="未命名演示")
     description: Mapped[str] = mapped_column(Text, default="")
+    theme: Mapped[dict] = mapped_column(JSON, default=dict)
+    navigation: Mapped[dict] = mapped_column(JSON, default=dict)
+    manual_fields: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[DemoStatus] = mapped_column(Enum(DemoStatus), default=DemoStatus.draft)
     current_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -88,13 +91,39 @@ class Step(Base):
     title: Mapped[str] = mapped_column(String(200), default="")
     body: Mapped[str] = mapped_column(Text, default="")
     asset_key: Mapped[str] = mapped_column(String(500))
+    render_mode: Mapped[str] = mapped_column(String(20), default="image")
+    dom_snapshot_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     viewport_width: Mapped[int] = mapped_column(Integer)
     viewport_height: Mapped[int] = mapped_column(Integer)
     hotspot: Mapped[dict] = mapped_column(JSON, default=dict)
     redactions: Mapped[list] = mapped_column(JSON, default=list)
+    page_context: Mapped[dict] = mapped_column(JSON, default=dict)
+    scroll_state: Mapped[dict] = mapped_column(JSON, default=dict)
+    capture_warnings: Mapped[list] = mapped_column(JSON, default=list)
+    manual_fields: Mapped[list] = mapped_column(JSON, default=list)
+    ai_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     duration: Mapped[float] = mapped_column(Float, default=3.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     demo: Mapped[Demo] = relationship(back_populates="steps")
+    hotspots: Mapped[list["Hotspot"]] = relationship(
+        back_populates="step", cascade="all, delete-orphan", order_by="Hotspot.position"
+    )
+
+
+class Hotspot(Base):
+    __tablename__ = "hotspots"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    step_id: Mapped[str] = mapped_column(ForeignKey("steps.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    selector: Mapped[dict] = mapped_column(JSON, default=dict)
+    fallback_rect: Mapped[dict] = mapped_column(JSON, default=dict)
+    trigger: Mapped[str] = mapped_column(String(20), default="click")
+    action: Mapped[dict] = mapped_column(JSON, default=dict)
+    tooltip: Mapped[dict] = mapped_column(JSON, default=dict)
+    style: Mapped[dict] = mapped_column(JSON, default=dict)
+    manual_fields: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    step: Mapped[Step] = relationship(back_populates="hotspots")
 
 
 class PublishedRevision(Base):
@@ -130,3 +159,19 @@ class ExportJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
+
+class AIJob(Base):
+    __tablename__ = "ai_jobs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
+    step_id: Mapped[str | None] = mapped_column(ForeignKey("steps.id", ondelete="CASCADE"), nullable=True)
+    status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.queued)
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    model: Mapped[str] = mapped_column(String(200), default="")
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    applied_patch: Mapped[dict] = mapped_column(JSON, default=dict)
+    inverse_patch: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

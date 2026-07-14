@@ -1,2 +1,20 @@
-:root { font: 14px system-ui, "PingFang SC", sans-serif; color: #172033; } body { margin: 0; width: 330px; background: #f7f8fb; } main { padding: 18px; } h1 { margin: 0 0 18px; font-size: 20px; } h1 span { color: #635bff; } section, label { display: grid; gap: 8px; } section { gap: 13px; } input, select, button { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #d6dbe5; border-radius: 8px; background: white; font: inherit; } button { background: #635bff; border-color: #635bff; color: white; font-weight: 650; cursor: pointer; } button.danger { background: #c93647; border-color: #c93647; } button.link { color: #68748a; background: transparent; border-color: transparent; } #message:not(:empty) { padding: 9px; margin-bottom: 12px; background: #fff3d7; border-radius: 7px; font-size: 12px; } label { color: #58657b; font-size: 12px; }
-
+:root { font: 14px system-ui, "PingFang SC", sans-serif; color: #172033; }
+body { margin: 0; width: 360px; background: #f7f8fb; }
+main { padding: 18px; }
+h1 { margin: 0 0 18px; font-size: 20px; } h1 span { color: #635bff; }
+section, label, #setup, #active-recording { display: grid; gap: 8px; } section, #setup, #active-recording { gap: 13px; }
+input, select, button { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #d6dbe5; border-radius: 8px; background: white; font: inherit; }
+button { background: #635bff; border-color: #635bff; color: white; font-weight: 650; cursor: pointer; }
+button.danger { background: #c93647; border-color: #c93647; } button.secondary { color: #4f46e5; background: #eef2ff; border-color: #c7d2fe; }
+button.link { color: #68748a; background: transparent; border-color: transparent; }
+#message:not(:empty) { padding: 9px; margin-bottom: 12px; background: #fff3d7; border-radius: 7px; font-size: 12px; }
+label { color: #58657b; font-size: 12px; }
+fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; } legend { margin-bottom: 7px; color: #58657b; font-size: 12px; }
+.mode-card { grid-template-columns: 20px 1fr; align-items: start; padding: 11px; border: 1px solid #dce1ea; border-radius: 10px; background: white; cursor: pointer; }
+.mode-card:has(input:checked) { border-color: #635bff; box-shadow: 0 0 0 2px #635bff1f; }
+.mode-card input { width: 15px; margin: 3px 0 0; accent-color: #635bff; }
+.mode-card span { display: grid; gap: 3px; } .mode-card strong { color: #172033; font-size: 13px; } .mode-card small { color: #657187; line-height: 1.35; } .mode-card em { color: #635bff; font-size: 10px; font-style: normal; }
+.recording-summary { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 10px; padding: 13px; background: #111827; color: white; border-radius: 11px; }
+.recording-summary > div { display: grid; gap: 3px; } .recording-summary small { color: #cbd5e1; font-size: 10px; } .recording-summary b { font-size: 12px; }
+.record-dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 4px #ef444433; }
+.recording-summary.paused .record-dot { background: #f59e0b; box-shadow: none; } .recording-summary.capturing .record-dot { background: #8b5cf6; }

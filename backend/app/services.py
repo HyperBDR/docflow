@@ -3,8 +3,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.defaults import DEFAULT_NAVIGATION, DEFAULT_THEME, DEFAULT_TOOLTIP, DEFAULT_HOTSPOT_STYLE
 from app.models import Demo, PublishedRevision, ShareToken, Step, User
-from app.schemas import DemoOut, StepOut
+from app.schemas import DemoOut, HotspotOut, StepOut
 
 
 def owned_demo(db: Session, demo_id: str, user: User) -> Demo:
@@ -25,6 +26,17 @@ def active_share(db: Session, demo_id: str) -> ShareToken | None:
 def step_out(step: Step, demo_id: str) -> StepOut:
     result = StepOut.model_validate(step)
     result.image_url = f"{settings.public_base_url}/api/demos/{demo_id}/steps/{step.id}/image"
+    result.snapshot_url = (
+        f"{settings.public_base_url}/api/demos/{demo_id}/steps/{step.id}/snapshot"
+        if step.dom_snapshot_key else None
+    )
+    result.hotspots = [HotspotOut.model_validate(item) for item in step.hotspots]
+    if not result.hotspots and step.hotspot:
+        result.hotspots = [HotspotOut(
+            id=f"legacy-{step.id}", position=0, selector={}, fallback_rect=step.hotspot,
+            trigger="click", action={"type": "next"}, tooltip=DEFAULT_TOOLTIP,
+            style=DEFAULT_HOTSPOT_STYLE,
+        )]
     return result
 
 
@@ -39,10 +51,13 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         updated_at=demo.updated_at,
         steps=[step_out(step, demo.id) for step in demo.steps] if include_steps else [],
         share_url=f"{settings.web_origin}/p/{share.token}" if share else None,
+        theme={**DEFAULT_THEME, **(demo.theme or {})},
+        navigation={**DEFAULT_NAVIGATION, **(demo.navigation or {})},
+        manual_fields=demo.manual_fields or [],
+        ai_enabled=settings.ai_enabled and bool(settings.ai_api_key),
     )
 
 
 def next_revision_number(db: Session, demo_id: str) -> int:
     value = db.scalar(select(func.max(PublishedRevision.number)).where(PublishedRevision.demo_id == demo_id))
     return (value or 0) + 1
-

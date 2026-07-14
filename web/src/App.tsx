@@ -4,6 +4,7 @@ import { ApiError, api } from './api'
 import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
 import Player from './pages/Player'
+import SnapshotFrame from './pages/SnapshotFrame'
 
 type User = { id: string; email: string }
 
@@ -51,12 +52,19 @@ function Shell({ user, logout }: { user: User; logout: () => void }) {
 }
 
 export default function App() {
+  const isSnapshotFrame = window.location.pathname === '/snapshot-frame'
+  const isPublicPlayer = window.location.pathname.startsWith('/p/')
   const [user, setUser] = useState<User | null | undefined>(undefined)
-  useEffect(() => { api.me().then(setUser).catch(error => setUser(error instanceof ApiError && error.status === 401 ? null : null)) }, [])
+  useEffect(() => {
+    if (isSnapshotFrame || isPublicPlayer) return
+    api.me().then(setUser).catch(error => setUser(error instanceof ApiError && error.status === 401 ? null : null))
+  }, [isSnapshotFrame, isPublicPlayer])
+  if (isSnapshotFrame) return <SnapshotFrame />
+  if (isPublicPlayer) return <Routes><Route path="/p/:token" element={<Player />} /></Routes>
   if (user === undefined) return <div className="center-page">正在加载 DocFlow…</div>
   return <Routes>
     <Route path="/p/:token" element={<Player />} />
+    <Route path="/snapshot-frame" element={<SnapshotFrame />} />
     <Route path="/*" element={user ? <Shell user={user} logout={async () => { await api.logout(); setUser(null) }} /> : <Auth onAuthenticated={setUser} />} />
   </Routes>
 }
-

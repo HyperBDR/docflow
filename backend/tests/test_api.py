@@ -79,3 +79,30 @@ def test_step_validation_and_password_redaction(authenticated):
     assert len(response.json()["redactions"]) == 1
     assert authenticated.patch(f"/api/demos/{demo['id']}/steps/{response.json()['id']}", json={"duration": 16}).status_code == 422
 
+
+def test_recording_enqueues_ai_without_waiting_for_generation(authenticated, monkeypatch):
+    from app.routers import recordings
+
+    queued: list[str] = []
+    monkeypatch.setattr(recordings.settings, "ai_enabled", True)
+    monkeypatch.setattr(recordings.settings, "ai_api_key", "test-key")
+    monkeypatch.setattr(recordings, "enqueue_ai_job", lambda db, demo, user, step_id: queued.append(step_id))
+    demo = authenticated.post("/api/demos", json={"title": "异步 AI"}).json()
+    response = create_step(authenticated, demo["id"], "async-ai")
+    assert response.status_code == 201
+    assert queued == [response.json()["id"]]
+
+
+def test_duplicate_demo_copies_steps_as_draft(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "原始演示", "description": "说明"}).json()
+    source_step = create_step(authenticated, demo["id"]).json()
+    response = authenticated.post(f"/api/demos/{demo['id']}/duplicate")
+    assert response.status_code == 201
+    copied = response.json()
+    assert copied["id"] != demo["id"]
+    assert copied["title"] == "原始演示（副本）"
+    assert copied["status"] == "draft"
+    assert copied["share_url"] is None
+    assert len(copied["steps"]) == 1
+    assert copied["steps"][0]["id"] != source_step["id"]
+    assert copied["steps"][0]["title"] == source_step["title"]

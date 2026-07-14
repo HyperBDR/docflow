@@ -13,6 +13,18 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     session_days: int = 14
     extension_token_days: int = 30
+    dom_slides_enabled: bool = True
+    snapshot_compressed_limit_mb: int = 15
+    snapshot_uncompressed_limit_mb: int = 50
+    ai_enabled: bool = False
+    ai_base_url: str = "https://api.openai.com/v1"
+    ai_api_key: str = ""
+    ai_model: str = "gpt-4.1-mini"
+    ai_vision_enabled: bool = True
+    ai_timeout_seconds: int = 120
+    ai_chunk_size: int = 8
+    render_web_url: str = "http://web"
+    chromium_executable: str = "/usr/bin/chromium"
 
 
 @lru_cache
@@ -21,4 +33,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-

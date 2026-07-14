@@ -63,10 +63,36 @@ def slide(step: dict, index: int, size=(1920, 1080), pointer: tuple[float, float
 
 
 def render_pdf(snapshot: dict) -> bytes:
-    pages = [slide(step, index, size=(1600, 1131)) for index, step in enumerate(snapshot["steps"], 1)]
+    pages = render_player_images(snapshot, None) or [slide(step, index, size=(1600, 1131)) for index, step in enumerate(snapshot["steps"], 1)]
     output = io.BytesIO()
     pages[0].save(output, "PDF", save_all=True, append_images=pages[1:], resolution=144, quality=90)
     return output.getvalue()
+
+
+def render_player_images(snapshot: dict, token: str | None) -> list[Image.Image] | None:
+    if not token or not any(step.get("render_mode") == "dom" for step in snapshot.get("steps", [])):
+        return None
+    try:
+        from playwright.sync_api import sync_playwright
+
+        pages: list[Image.Image] = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                headless=True,
+                executable_path=settings.chromium_executable,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            page = browser.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
+            for index in range(len(snapshot["steps"])):
+                url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}"
+                page.goto(url, wait_until="networkidle", timeout=60_000)
+                page.wait_for_selector('main[data-export-ready="true"]', timeout=30_000)
+                content = page.locator("main.player-shell").screenshot(type="jpeg", quality=92)
+                pages.append(Image.open(io.BytesIO(content)).convert("RGB"))
+            browser.close()
+        return pages
+    except Exception:
+        return None
 
 
 def markdown_text(snapshot: dict, base_url: str, token: str | None = None, local: bool = False) -> str:
@@ -89,23 +115,29 @@ def render_markdown_zip(snapshot: dict) -> bytes:
     return output.getvalue()
 
 
-def render_mp4(snapshot: dict) -> bytes:
+def render_mp4(snapshot: dict, token: str | None = None) -> bytes:
     with tempfile.TemporaryDirectory(prefix="docflow-") as temp:
         directory = Path(temp)
         manifest_lines: list[str] = []
         previous = (960.0, 450.0)
         frame_number = 0
+        rendered = render_player_images(snapshot, token)
         for index, step in enumerate(snapshot["steps"], 1):
-            target = (float(step.get("hotspot", {}).get("x", 0.5)) * 1920, float(step.get("hotspot", {}).get("y", 0.5)) * 910)
+            hotspot = (step.get("hotspots") or [{}])[0].get("fallback_rect", step.get("hotspot", {}))
+            target = (float(hotspot.get("x", 0.5)) * 1920, 62 + float(hotspot.get("y", 0.5)) * 898)
+            base = rendered[index - 1] if rendered else None
             for part in range(6):
                 progress = (part + 1) / 6
                 pointer = (previous[0] + (target[0] - previous[0]) * progress, previous[1] + (target[1] - previous[1]) * progress)
                 path = directory / f"frame-{frame_number:05d}.jpg"
-                slide(step, index, pointer=pointer).save(path, "JPEG", quality=92)
+                frame = base.copy() if base else slide(step, index)
+                draw = ImageDraw.Draw(frame)
+                draw.ellipse((pointer[0] - 16, pointer[1] - 16, pointer[0] + 16, pointer[1] + 16), fill="#ef4444", outline="white", width=4)
+                frame.save(path, "JPEG", quality=92)
                 manifest_lines += [f"file '{path.as_posix()}'", "duration 0.08"]
                 frame_number += 1
             hold = directory / f"frame-{frame_number:05d}.jpg"
-            slide(step, index).save(hold, "JPEG", quality=92)
+            (base.copy() if base else slide(step, index)).save(hold, "JPEG", quality=92)
             manifest_lines += [f"file '{hold.as_posix()}'", f"duration {max(1, min(15, float(step.get('duration', 3))))}"]
             frame_number += 1
             previous = target

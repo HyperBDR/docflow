@@ -14,11 +14,12 @@
     "typescript": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "react-router-dom": "latest"
+    "react-router-dom": "latest",
+    "@floating-ui/react": "latest",
+    "rrweb-snapshot": "2.1.0"
   },
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest"
   }
 }
-

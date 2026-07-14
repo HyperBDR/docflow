@@ -1,4 +1,4 @@
-import type { Demo, ExportJob, Step } from './types'
+import type { AIJob, Demo, ExportJob, HotspotData, Step } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -31,7 +31,11 @@ export const api = {
   createDemo: (title: string) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title }) }),
   updateDemo: (id: string, values: Partial<Demo>) => request<Demo>(`/api/demos/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
   deleteDemo: (id: string) => request<void>(`/api/demos/${id}`, { method: 'DELETE' }),
+  duplicateDemo: (id: string) => request<Demo>(`/api/demos/${id}/duplicate`, { method: 'POST' }),
   updateStep: (demoId: string, stepId: string, values: Partial<Step>) => request<Step>(`/api/demos/${demoId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  createHotspot: (demoId: string, stepId: string, values: Omit<HotspotData, 'id' | 'position'>) => request<HotspotData>(`/api/demos/${demoId}/steps/${stepId}/hotspots`, { method: 'POST', body: JSON.stringify(values) }),
+  updateHotspot: (demoId: string, stepId: string, hotspotId: string, values: Partial<HotspotData>) => request<HotspotData>(`/api/demos/${demoId}/steps/${stepId}/hotspots/${hotspotId}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  deleteHotspot: (demoId: string, stepId: string, hotspotId: string) => request<void>(`/api/demos/${demoId}/steps/${stepId}/hotspots/${hotspotId}`, { method: 'DELETE' }),
   deleteStep: (demoId: string, stepId: string) => request<void>(`/api/demos/${demoId}/steps/${stepId}`, { method: 'DELETE' }),
   reorder: (demoId: string, stepIds: string[]) => request<Demo>(`/api/demos/${demoId}/steps/reorder`, { method: 'POST', body: JSON.stringify({ step_ids: stepIds }) }),
   publish: (id: string) => request<Demo>(`/api/demos/${id}/publish`, { method: 'POST' }),
@@ -40,4 +44,8 @@ export const api = {
   uploadStep: (demoId: string, form: FormData) => request<Step>(`/api/recordings/${demoId}/steps`, { method: 'POST', body: form }),
   createExport: (demoId: string, kind: ExportJob['kind']) => request<ExportJob>(`/api/exports/${demoId}`, { method: 'POST', body: JSON.stringify({ kind }) }),
   export: (id: string) => request<ExportJob>(`/api/exports/${id}`),
+  generateAI: (demoId: string, stepId?: string) => request<AIJob>(stepId ? `/api/demos/${demoId}/steps/${stepId}/ai/generate` : `/api/demos/${demoId}/ai/generate`, { method: 'POST' }),
+  aiJob: (id: string) => request<AIJob>(`/api/ai/jobs/${id}`),
+  latestAI: (demoId: string) => request<AIJob | null>(`/api/demos/${demoId}/ai/latest`),
+  revertAI: (id: string) => request<AIJob>(`/api/ai/jobs/${id}/revert`, { method: 'POST' }),
 }
