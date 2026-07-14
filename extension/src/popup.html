@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><link rel="stylesheet" href="popup.css"></head><body>
+  <main><h1><span>◉</span> DocFlow</h1><div id="message"></div>
+    <section id="connect"><label>DocFlow API 地址<input id="api" value="http://localhost:8000"></label><label>六位配对码<input id="code" maxlength="6" inputmode="numeric" placeholder="000000"></label><button id="pair">连接账号</button></section>
+    <section id="recorder" hidden><label>选择演示<select id="demo"></select></label><button id="start">开始录制当前标签页</button><button id="stop" class="danger" hidden>停止并打开编辑器</button><button id="disconnect" class="link">断开账号</button></section>
+  </main><script src="popup.js"></script>
+</body></html>
+

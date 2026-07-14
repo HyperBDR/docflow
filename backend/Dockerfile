@@ -1,0 +1,30 @@
+FROM python:3.12-slim
+
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com
+RUN sed -i \
+      -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}/debian|g" \
+      -e "s|http://deb.debian.org/debian-security|${DEBIAN_MIRROR}/debian-security|g" \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+ENV PIP_DEFAULT_TIMEOUT=600 \
+    PIP_RETRIES=10 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+COPY pyproject.toml alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
+      --index-url "${PIP_INDEX_URL}" \
+      --trusted-host "${PIP_TRUSTED_HOST}" \
+      --timeout 600 \
+      --retries 10 \
+      .
+RUN mkdir -p /data/assets /data/exports
+EXPOSE 8000

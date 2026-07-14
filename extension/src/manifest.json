@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "DocFlow Recorder",
+  "description": "将网页操作录制为 DocFlow 交互文档",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_popup": "popup.html", "default_title": "DocFlow Recorder" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }]
+}
+
