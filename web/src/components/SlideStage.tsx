@@ -22,6 +22,7 @@ type Props = {
   onRectChange?: (hotspot: HotspotData, rect: Rect) => void
   showZoomEditor?: boolean
   persistZoom?: boolean
+  exportZoomProgress?: number
   onZoomRectChange?: (rect: Rect) => void
   onZoomDelete?: () => void
 }
@@ -206,7 +207,7 @@ function zoomedRect(rect: Rect, scale: number, offsetX: number, offsetY: number)
   return { x: rect.x * scale + offsetX, y: rect.y * scale + offsetY, w: rect.w * scale, h: rect.h * scale }
 }
 
-export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, persistZoom = false, onZoomRectChange, onZoomDelete }: Props) {
+export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, persistZoom = false, exportZoomProgress, onZoomRectChange, onZoomDelete }: Props) {
   const shellRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -221,7 +222,10 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url)
   const zoom = step.animation?.zoom
   const zoomRect = zoom?.rect
-  const zoomTransitionDuration = Math.max(0, Math.min(5000, Number(zoom?.transition_duration_ms ?? 800)))
+  const zoomTransitionDuration = Math.max(0, Math.min(5000, Number(zoom?.transition_duration_ms ?? 1200)))
+  const deterministicZoom = exportZoomProgress !== undefined
+  const effectiveZoomProgress = deterministicZoom ? Math.max(0, Math.min(1, exportZoomProgress)) : zoomActive ? 1 : 0
+  const zoomVisible = effectiveZoomProgress > 0
 
   const runZoomPreview = useCallback(() => {
     if (!zoomRect) return
@@ -293,10 +297,10 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   }, [error, onReady])
 
   useEffect(() => {
-    if (mode !== 'player' || !contentReady || !zoom?.enabled || !zoomRect) return
+    if (deterministicZoom || mode !== 'player' || !contentReady || !zoom?.enabled || !zoomRect) return
     const start = window.setTimeout(runZoomPreview, 250)
     return () => { window.clearTimeout(start); window.clearTimeout(zoomTimer.current); setZoomActive(false) }
-  }, [mode, contentReady, step.id, zoom?.enabled, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h, runZoomPreview])
+  }, [deterministicZoom, mode, contentReady, step.id, zoom?.enabled, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h, runZoomPreview])
 
   useEffect(() => () => window.clearTimeout(zoomTimer.current), [])
 
@@ -307,11 +311,13 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const showDomFrame = useDom && !error && Boolean(snapshot)
   const showScreenshot = fallback || !contentReady
   const zoomTransform = useMemo(() => {
-    if (!zoomActive || !zoomRect) return { scale: 1, x: 0, y: 0, css: 'translate(0, 0) scale(1)' }
-    const zoomScale = Math.max(1, Math.min(4, Math.min(1 / zoomRect.w, 1 / zoomRect.h) * .94))
-    const x = .5 - zoomRect.x * zoomScale, y = .5 - zoomRect.y * zoomScale
+    if (!zoomRect || effectiveZoomProgress <= 0) return { scale: 1, x: 0, y: 0, css: 'translate(0, 0) scale(1)' }
+    const targetScale = Math.max(1, Math.min(4, Math.min(1 / zoomRect.w, 1 / zoomRect.h) * .94))
+    const targetX = .5 - zoomRect.x * targetScale, targetY = .5 - zoomRect.y * targetScale
+    const zoomScale = 1 + (targetScale - 1) * effectiveZoomProgress
+    const x = targetX * effectiveZoomProgress, y = targetY * effectiveZoomProgress
     return { scale: zoomScale, x, y, css: `translate(${x * 100}%, ${y * 100}%) scale(${zoomScale})` }
-  }, [zoomActive, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h])
+  }, [effectiveZoomProgress, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h])
   // SnapshotFrame is trusted DocFlow code and needs same-origin access to the
   // script-free inner iframe created by rrweb. Captured content stays in the
   // inner iframe, whose sandbox does not permit scripts.
@@ -319,7 +325,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     {error && <div className="capture-warning">{error}，已切换截图预览。</div>}
     <div
       ref={wrapperRef}
-      className={`slide-stage ${mode} ${zoomActive ? 'zoom-previewing' : ''}`}
+      className={`slide-stage ${mode} ${zoomVisible ? 'zoom-previewing' : ''}`}
       style={{ width: stageWidth, height: stageHeight, aspectRatio: `${step.viewport_width}/${step.viewport_height}` }}
       onClick={event => {
         if (mode !== 'editor' || !fallback || !onTarget) return
@@ -327,7 +333,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
         onTarget({ selector: {}, rect: { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height, w: .05, h: .05 } })
       }}
     >
-      <div className={`slide-visual-surface ${zoomActive ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css, transitionDuration: `${zoomTransitionDuration}ms` }}>
+      <div className={`slide-visual-surface ${zoomVisible ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css, transitionDuration: deterministicZoom ? '0ms' : `${zoomTransitionDuration}ms` }}>
         {showScreenshot && <img src={step.image_url} draggable={false} alt={step.title} onLoad={() => {
           if (fallback) { setContentReady(true); onReady?.() }
         }} />}
@@ -347,7 +353,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
         onGuidePrevious={onGuidePrevious} onGuideNext={() => onGuideNext?.(hotspot)}
         onRectChange={rect => onRectChange?.(hotspot, rect)}
       />)}
-      {contentReady && showZoomEditor && zoomRect && !zoomActive && <ZoomRegionLayer rect={zoomRect} wrapper={wrapperRef.current} hotspots={step.hotspots} onChange={onZoomRectChange} onPreview={runZoomPreview} onDelete={onZoomDelete} />}
+      {contentReady && showZoomEditor && zoomRect && !zoomVisible && <ZoomRegionLayer rect={zoomRect} wrapper={wrapperRef.current} hotspots={step.hotspots} onChange={onZoomRectChange} onPreview={runZoomPreview} onDelete={onZoomDelete} />}
     </div>
   </div>
 }

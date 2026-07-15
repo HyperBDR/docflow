@@ -43,6 +43,7 @@ export const api = {
   pair: () => request<{ code: string; expires_in: number }>('/api/extension/pair', { method: 'POST' }),
   uploadStep: (demoId: string, form: FormData) => request<Step>(`/api/recordings/${demoId}/steps`, { method: 'POST', body: form }),
   createExport: (demoId: string, kind: ExportJob['kind']) => request<ExportJob>(`/api/exports/${demoId}`, { method: 'POST', body: JSON.stringify({ kind }) }),
+  exports: (demoId: string) => request<ExportJob[]>(`/api/exports?demo_id=${encodeURIComponent(demoId)}`),
   export: (id: string) => request<ExportJob>(`/api/exports/${id}`),
   generateAI: (demoId: string, stepId?: string) => request<AIJob>(stepId ? `/api/demos/${demoId}/steps/${stepId}/ai/generate` : `/api/demos/${demoId}/ai/generate`, { method: 'POST' }),
   aiJob: (id: string) => request<AIJob>(`/api/ai/jobs/${id}`),

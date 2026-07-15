@@ -1,11 +1,8 @@
 import io
-import json
-import os
-import shutil
 import subprocess
 import tempfile
-import time
 import zipfile
+from math import ceil
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -94,11 +91,7 @@ def render_player_images(snapshot: dict, token: str | None) -> list[Image.Image]
                 page.wait_for_selector('main[data-export-ready="true"]', timeout=30_000)
                 zoom = (step.get("animation") or {}).get("zoom") or {}
                 if zoom.get("enabled") and zoom.get("rect"):
-                    transition_ms = max(0, min(5000, int(zoom.get("transition_duration_ms", 800))))
-                    # Zoom starts 250ms after the slide reports ready. Wait for
-                    # the configured transition to finish before freezing PDF
-                    # and Markdown images at their final magnification.
-                    page.wait_for_timeout(350 + transition_ms)
+                    set_export_zoom_progress(page, 1)
                 else:
                     page.wait_for_timeout(150)
                 # PNG preserves the captured page's exact text and UI colors.
@@ -146,14 +139,14 @@ def render_mp4(snapshot: dict, token: str | None = None) -> bytes:
         raise RuntimeError("cannot render an empty demo")
     with tempfile.TemporaryDirectory(prefix="docflow-") as temp:
         directory = Path(temp)
-        source_video = record_player_video(snapshot, token, directory)
+        timeline, exact_duration = render_video_timeline(snapshot, token, directory)
         target_file = directory / "result.mp4"
-        source_path, trim_start, duration = source_video
         command = [
-            "ffmpeg", "-y", "-i", str(source_path), "-ss", f"{trim_start:.3f}", "-t", f"{duration:.3f}",
-            "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(timeline),
+            "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "slow", "-crf", "16",
+            "-tune", "stillimage",
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-            "-movflags", "+faststart", str(target_file),
+            "-t", f"{exact_duration:.6f}", "-movflags", "+faststart", str(target_file),
         ]
         result = subprocess.run(command, capture_output=True, timeout=900)
         if result.returncode != 0:
@@ -170,85 +163,98 @@ def export_viewport(step: dict, max_width: int, max_height: int) -> dict[str, in
     return {"width": max(2, int(width * ratio) // 2 * 2), "height": max(2, int(height * ratio) // 2 * 2)}
 
 
-def record_player_video(snapshot: dict, token: str, directory: Path) -> tuple[Path, float, float]:
+def set_export_zoom_progress(page, progress: float) -> None:
+    page.wait_for_function("() => typeof window.__DOCFLOW_SET_ZOOM_PROGRESS__ === 'function'", timeout=10_000)
+    page.evaluate(
+        "async progress => { await window.__DOCFLOW_SET_ZOOM_PROGRESS__(progress); }",
+        max(0.0, min(1.0, progress)),
+    )
+
+
+def smootherstep(progress: float) -> float:
+    """A gentle acceleration/deceleration curve for deterministic Zoom frames."""
+    value = max(0.0, min(1.0, progress))
+    return value * value * value * (value * (value * 6 - 15) + 10)
+
+
+def save_video_frame(content: bytes, path: Path, size: tuple[int, int]) -> None:
+    """Normalize browser stage screenshots without upscaling or recompression."""
+    source = Image.open(io.BytesIO(content)).convert("RGB")
+    width, height = size
+    ratio = min(1.0, width / source.width, height / source.height)
+    if ratio < 1:
+        source = source.resize(
+            (max(1, int(source.width * ratio)), max(1, int(source.height * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+    canvas = Image.new("RGB", size, "#111827")
+    canvas.paste(source, ((width - source.width) // 2, (height - source.height) // 2))
+    canvas.save(path, "PNG", compress_level=2)
+
+
+def render_video_timeline(snapshot: dict, token: str, directory: Path) -> tuple[Path, float]:
+    """Render exact high-resolution PNG frames and a duration-accurate timeline.
+
+    Unlike Chromium's built-in WebM recorder, this keeps captured page pixels,
+    fonts, hotspot and tooltip styling intact. Zoom is driven frame-by-frame so
+    browser scheduling cannot shorten transitions or per-step dwell time.
+    """
     try:
-        ensure_playwright_ffmpeg()
         from playwright.sync_api import sync_playwright
 
         viewport = export_viewport(snapshot["steps"][0], 1920, 1080)
+        size = (viewport["width"], viewport["height"])
+        playback = snapshot.get("playback") or {}
+        step_delay_ms = max(0, min(30_000, int(playback.get("transition_delay_ms", 1000))))
+        entries: list[tuple[Path, float]] = []
+        frame_number = 0
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(
                 headless=True,
                 executable_path=settings.chromium_executable,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-            context = browser.new_context(
-                viewport=viewport,
-                device_scale_factor=1,
-                record_video_dir=str(directory),
-                record_video_size=viewport,
-            )
-            started_at = time.monotonic()
-            page = context.new_page()
-            video = page.video
-            url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step=0"
-            page.goto(url, wait_until="networkidle", timeout=60_000)
-            page.wait_for_selector('main[data-export-ready="true"][data-step-index="0"]', timeout=30_000)
-            ready_at = time.monotonic()
-            page.wait_for_timeout(150)
+            page = browser.new_page(viewport=viewport, device_scale_factor=1)
             for index, step in enumerate(snapshot["steps"]):
-                if index:
-                    page.keyboard.press("ArrowRight")
-                    page.wait_for_selector(
-                        f'main[data-export-ready="true"][data-step-index="{index}"]', timeout=30_000
-                    )
-                hold_ms = int(max(1, min(15, float(step.get("duration", 3)))) * 1000)
+                url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}"
+                page.goto(url, wait_until="networkidle", timeout=60_000)
+                page.wait_for_selector(
+                    f'main[data-export-ready="true"][data-step-index="{index}"]', timeout=30_000
+                )
                 zoom = (step.get("animation") or {}).get("zoom") or {}
-                if zoom.get("enabled") and zoom.get("rect"):
-                    transition_ms = max(0, min(5000, int(zoom.get("transition_duration_ms", 800))))
-                    zoom_duration_ms = max(500, min(10000, int(zoom.get("duration_ms", 3000))))
-                    # SlideStage activates Zoom 250ms after content is ready.
-                    # Keep recording through both the transition and the
-                    # requested dwell time so MP4 never cuts the animation.
-                    hold_ms = max(hold_ms, 250 + transition_ms + zoom_duration_ms)
-                page.wait_for_timeout(hold_ms)
-            ended_at = time.monotonic()
-            context.close()
-            if video is None:
-                raise RuntimeError("Chromium did not create an export video")
-            source_path = Path(video.path())
+                zoom_enabled = bool(zoom.get("enabled") and zoom.get("rect"))
+                transition_ms = max(0, min(5000, int(zoom.get("transition_duration_ms", 1200)))) if zoom_enabled else 0
+                transition_frames = max(1, ceil(transition_ms / 1000 * 20) + 1) if transition_ms else 1
+                transition_frame_duration = transition_ms / 1000 / max(1, transition_frames - 1)
+
+                for transition_index in range(transition_frames):
+                    progress = transition_index / max(1, transition_frames - 1) if zoom_enabled else 0
+                    set_export_zoom_progress(page, smootherstep(progress))
+                    content = page.locator("main.export-mode .slide-stage").screenshot(type="png")
+                    frame_path = directory / f"frame-{frame_number:06d}.png"
+                    save_video_frame(content, frame_path, size)
+                    frame_number += 1
+                    if transition_index < transition_frames - 1:
+                        entries.append((frame_path, transition_frame_duration))
+                    else:
+                        step_hold_ms = int(max(1, min(15, float(step.get("duration", 3)))) * 1000)
+                        zoom_hold_ms = max(500, min(10_000, int(zoom.get("duration_ms", 3000)))) if zoom_enabled else 0
+                        hold_ms = max(step_hold_ms, zoom_hold_ms)
+                        if index < len(snapshot["steps"]) - 1:
+                            hold_ms += step_delay_ms
+                        entries.append((frame_path, hold_ms / 1000))
             browser.close()
-        trim_start = max(0.0, ready_at - started_at)
-        duration = max(0.1, ended_at - ready_at)
-        return source_path, trim_start, duration
+
+        if not entries:
+            raise RuntimeError("video timeline contains no frames")
+        timeline = directory / "timeline.txt"
+        lines: list[str] = []
+        for path, duration in entries:
+            lines.extend([f"file '{path.as_posix()}'", f"duration {max(1 / 30, duration):.6f}"])
+        # concat demuxer applies the final duration only when another file
+        # follows it; repeat the last frame without adding extra duration.
+        lines.append(f"file '{entries[-1][0].as_posix()}'")
+        timeline.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return timeline, sum(duration for _, duration in entries)
     except Exception as exc:
-        raise RuntimeError(f"interactive player video recording failed: {exc}") from exc
-
-
-def ensure_playwright_ffmpeg() -> None:
-    """Let Playwright recording reuse the distro FFmpeg already in the worker.
-
-    Playwright otherwise expects a second downloaded media binary in its cache.
-    Reading its bundled revision keeps this compatible with package upgrades and
-    avoids another large, slow external download during image builds.
-    """
-    import playwright
-
-    package = Path(playwright.__file__).parent / "driver" / "package"
-    registry = json.loads((package / "browsers.json").read_text(encoding="utf-8"))
-    revision = next(item["revision"] for item in registry["browsers"] if item["name"] == "ffmpeg")
-    configured = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-    base = package / ".local-browsers" if configured == "0" else Path(configured).expanduser() if configured else Path.home() / ".cache" / "ms-playwright"
-    target = base / f"ffmpeg-{revision}" / "ffmpeg-linux"
-    if target.exists():
-        return
-    system_ffmpeg = shutil.which("ffmpeg")
-    if not system_ffmpeg:
-        raise RuntimeError("system ffmpeg is not installed")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        target.symlink_to(system_ffmpeg)
-    except FileExistsError:
-        pass
-    if not target.exists():
-        raise RuntimeError(f"could not prepare Playwright ffmpeg at {target}")
+        raise RuntimeError(f"high-resolution player frame rendering failed: {exc}") from exc

@@ -19,6 +19,7 @@ export default function Player() {
   const [demo, setDemo] = useState<Published | null>(null)
   const [index, setIndex] = useState(0)
   const [ready, setReady] = useState(false)
+  const [exportZoomProgress, setExportZoomProgress] = useState<number | undefined>(exportMode ? 0 : undefined)
   const [error, setError] = useState('')
   useEffect(() => { fetch(`${publicApi}/public/${token}`).then(response => { if (!response.ok) throw new Error('演示不存在或已撤销'); return response.json() }).then(value => {
     value.steps = value.steps.map((step: Step) => ({
@@ -33,6 +34,15 @@ export default function Player() {
     setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1)))
   }).catch(value => setError(value.message)) }, [token, publicApi, requestedStep])
   useEffect(() => setReady(false), [index])
+  useEffect(() => {
+    if (!exportMode) return
+    const target = window as typeof window & { __DOCFLOW_SET_ZOOM_PROGRESS__?: (progress: number) => Promise<void> }
+    target.__DOCFLOW_SET_ZOOM_PROGRESS__ = (progress: number) => new Promise(resolve => {
+      setExportZoomProgress(Math.max(0, Math.min(1, Number(progress) || 0)))
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    })
+    return () => { delete target.__DOCFLOW_SET_ZOOM_PROGRESS__ }
+  }, [exportMode, index])
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!ready) return
@@ -88,7 +98,7 @@ export default function Player() {
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
     <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><button onClick={() => document.documentElement.requestFullscreen()}>全屏</button></header>
     <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage key={step.id}
-      step={step} mode="player" fit="viewport" persistZoom theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
+      step={step} mode="player" fit="viewport" persistZoom exportZoomProgress={exportZoomProgress} theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
       onHotspot={activate} onGuidePrevious={() => goTo(index - 1)} onGuideNext={activate} onReady={() => setReady(true)}
     /></section>
     <footer>

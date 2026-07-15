@@ -66,14 +66,15 @@ export default function Editor() {
   const [tab, setTab] = useState<InspectorTab>('content')
   const [jobs, setJobs] = useState<ExportJob[]>([])
   const [aiJob, setAIJob] = useState<AIJob | null>(null)
+  const [exportCenterOpen, setExportCenterOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
   const selectedHotspot = useMemo(() => selected?.hotspots.find(item => item.id === selectedHotspotId) || selected?.hotspots[0], [selected, selectedHotspotId])
 
   useEffect(() => {
-    Promise.all([api.demo(id), api.latestAI(id)]).then(([value, latest]) => {
-      setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null); setAIJob(latest)
+    Promise.all([api.demo(id), api.latestAI(id), api.exports(id).catch(() => [])]).then(([value, latest, exportJobs]) => {
+      setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null); setAIJob(latest); setJobs(exportJobs)
     }).catch(value => setError(value.message))
   }, [id])
   useEffect(() => {
@@ -183,8 +184,19 @@ export default function Editor() {
     const token = demo.share_url.split('/').pop(), response = await fetch(`${API_URL}/public/${token}/markdown`)
     await copyText(await response.text()); setNotice('Markdown 已复制到剪贴板。')
   }
+  async function copyShareLink() {
+    if (!demo?.share_url) return
+    await copyText(demo.share_url)
+    setNotice('共享链接已复制到剪贴板。')
+  }
   async function startExport(kind: ExportJob['kind']) {
-    try { const job = await api.createExport(id, kind); setJobs(current => [job, ...current.filter(item => item.kind !== kind)]) } catch (value) { setError((value as Error).message) }
+    try {
+      // Export the current editor state instead of a potentially stale
+      // published revision, so timing/Zoom changes take effect immediately.
+      setDemo(await api.publish(id))
+      const job = await api.createExport(id, kind)
+      setJobs(current => [job, ...current.filter(item => item.kind !== kind)])
+    } catch (value) { setError((value as Error).message) }
   }
   async function generateAI(stepId?: string) {
     try { setAIJob(await api.generateAI(id, stepId)); setTab('ai') } catch (value) { setError((value as Error).message) }
@@ -242,7 +254,7 @@ export default function Editor() {
     patchStep(step.id, {
       animation: {
         ...(step.animation || {}),
-        zoom: { ...(step.animation?.zoom || {}), enabled: true, duration_ms: step.animation?.zoom?.duration_ms || 3000, transition_duration_ms: step.animation?.zoom?.transition_duration_ms ?? 800, rect },
+        zoom: { ...(step.animation?.zoom || {}), enabled: true, duration_ms: step.animation?.zoom?.duration_ms || 3000, transition_duration_ms: step.animation?.zoom?.transition_duration_ms ?? 1200, rect },
       },
     })
   }
@@ -264,10 +276,53 @@ export default function Editor() {
         </> : <button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />演示模式</button>}
         {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title="打开公开链接"><Icon name="share" /></a>}
         {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />AI 优化</button>}
-        <button className="primary icon-button publish-action" onClick={publish}><Icon name="publish" />{demo.status === 'published' ? '更新发布' : '发布与共享'}</button>
+        <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''}`} onClick={() => setExportCenterOpen(value => !value)}><Icon name="share" />分享与导出</button>
       </div>
     </div>
     {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
+    {exportCenterOpen && <div className="export-center-layer" onMouseDown={() => setExportCenterOpen(false)}>
+      <aside className="export-center" onMouseDown={event => event.stopPropagation()}>
+        <header className="export-center-header">
+          <span className="export-center-icon"><Icon name="share" size={18} /></span>
+          <div><strong>分享与导出</strong><small>管理资源信息、发布版本和导出历史</small></div>
+          <button aria-label="关闭" onClick={() => setExportCenterOpen(false)}>×</button>
+        </header>
+        <div className="export-center-scroll">
+          <section className="export-resource-summary">
+            <div className="export-section-heading"><span><Icon name="text" />资源信息</span><span className={`status ${demo.status}`}><i />{demo.status === 'published' ? '已发布' : '草稿'}</span></div>
+            <label>演示简介<textarea value={demo.description} onChange={event => setDemo({ ...demo, description: event.target.value })} onBlur={() => patchDemo({ description: demo.description })} placeholder="简要说明这套演示的用途和适用场景" /></label>
+          </section>
+
+          <section>
+            <div className="export-section-heading"><span><Icon name="link" />共享链接</span></div>
+            {demo.share_url ? <div className="share-link-card"><span title={demo.share_url}>{demo.share_url}</span><button className="icon-button" onClick={copyShareLink}><Icon name="copy" />复制</button><a className="icon-button" href={demo.share_url} target="_blank" rel="noreferrer"><Icon name="play" />打开</a></div> : <div className="export-empty-note"><Icon name="link" /><span>当前资源尚未发布，发布后即可获得公开访问链接。</span></div>}
+            <button className="publish-version-button icon-button" onClick={publish}><Icon name="publish" />{demo.status === 'published' ? '更新当前发布版本' : '发布并创建共享链接'}</button>
+          </section>
+
+          <section>
+            <div className="export-section-heading"><span><Icon name="download" />导出格式</span><small>导出前会自动同步当前编辑内容</small></div>
+            <div className="export-format-grid">
+              <button disabled={!demo.steps.length} onClick={() => startExport('pdf')}><span><Icon name="text" /></span><div><strong>PDF</strong><small>逐步骤高清页面</small></div><Icon name="download" /></button>
+              <button disabled={!demo.steps.length} onClick={() => startExport('mp4')}><span><Icon name="play" /></span><div><strong>MP4 视频</strong><small>包含引导与 Zoom</small></div><Icon name="download" /></button>
+              <button disabled={!demo.steps.length} onClick={() => startExport('markdown')}><span><Icon name="image" /></span><div><strong>文档图片包</strong><small>Markdown 与 WebP</small></div><Icon name="download" /></button>
+              <button disabled={!demo.share_url} onClick={copyMarkdown}><span><Icon name="copy" /></span><div><strong>复制 Markdown</strong><small>直接粘贴到文档</small></div><Icon name="copy" /></button>
+            </div>
+          </section>
+
+          <section className="export-history-section">
+            <div className="export-section-heading"><span><Icon name="clock" />导出记录</span><small>{jobs.length ? `最近 ${jobs.length} 条` : '暂无记录'}</small></div>
+            <div className="export-history-list">
+              {jobs.map(job => <article className={`export-history-item ${job.status}`} key={job.id}>
+                <span className="export-history-kind"><Icon name={job.kind === 'mp4' ? 'play' : job.kind === 'pdf' ? 'text' : 'image'} /></span>
+                <div><strong>{job.kind === 'mp4' ? 'MP4 视频' : job.kind === 'pdf' ? 'PDF 文档' : 'Markdown 图片包'}</strong><small>{new Date(job.created_at).toLocaleString()}</small>{['queued', 'running'].includes(job.status) && <span className="export-progress"><i style={{ width: `${job.progress}%` }} /></span>}{job.status === 'failed' && <em title={job.error}>导出失败 · {job.error?.split('\n')[0] || '请重试'}</em>}</div>
+                {job.status === 'complete' && job.download_url ? <a className="icon-button" href={`${API_URL}${job.download_url}`}><Icon name="download" />下载</a> : <span className={`job-status ${job.status}`}>{job.status === 'failed' ? '失败' : job.status === 'queued' ? '排队中' : `${job.progress}%`}</span>}
+              </article>)}
+              {!jobs.length && <div className="export-empty-note history-empty"><Icon name="clock" /><span>完成一次导出后，文件和任务状态会显示在这里。</span></div>}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>}
     {detailMode === 'present' ? <section className="immersive-demo">
       {selected ? <>
         <div className="immersive-stage"><SlideStage key={selected.id}
@@ -387,7 +442,7 @@ export default function Editor() {
             {selected.animation?.zoom?.rect ? <>
               <div className="animation-status"><span><i />Zoom 区域已启用</span><small>可直接在画布中拖动或缩放选区</small></div>
               <div className="field-grid">
-                <label>缩放过渡时长（ms）<input type="number" min="0" max="5000" step="100" value={selected.animation.zoom.transition_duration_ms ?? 800} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, transition_duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
+                <label>缩放过渡时长（ms）<input type="number" min="0" max="5000" step="100" value={selected.animation.zoom.transition_duration_ms ?? 1200} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, transition_duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
                 <label>放大停留时长（ms）<input type="number" min="500" max="10000" step="250" value={selected.animation.zoom.duration_ms || 3000} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
               </div>
               <p className="field-note">MP4 会完整保留缩放过渡和放大后的停留过程；数值越大，Zoom 动画越舒缓。</p>
@@ -418,10 +473,6 @@ export default function Editor() {
           </InspectorSection>}
           <InspectorSection icon="eye" title="数据与覆盖规则"><p className="field-note">AI 只接收脱敏文字和缩略图，不会覆盖已经手动修改的字段。</p></InspectorSection>
         </div>}
-        <div className="output-section"><h3><Icon name="share" />发布、共享与导出</h3><textarea value={demo.description} onChange={event => setDemo({ ...demo, description: event.target.value })} onBlur={() => patchDemo({ description: demo.description })} placeholder="演示简介" />
-          <div className="output-grid"><button className="icon-button" disabled={!demo.share_url} onClick={copyMarkdown}><Icon name="copy" />复制 Markdown</button><button className="icon-button" disabled={!demo.share_url} onClick={() => startExport('markdown')}><Icon name="download" />文档图片包</button><button className="icon-button" disabled={!demo.share_url} onClick={() => startExport('pdf')}><Icon name="download" />PDF</button><button className="icon-button" disabled={!demo.share_url} onClick={() => startExport('mp4')}><Icon name="download" />MP4</button></div>
-          {jobs.map(job => <div className="job" key={job.id}><span>{job.kind.toUpperCase()}</span><span>{job.status === 'complete' ? <a href={`${API_URL}${job.download_url}`}>下载</a> : job.status === 'failed' ? '失败' : `${job.progress}%`}</span></div>)}
-        </div>
       </aside>
     </div>}
   </main>

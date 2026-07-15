@@ -62,6 +62,7 @@ export type ExportJob = {
   progress: number
   error?: string
   download_url?: string
+  created_at: string
 }
 
 export type AIJob = {
