@@ -180,7 +180,7 @@ export default function Editor() {
     patchStep(step.id, {
       animation: {
         ...(step.animation || {}),
-        zoom: { ...(step.animation?.zoom || {}), enabled: true, duration_ms: step.animation?.zoom?.duration_ms || 3000, rect },
+        zoom: { ...(step.animation?.zoom || {}), enabled: true, duration_ms: step.animation?.zoom?.duration_ms || 3000, transition_duration_ms: step.animation?.zoom?.transition_duration_ms ?? 800, rect },
       },
     })
   }
@@ -297,7 +297,11 @@ export default function Editor() {
           <InspectorSection icon="animation" title="Zoom and Pan" description="框选页面区域，在播放步骤时自动聚焦并放大">
             {selected.animation?.zoom?.rect ? <>
               <div className="animation-status"><span><i />Zoom 区域已启用</span><small>可直接在画布中拖动或缩放选区</small></div>
-              <label>Zoom Preview 时长（ms）<input type="number" min="500" max="10000" step="250" value={selected.animation.zoom.duration_ms || 3000} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
+              <div className="field-grid">
+                <label>缩放过渡时长（ms）<input type="number" min="0" max="5000" step="100" value={selected.animation.zoom.transition_duration_ms ?? 800} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, transition_duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
+                <label>放大停留时长（ms）<input type="number" min="500" max="10000" step="250" value={selected.animation.zoom.duration_ms || 3000} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
+              </div>
+              <p className="field-note">MP4 会完整保留缩放过渡和放大后的停留过程；数值越大，Zoom 动画越舒缓。</p>
               <button className="danger icon-button" onClick={() => patchStep(selected.id, { animation: { ...(selected.animation || {}), zoom: undefined } })}><Icon name="delete" />删除 Zoom 区域</button>
             </> : <>
               <p className="field-note">添加后可在中间画布自由拖动和缩放框选区域；操作栏可预览 3 秒缩放效果，并检查是否包含主要 Hotspot。</p>

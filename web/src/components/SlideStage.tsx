@@ -221,6 +221,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url)
   const zoom = step.animation?.zoom
   const zoomRect = zoom?.rect
+  const zoomTransitionDuration = Math.max(0, Math.min(5000, Number(zoom?.transition_duration_ms ?? 800)))
 
   const runZoomPreview = useCallback(() => {
     if (!zoomRect) return
@@ -317,7 +318,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
         onTarget({ selector: {}, rect: { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height, w: .05, h: .05 } })
       }}
     >
-      <div className={`slide-visual-surface ${zoomActive ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css }}>
+      <div className={`slide-visual-surface ${zoomActive ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css, transitionDuration: `${zoomTransitionDuration}ms` }}>
         {showScreenshot && <img src={step.image_url} draggable={false} alt={step.title} onLoad={() => {
           if (fallback) { setContentReady(true); onReady?.() }
         }} />}

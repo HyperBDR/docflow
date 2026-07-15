@@ -36,6 +36,7 @@ class ZoomAnimation(BaseModel):
     enabled: bool = True
     rect: Hotspot
     duration_ms: int = Field(default=3000, ge=500, le=10000)
+    transition_duration_ms: int = Field(default=800, ge=0, le=5000)
 
 
 class StepAnimation(BaseModel):

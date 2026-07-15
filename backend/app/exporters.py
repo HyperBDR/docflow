@@ -93,7 +93,14 @@ def render_player_images(snapshot: dict, token: str | None) -> list[Image.Image]
                 page.goto(url, wait_until="networkidle", timeout=60_000)
                 page.wait_for_selector('main[data-export-ready="true"]', timeout=30_000)
                 zoom = (step.get("animation") or {}).get("zoom") or {}
-                page.wait_for_timeout(700 if zoom.get("enabled") and zoom.get("rect") else 150)
+                if zoom.get("enabled") and zoom.get("rect"):
+                    transition_ms = max(0, min(5000, int(zoom.get("transition_duration_ms", 800))))
+                    # Zoom starts 250ms after the slide reports ready. Wait for
+                    # the configured transition to finish before freezing PDF
+                    # and Markdown images at their final magnification.
+                    page.wait_for_timeout(350 + transition_ms)
+                else:
+                    page.wait_for_timeout(150)
                 # PNG preserves the captured page's exact text and UI colors.
                 # Capturing the stage rather than the player shell excludes all
                 # title, fullscreen and footer navigation chrome.
@@ -196,6 +203,14 @@ def record_player_video(snapshot: dict, token: str, directory: Path) -> tuple[Pa
                         f'main[data-export-ready="true"][data-step-index="{index}"]', timeout=30_000
                     )
                 hold_ms = int(max(1, min(15, float(step.get("duration", 3)))) * 1000)
+                zoom = (step.get("animation") or {}).get("zoom") or {}
+                if zoom.get("enabled") and zoom.get("rect"):
+                    transition_ms = max(0, min(5000, int(zoom.get("transition_duration_ms", 800))))
+                    zoom_duration_ms = max(500, min(10000, int(zoom.get("duration_ms", 3000))))
+                    # SlideStage activates Zoom 250ms after content is ready.
+                    # Keep recording through both the transition and the
+                    # requested dwell time so MP4 never cuts the animation.
+                    hold_ms = max(hold_ms, 250 + transition_ms + zoom_duration_ms)
                 page.wait_for_timeout(hold_ms)
             ended_at = time.monotonic()
             context.close()

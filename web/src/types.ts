@@ -34,7 +34,7 @@ export type Step = {
   capture_warnings: string[]
   manual_fields: string[]
   ai_metadata: { warnings?: string[]; redundant?: boolean; job_id?: string }
-  animation: { zoom?: { enabled?: boolean; rect?: Rect; duration_ms?: number } }
+  animation: { zoom?: { enabled?: boolean; rect?: Rect; duration_ms?: number; transition_duration_ms?: number } }
   hotspots: HotspotData[]
 }
 
