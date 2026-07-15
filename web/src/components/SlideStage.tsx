@@ -2,6 +2,21 @@ import { arrow, autoUpdate, flip, FloatingArrow, offset, shift, useFloating, typ
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { HotspotData, Rect, SelectorInfo, Step } from '../types'
 
+const snapshotCache = new Map<string, Promise<Record<string, unknown>>>()
+const SNAPSHOT_CACHE_LIMIT = 12
+
+export function preloadSnapshot(url?: string) {
+  if (!url) return Promise.resolve(null)
+  const cached = snapshotCache.get(url)
+  if (cached) return cached
+  const pending = fetch(url, { credentials: 'include' })
+    .then(response => { if (!response.ok) throw new Error('DOM 快照加载失败'); return response.json() })
+    .catch(error => { snapshotCache.delete(url); throw error })
+  snapshotCache.set(url, pending)
+  while (snapshotCache.size > SNAPSHOT_CACHE_LIMIT) snapshotCache.delete(snapshotCache.keys().next().value!)
+  return pending
+}
+
 type TargetSelection = { selector: SelectorInfo; rect: Rect }
 
 type Props = {
@@ -212,11 +227,13 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const wrapperRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null)
+  const [loadedSnapshotUrl, setLoadedSnapshotUrl] = useState('')
   const [frameReadyVersion, setFrameReadyVersion] = useState(0)
   const [dynamicRects, setDynamicRects] = useState<Record<string, Rect>>({})
   const [error, setError] = useState('')
   const [scale, setScale] = useState(1)
   const [contentReady, setContentReady] = useState(false)
+  const [previewReady, setPreviewReady] = useState(false)
   const [zoomActive, setZoomActive] = useState(false)
   const zoomTimer = useRef<number | undefined>(undefined)
   const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url)
@@ -235,8 +252,9 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   }, [persistZoom, zoom?.duration_ms, zoomRect])
 
   useEffect(() => {
-    setSnapshot(null); setError(''); setDynamicRects({}); setContentReady(false); setZoomActive(false)
+    setError(''); setDynamicRects({}); setContentReady(false); setPreviewReady(false); setZoomActive(false)
     if (!useDom || !step.snapshot_url) {
+      setSnapshot(null); setLoadedSnapshotUrl('')
       // Cached screenshots (and data URLs) can finish before this effect runs.
       // Re-check the actual image after resetting state so the loading overlay
       // cannot remain stuck when revisiting an already cached step.
@@ -246,9 +264,10 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
       })
       return () => cancelAnimationFrame(frame)
     }
-    fetch(step.snapshot_url, { credentials: 'include' })
-      .then(response => { if (!response.ok) throw new Error('DOM 快照加载失败'); return response.json() })
-      .then(setSnapshot).catch(value => setError(value.message))
+    const url = step.snapshot_url
+    preloadSnapshot(url)
+      .then(value => { if (value) { setSnapshot(value); setLoadedSnapshotUrl(url) } })
+      .catch(value => setError(value.message))
   }, [step.id, step.snapshot_url, useDom])
 
   useEffect(() => {
@@ -284,11 +303,11 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   }, [step.hotspots, onHotspot, onTarget, onReady])
 
   useEffect(() => {
-    if (!snapshot || frameReadyVersion === 0 || !iframeRef.current?.contentWindow) return
+    if (!snapshot || loadedSnapshotUrl !== step.snapshot_url || frameReadyVersion === 0 || !iframeRef.current?.contentWindow) return
     iframeRef.current.contentWindow.postMessage({
       type: 'DOCFLOW_LOAD', snapshot, hotspots: step.hotspots, mode, scroll: step.scroll_state,
     }, '*')
-  }, [snapshot, frameReadyVersion, step.id, step.hotspots, step.scroll_state, mode])
+  }, [snapshot, loadedSnapshotUrl, frameReadyVersion, step.id, step.snapshot_url, step.hotspots, step.scroll_state, mode])
 
   useEffect(() => {
     if (!error) return
@@ -335,6 +354,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     >
       <div className={`slide-visual-surface ${zoomVisible ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css, transitionDuration: deterministicZoom ? '0ms' : `${zoomTransitionDuration}ms` }}>
         {showScreenshot && <img src={step.image_url} draggable={false} alt={step.title} onLoad={() => {
+          setPreviewReady(true)
           if (fallback) { setContentReady(true); onReady?.() }
         }} />}
         {showDomFrame && <iframe
@@ -345,7 +365,8 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
           style={{ width: step.viewport_width, height: step.viewport_height, transform: `scale(${scale})`, opacity: contentReady ? 1 : 0 }}
         />}
       </div>
-      {!contentReady && <div className="slide-transition-loading"><span /><b>正在加载下一步…</b></div>}
+      {!contentReady && !previewReady && <div className="slide-transition-loading"><span /><b>正在加载下一步…</b></div>}
+      {!contentReady && previewReady && useDom && <div className="slide-background-loading"><span />交互页面加载中</div>}
       {contentReady && step.hotspots.map(hotspot => <HotspotLayer
         key={hotspot.id} hotspot={hotspot} rect={zoomedRect(dynamicRects[hotspot.id] || hotspot.fallback_rect, zoomTransform.scale, zoomTransform.x, zoomTransform.y)}
         active={hotspot.id === activeId} mode={mode} wrapper={wrapperRef.current} theme={theme} navigation={navigation} stepIndex={stepIndex} stepCount={stepCount}

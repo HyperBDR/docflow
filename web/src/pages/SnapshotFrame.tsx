@@ -146,6 +146,8 @@ export default function SnapshotFrame() {
     let cleanupFrame = () => {}
     let disposed = false
     let loadVersion = 0
+    let rectsEnabled = false
+    let scheduleRectRefresh = () => {}
 
     const connectedRoot = async () => {
       // React StrictMode mounts, cleans up and mounts effects once more in
@@ -161,6 +163,7 @@ export default function SnapshotFrame() {
     }
 
     const sendRects = () => {
+      if (!rectsEnabled) return
       const doc = frame?.contentDocument, view = frame?.contentWindow
       if (!doc || !view) return
       const rects: Record<string, ReturnType<typeof rectFor>> = {}
@@ -218,6 +221,7 @@ export default function SnapshotFrame() {
       doc.addEventListener('click', onClick, true); doc.addEventListener('pointerover', onOver, true); doc.addEventListener('pointerout', onOut, true)
       let rectFrame = 0
       const scheduleRects = () => { cancelAnimationFrame(rectFrame); rectFrame = requestAnimationFrame(sendRects) }
+      scheduleRectRefresh = scheduleRects
       const resizeObserver = new ResizeObserver(scheduleRects)
       resizeObserver.observe(doc.documentElement)
       if (doc.body) resizeObserver.observe(doc.body)
@@ -231,6 +235,7 @@ export default function SnapshotFrame() {
         doc.removeEventListener('click', onClick, true); doc.removeEventListener('pointerover', onOver, true); doc.removeEventListener('pointerout', onOut, true)
         cancelAnimationFrame(rectFrame); settleTimers.forEach(clearTimeout); resizeObserver.disconnect(); mutationObserver.disconnect()
         view.removeEventListener('resize', scheduleRects); doc.removeEventListener('scroll', scheduleRects, true)
+        scheduleRectRefresh = () => {}
       }
     }
 
@@ -239,6 +244,7 @@ export default function SnapshotFrame() {
       const currentLoad = ++loadVersion
       hotspots = event.data.hotspots || []; mode = event.data.mode
       try {
+        rectsEnabled = false
         repairLegacySnapshot(event.data.snapshot.snapshot as Record<string, any>)
         const root = await connectedRoot()
         if (disposed || currentLoad !== loadVersion) return
@@ -250,7 +256,12 @@ export default function SnapshotFrame() {
         frame = rebuilt.iframe
         attachFrameAgent()
         frame.contentWindow?.scrollTo(event.data.scroll?.x || 0, event.data.scroll?.y || 0)
-        requestAnimationFrame(() => { sendRects(); parent.postMessage({ type: 'DOCFLOW_LOADED' }, '*') })
+        requestAnimationFrame(() => {
+          // The fallback hotspot rect is immediately usable. Do not keep the
+          // whole slide blocked while semantic target resolution scans the DOM.
+          parent.postMessage({ type: 'DOCFLOW_LOADED' }, '*')
+          window.setTimeout(() => { rectsEnabled = true; scheduleRectRefresh() }, 50)
+        })
       } catch (error) {
         if (!disposed && currentLoad === loadVersion) parent.postMessage({ type: 'DOCFLOW_ERROR', error: String(error) }, '*')
       }

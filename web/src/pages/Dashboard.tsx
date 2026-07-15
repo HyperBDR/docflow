@@ -20,12 +20,20 @@ export default function Dashboard() {
   const [tagFilter, setTagFilter] = useState('all')
   const [view, setView] = useState<'grid' | 'list'>(() => localStorage.getItem('docflow-library-view') === 'list' ? 'list' : 'grid')
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [tagTargets, setTagTargets] = useState<Demo[] | null>(null)
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => { Promise.all([api.demos(), api.categories(), api.tags()]).then(([demoItems, categoryItems, tagItems]) => { setDemos(demoItems); setCategories(categoryItems); setTags(tagItems) }).catch(value => setError(value.message)) }, [])
+  useEffect(() => {
+    if (!openMenu) return
+    const close = () => setOpenMenu(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [openMenu])
   const roots = useMemo(() => categories.filter(item => !item.parent_id), [categories])
   const selectedDemos = useMemo(() => demos.filter(demo => selected.has(demo.id)), [demos, selected])
   const categoryIds = useMemo(() => {
@@ -104,7 +112,7 @@ export default function Dashboard() {
           {categories.filter(item => item.parent_id === root.id).map(child => <button key={child.id} className={`category-child ${categoryFilter === child.id ? 'active' : ''}`} onClick={() => setCategoryFilter(child.id)}><span><i style={{ background: child.color }} /><span>{child.name}</span></span><b>{categoryCount(child.id)}</b></button>)}
         </div>)}</div>
         <button className="sidebar-add" onClick={() => setDialog('categories')}><Icon name="plus" />新建分类</button>
-        <div className="sidebar-tags"><div><span><Icon name="tag" />标签</span><button onClick={() => { setSelected(new Set()); setDialog('tags') }}><Icon name="plus" size={13} /></button></div>{tags.slice(0, 12).map(tag => <button key={tag.id} className={tagFilter === tag.id ? 'active' : ''} onClick={() => setTagFilter(tagFilter === tag.id ? 'all' : tag.id)}><span><i style={{ background: tag.color }} />{tag.name}</span><b>{demos.filter(item => item.tags.some(value => value.id === tag.id)).length}</b></button>)}</div>
+        <div className="sidebar-tags"><div><span><Icon name="tag" />标签</span><button onClick={() => { setSelected(new Set()); setTagTargets([]); setDialog('tags') }}><Icon name="plus" size={13} /></button></div>{tags.slice(0, 12).map(tag => <button key={tag.id} className={tagFilter === tag.id ? 'active' : ''} onClick={() => setTagFilter(tagFilter === tag.id ? 'all' : tag.id)}><span><i style={{ background: tag.color }} />{tag.name}</span><b>{demos.filter(item => item.tags.some(value => value.id === tag.id)).length}</b></button>)}</div>
       </aside>
 
       <section className="library-content">
@@ -118,17 +126,30 @@ export default function Dashboard() {
         {selected.size > 0 && <div className="bulk-action-bar"><span>已选择 <strong>{selected.size}</strong> 个资源</span><div>
           <button disabled={busy || selected.size !== 1} onClick={() => navigate(`/demos/${selectedDemos[0].id}?mode=edit`)}><Icon name="edit" />编辑</button>
           <button disabled={busy} onClick={() => setDialog('move')}><Icon name="folder" />移动到</button>
-          <button disabled={busy} onClick={() => setDialog('tags')}><Icon name="tag" />设置标签</button>
+          <button disabled={busy} onClick={() => { setTagTargets(null); setDialog('tags') }}><Icon name="tag" />设置标签</button>
           <button disabled={busy || selected.size < 2 || selected.size > 5} title="请选择 2–5 个资源" onClick={() => setDialog('merge')}><Icon name="move" />合并</button>
           <button disabled={busy} onClick={() => share(selectedDemos)}><Icon name="share" />共享</button><button disabled={busy} onClick={() => duplicate(selectedDemos)}><Icon name="copy" />复制</button><button className="danger" disabled={busy} onClick={() => remove([...selected])}><Icon name="delete" />删除</button>
         </div></div>}
 
         <div className={`demo-grid ${view === 'list' ? 'list-view' : ''}`}>
-          {filtered.map(demo => <article className={`demo-card ${selected.has(demo.id) ? 'selected' : ''}`} key={demo.id}>
+          {filtered.map(demo => <article className={`demo-card ${selected.has(demo.id) ? 'selected' : ''} ${openMenu === demo.id ? 'menu-open' : ''}`} key={demo.id}>
             <label className="card-select" title="选择资源"><input type="checkbox" checked={selected.has(demo.id)} onChange={() => toggle(demo.id)} /></label>
             <Link to={`/demos/${demo.id}`} className={`demo-preview ${demo.thumbnail_url ? 'has-image' : ''}`}>{demo.thumbnail_url ? <img src={demo.thumbnail_url} alt={`${demo.title} 缩略图`} loading="lazy" /> : <span><Icon name="image" size={38} /></span>}<em><Icon name={demo.status === 'published' ? 'play' : 'edit'} size={11} />{demo.status === 'published' ? '交互演示' : '草稿'}</em></Link>
+            <div className="card-quick-actions">
+              <button disabled={busy} title="设置标签" aria-label={`设置“${demo.title}”的标签`} onClick={() => { setTagTargets([demo]); setDialog('tags') }}><Icon name="tag" /></button>
+              <Link to={`/demos/${demo.id}?mode=edit`} title="编辑演示" aria-label={`编辑“${demo.title}”`}><Icon name="edit" /></Link>
+              <button disabled={busy} title={demo.share_url ? '复制分享链接' : '发布并分享'} aria-label={demo.share_url ? `复制“${demo.title}”的分享链接` : `发布并分享“${demo.title}”`} onClick={() => share([demo])}><Icon name="share" /></button>
+            </div>
             <div className="demo-card-body"><div className="demo-card-title"><h3 title={demo.title}>{demo.title}</h3><span className={`status ${demo.status}`}>{demo.status === 'published' ? '已发布' : '草稿'}</span></div><p>更新于 {new Date(demo.updated_at).toLocaleString()}</p><div className="demo-tags">{demo.tags.map(tag => <span key={tag.id} style={{ '--tag-color': tag.color } as React.CSSProperties}>{tag.name}</span>)}</div></div>
-            <div className="card-actions"><Link to={`/demos/${demo.id}?mode=edit`} className="card-action"><Icon name="edit" />编辑</Link>{demo.share_url && <Link to={`/demos/${demo.id}/analytics`} className="card-action"><Icon name="analytics" />分析</Link>}{demo.share_url && <a href={demo.share_url} target="_blank" className="card-action"><Icon name="play" />预览</a>}<button disabled={busy} onClick={() => share([demo])}><Icon name="share" />{demo.share_url ? '复制链接' : '发布'}</button><button disabled={busy} onClick={() => duplicate([demo])}><Icon name="copy" />复制</button>{demo.share_url && <button disabled={busy} onClick={() => revoke(demo)} title="取消共享"><Icon name="unlink" /></button>}<button disabled={busy} className="danger" onClick={() => remove([demo.id])} title="删除演示"><Icon name="delete" /></button></div>
+            <button className="card-more-trigger" title="更多操作" aria-label={`打开“${demo.title}”的更多操作`} onClick={event => { event.stopPropagation(); setOpenMenu(current => current === demo.id ? null : demo.id) }}><Icon name="more" /></button>
+            {openMenu === demo.id && <div className="card-more-menu" onClick={event => event.stopPropagation()}>
+              <div className="card-more-heading"><Icon name="settings" size={13} />更多操作</div>
+              {demo.share_url && <Link to={`/demos/${demo.id}/analytics`} onClick={() => setOpenMenu(null)}><Icon name="analytics" />访问分析</Link>}
+              {demo.share_url && <a href={demo.share_url} target="_blank" rel="noreferrer" onClick={() => setOpenMenu(null)}><Icon name="play" />打开预览</a>}
+              <button disabled={busy} onClick={() => { setOpenMenu(null); duplicate([demo]) }}><Icon name="copy" />创建副本</button>
+              {demo.share_url && <button disabled={busy} onClick={() => { setOpenMenu(null); revoke(demo) }}><Icon name="unlink" />取消共享</button>}
+              <button disabled={busy} className="danger" onClick={() => { setOpenMenu(null); remove([demo.id]) }}><Icon name="delete" />删除演示</button>
+            </div>}
           </article>)}
           {!filtered.length && <div className="empty"><Icon name="folder" size={42} /><h3>{demos.length ? '这个分类中没有匹配资源' : '还没有演示'}</h3><p>创建演示或调整分类、状态和标签筛选。</p></div>}
         </div>
@@ -136,7 +157,7 @@ export default function Dashboard() {
     </div>
     {dialog === 'categories' && <CategoryDialog categories={categories} onClose={() => { setDialog(null); api.demos().then(setDemos).catch(showError) }} onChange={setCategories} onError={showError} />}
     {dialog === 'move' && <MoveDialog categories={categories} count={selected.size} onClose={() => setDialog(null)} onMove={async categoryId => { setBusy(true); try { const updates = await Promise.all(selectedDemos.map(item => api.updateDemo(item.id, { category_id: categoryId || null }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setNotice('资源已移动到新分类。') } catch (value) { showError(value) } finally { setBusy(false) } }} />}
-    {dialog === 'tags' && <TagDialog tags={tags} demos={selectedDemos} onClose={() => { setDialog(null); api.demos().then(setDemos).catch(showError) }} onTags={setTags} onApply={async ids => { if (!selectedDemos.length) { setDialog(null); api.demos().then(setDemos).catch(showError); return } setBusy(true); try { const updates = await Promise.all(selectedDemos.map(item => api.updateDemo(item.id, { tag_ids: ids }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setNotice('标签已更新。') } catch (value) { showError(value) } finally { setBusy(false) } }} onError={showError} />}
+    {dialog === 'tags' && <TagDialog tags={tags} demos={tagTargets ?? selectedDemos} onClose={() => { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError) }} onTags={setTags} onApply={async ids => { const targets = tagTargets ?? selectedDemos; if (!targets.length) { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError); return } setBusy(true); try { const updates = await Promise.all(targets.map(item => api.updateDemo(item.id, { tag_ids: ids }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setTagTargets(null); setNotice(targets.length === 1 ? `“${targets[0].title}”的标签已更新。` : '标签已更新。') } catch (value) { showError(value) } finally { setBusy(false) } }} onError={showError} />}
     {dialog === 'merge' && <MergeDialog demos={selectedDemos} categories={categories} onClose={() => setDialog(null)} onMerge={async (ids, name, categoryId) => { setBusy(true); try { const merged = await api.mergeDemos(ids, name, categoryId); setDemos(current => [merged, ...current]); setSelected(new Set([merged.id])); setDialog(null); setNotice(`已生成“${merged.title}”，原资源保持不变。`) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
   </main>
 }

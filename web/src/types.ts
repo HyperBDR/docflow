@@ -29,6 +29,7 @@ export type Step = {
   image_url: string
   render_mode: 'image' | 'dom'
   snapshot_url?: string
+  snapshot_version?: string
   page_context: Record<string, unknown>
   scroll_state: Record<string, number>
   capture_warnings: string[]

@@ -1,6 +1,6 @@
 import io
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,6 @@ from app.database import get_db
 from app.models import AnalyticsEvent, PublishedRevision, ShareToken, StepComment
 from app.schemas import AnalyticsEventCreate, CommentCreate
 from app.storage import storage
-from app.snapshots import SnapshotError, load_snapshot
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -105,6 +104,10 @@ def public_demo(token: str, db: Session = Depends(get_db)):
                 f"{settings.public_base_url}/public/{token}/slides/{step['id']}/snapshot"
                 if step.get("dom_snapshot_key") else None
             ),
+            "snapshot_version": (
+                step.get("dom_snapshot_key", "").rsplit("/", 1)[-1].split(".", 1)[0]
+                if step.get("dom_snapshot_key") else None
+            ),
             "asset_key": None,
             "dom_snapshot_key": None,
         }
@@ -123,15 +126,25 @@ def public_asset(token: str, step_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{token}/slides/{step_id}/snapshot")
-def public_snapshot(token: str, step_id: str, db: Session = Depends(get_db)):
+def public_snapshot(token: str, step_id: str, v: str | None = None, db: Session = Depends(get_db)):
     _, revision = published(db, token)
     step = next((item for item in revision.snapshot["steps"] if item["id"] == step_id), None)
     if not step or not step.get("dom_snapshot_key"):
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
-    try:
-        return load_snapshot(step["dom_snapshot_key"])
-    except SnapshotError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    key = step["dom_snapshot_key"]
+    version = key.rsplit("/", 1)[-1].split(".", 1)[0]
+    if not storage.exists(key):
+        raise HTTPException(status_code=404, detail="DOM snapshot not found")
+    # Snapshots are already stored as gzip. Returning those bytes directly
+    # avoids expanding a 0.6–1.3 MB object into 4–5 MB of JSON on every step.
+    return Response(
+        content=storage.read(key), media_type="application/json",
+        headers={
+            "Content-Encoding": "gzip",
+            "Cache-Control": "public, max-age=31536000, immutable" if v == version else "public, max-age=300",
+            "ETag": f'"{version}"',
+        },
+    )
 
 
 @router.get("/{token}/markdown", response_class=PlainTextResponse)

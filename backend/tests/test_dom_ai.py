@@ -117,7 +117,12 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
     public = authenticated.get(f"/public/{token}").json()
     assert public["steps"][0]["render_mode"] == "dom"
     assert public["steps"][0]["snapshot_url"]
-    assert authenticated.get(f"/public/{token}/slides/{step['id']}/snapshot").status_code == 200
+    assert "snapshot_version" in public["steps"][0], list(public["steps"][0])
+    snapshot_response = authenticated.get(f"/public/{token}/slides/{step['id']}/snapshot", params={"v": public["steps"][0]["snapshot_version"]})
+    assert snapshot_response.status_code == 200
+    assert snapshot_response.headers["content-encoding"] == "gzip"
+    assert "immutable" in snapshot_response.headers["cache-control"]
+    assert snapshot_response.json()["snapshot"]
 
 
 def test_ai_application_respects_manual_fields(authenticated):

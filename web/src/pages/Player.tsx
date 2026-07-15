@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { API_URL } from '../api'
-import SlideStage from '../components/SlideStage'
+import SlideStage, { preloadSnapshot } from '../components/SlideStage'
 import Icon from '../components/Icon'
 import type { Demo, HotspotData, Step, StepComment } from '../types'
 
@@ -13,7 +13,12 @@ const defaultPlayback = { autoplay: false, step_duration_ms: 2000, transition_de
 
 function stableId(storage: Storage, key: string) {
   let value = storage.getItem(key)
-  if (!value) { value = crypto.randomUUID(); storage.setItem(key, value) }
+  if (!value) {
+    value = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+    storage.setItem(key, value)
+  }
   return value
 }
 
@@ -48,7 +53,7 @@ export default function Player() {
       // The recorded screenshot is the visual source of truth and avoids
       // missing external CSS, webfonts and runtime-only application styles.
       render_mode: exportMode ? 'image' : step.render_mode,
-      snapshot_url: !exportMode && step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot` : undefined,
+      snapshot_url: !exportMode && step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot${step.snapshot_version ? `?v=${encodeURIComponent(step.snapshot_version)}` : ''}` : undefined,
     }))
     setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1))); track('view')
   }).catch(value => setError(value.message)) }, [token, publicApi, requestedStep])
@@ -58,6 +63,15 @@ export default function Player() {
     const stepId = demo.steps[index].id
     track('step_view', stepId)
     if (index === demo.steps.length - 1) track('complete', stepId)
+  }, [demo, exportMode, index, ready])
+  useEffect(() => {
+    if (!demo || exportMode || !ready) return
+    for (const offset of [1, 2, -1]) {
+      const candidate = demo.steps[index + offset]
+      if (!candidate) continue
+      if (candidate.render_mode === 'dom') preloadSnapshot(candidate.snapshot_url).catch(() => undefined)
+      const image = new Image(); image.src = candidate.image_url
+    }
   }, [demo, exportMode, index, ready])
   useEffect(() => {
     if (!demo || exportMode || !demo.steps[index]) return
@@ -138,7 +152,7 @@ export default function Player() {
 
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
     <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><button onClick={() => document.documentElement.requestFullscreen()}>全屏</button></header>
-    <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage key={step.id}
+    <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage
       step={step} mode="player" fit="viewport" persistZoom exportZoomProgress={exportZoomProgress} theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
       onHotspot={activate} onGuidePrevious={() => goTo(index - 1)} onGuideNext={activate} onReady={() => setReady(true)}
     /></section>

@@ -1,7 +1,7 @@
 import secrets
 from copy import deepcopy
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 import io
@@ -12,7 +12,6 @@ from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, S
 from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, StepOut, StepUpdate
 from app.services import active_share, demo_out, next_revision_number, owned_demo, step_out
 from app.storage import storage
-from app.snapshots import SnapshotError, load_snapshot
 
 router = APIRouter(prefix="/api/demos", tags=["demos"])
 
@@ -235,10 +234,13 @@ def step_snapshot(demo_id: str, step_id: str, db: Session = Depends(get_db), use
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not step.dom_snapshot_key:
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
-    try:
-        return JSONResponse(load_snapshot(step.dom_snapshot_key), headers={"Cache-Control": "private, no-store"})
-    except SnapshotError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not storage.exists(step.dom_snapshot_key):
+        raise HTTPException(status_code=404, detail="DOM snapshot not found")
+    version = step.dom_snapshot_key.rsplit("/", 1)[-1].split(".", 1)[0]
+    return Response(
+        content=storage.read(step.dom_snapshot_key), media_type="application/json",
+        headers={"Content-Encoding": "gzip", "Cache-Control": "private, max-age=300", "ETag": f'"{version}"'},
+    )
 
 
 @router.post("/{demo_id}/publish", response_model=DemoOut)
