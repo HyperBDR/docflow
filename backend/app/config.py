@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     session_days: int = 14
     extension_token_days: int = 30
+    allow_user_create_team_space: bool = False
     dom_slides_enabled: bool = True
     snapshot_compressed_limit_mb: int = 15
     snapshot_uncompressed_limit_mb: int = 50

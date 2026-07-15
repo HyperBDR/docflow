@@ -1,0 +1,58 @@
+{
+  "title": "Personal settings",
+  "subtitle": "Manage your profile, security, and interface preferences.",
+  "backToAdmin": "Back to admin console",
+  "backToWorkspace": "Back to dashboard",
+  "profile": {
+    "title": "Profile",
+    "description": "This information appears in your team space and the admin console.",
+    "name": "Display name",
+    "namePlaceholder": "Enter your name",
+    "email": "Sign-in email",
+    "emailHint": "Only an administrator can change the sign-in email.",
+    "saved": "Profile saved"
+  },
+  "preferences": {
+    "title": "Preferences",
+    "description": "Choose the default interface language after sign-in.",
+    "language": "Interface language",
+    "languageHint": "The change is applied to your account immediately."
+  },
+  "security": {
+    "title": "Password & security",
+    "description": "Changing your password signs out all web and browser extension sessions.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "passwordHint": "At least 8 characters",
+    "mismatch": "The new passwords do not match",
+    "changed": "Password changed. Please sign in again.",
+    "change": "Change password"
+  },
+  "saving": "Saving…",
+  "changing": "Changing…",
+  "invite": { "title": "Join a team space", "description": "You have been invited to join {{organization}}.", "signedIn": "Currently signed in as {{email}}", "accept": "Accept invitation", "accepting": "Joining…", "loading": "Loading invitation…", "roles": { "owner": "Owner", "admin": "Administrator", "editor": "Editor", "viewer": "Viewer" } },
+  "space": {
+    "title": "Team space settings",
+    "subtitle": "Manage team members, roles, and space settings.",
+    "notFound": "This team space does not exist or has been archived.",
+    "forbidden": "You do not have permission to manage this team space.",
+    "yourRole": "Your role",
+    "tabs": { "members": "Members & roles", "settings": "Space settings" },
+    "email": "Member email",
+    "role": "Team role",
+    "invite": "Invite member",
+    "inviteCreated": "Invitation created. Copy the link and send it to the member.",
+    "memberUpdated": "Member role updated.",
+    "memberRemoved": "Member removed.",
+    "removeConfirm": "Remove {{name}} from this team space?",
+    "renamed": "Team space name updated.",
+    "basic": "Basic settings",
+    "basicDescription": "The team space name appears in each member's space switcher.",
+    "name": "Team space name",
+    "archive": "Archive team space",
+    "archiveDescription": "Members will lose access and public shares will be revoked. Platform administrators can restore or permanently delete it from the recycle bin.",
+    "archiveAction": "Archive team space",
+    "archiveConfirm": "Archive “{{name}}”? Existing public shares will be revoked immediately."
+  }
+}

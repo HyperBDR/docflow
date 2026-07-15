@@ -9,35 +9,38 @@ from app.database import get_db
 from app.dependencies import current_user
 from app.models import AnalyticsEvent, Category, Demo, StepComment, Tag, User
 from app.schemas import CategoryCreate, CategoryOut, CategoryUpdate, CommentOut, TagCreate, TagOut, TagUpdate
-from app.services import owned_demo
+from app.services import current_organization_id, owned_demo, require_organization_role
 
 router = APIRouter(prefix="/api", tags=["library"])
 
 
 def owned_category(db: Session, category_id: str, user: User) -> Category:
     category = db.get(Category, category_id)
-    if not category or category.owner_id != user.id:
+    if not category or category.organization_id != current_organization_id(db, user):
         raise HTTPException(status_code=404, detail="category not found")
+    require_organization_role(db, user, category.organization_id, {"owner", "admin", "editor"})
     return category
 
 
 @router.get("/categories", response_model=list[CategoryOut])
 def list_categories(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return db.scalars(select(Category).where(Category.owner_id == user.id).order_by(Category.position, Category.name)).all()
+    return db.scalars(select(Category).where(Category.organization_id == current_organization_id(db, user)).order_by(Category.position, Category.name)).all()
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)
 def create_category(payload: CategoryCreate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    organization_id = current_organization_id(db, user)
+    require_organization_role(db, user, organization_id, {"owner", "admin", "editor"})
     if payload.parent_id:
         parent = owned_category(db, payload.parent_id, user)
         if parent.parent_id:
             raise HTTPException(status_code=400, detail="categories support a maximum of two levels")
     duplicate = db.scalar(select(Category).where(
-        Category.owner_id == user.id, Category.parent_id == payload.parent_id, Category.name == payload.name.strip()
+        Category.organization_id == organization_id, Category.parent_id == payload.parent_id, Category.name == payload.name.strip()
     ))
     if duplicate:
         raise HTTPException(status_code=409, detail="a category with this name already exists")
-    category = Category(owner_id=user.id, name=payload.name.strip(), parent_id=payload.parent_id, color=payload.color)
+    category = Category(owner_id=user.id, organization_id=organization_id, name=payload.name.strip(), parent_id=payload.parent_id, color=payload.color)
     db.add(category); db.commit(); db.refresh(category)
     return category
 
@@ -69,16 +72,18 @@ def delete_category(category_id: str, db: Session = Depends(get_db), user: User 
 
 @router.get("/tags", response_model=list[TagOut])
 def list_tags(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return db.scalars(select(Tag).where(Tag.owner_id == user.id).order_by(Tag.name)).all()
+    return db.scalars(select(Tag).where(Tag.organization_id == current_organization_id(db, user)).order_by(Tag.name)).all()
 
 
 @router.post("/tags", response_model=TagOut, status_code=201)
 def create_tag(payload: TagCreate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    organization_id = current_organization_id(db, user)
+    require_organization_role(db, user, organization_id, {"owner", "admin", "editor"})
     name = payload.name.strip()
-    existing = db.scalar(select(Tag).where(Tag.owner_id == user.id, Tag.name == name))
+    existing = db.scalar(select(Tag).where(Tag.organization_id == organization_id, Tag.name == name))
     if existing:
         return existing
-    tag = Tag(owner_id=user.id, name=name, color=payload.color)
+    tag = Tag(owner_id=user.id, organization_id=organization_id, name=name, color=payload.color)
     db.add(tag); db.commit(); db.refresh(tag)
     return tag
 
@@ -86,16 +91,18 @@ def create_tag(payload: TagCreate, db: Session = Depends(get_db), user: User = D
 @router.delete("/tags/{tag_id}", status_code=204)
 def delete_tag(tag_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     tag = db.get(Tag, tag_id)
-    if not tag or tag.owner_id != user.id:
+    if not tag or tag.organization_id != current_organization_id(db, user):
         raise HTTPException(status_code=404, detail="tag not found")
+    require_organization_role(db, user, tag.organization_id, {"owner", "admin", "editor"})
     db.delete(tag); db.commit()
 
 
 @router.patch("/tags/{tag_id}", response_model=TagOut)
 def update_tag(payload: TagUpdate, tag_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     tag = db.get(Tag, tag_id)
-    if not tag or tag.owner_id != user.id:
+    if not tag or tag.organization_id != current_organization_id(db, user):
         raise HTTPException(status_code=404, detail="tag not found")
+    require_organization_role(db, user, tag.organization_id, {"owner", "admin", "editor"})
     values = payload.model_dump(exclude_unset=True)
     for key, value in values.items():
         setattr(tag, key, value.strip() if key == "name" else value)

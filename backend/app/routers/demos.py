@@ -1,8 +1,9 @@
 import secrets
 from copy import deepcopy
-from fastapi import APIRouter, Depends, HTTPException, Response
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 import io
 
@@ -11,7 +12,7 @@ from app.defaults import navigation_defaults
 from app.dependencies import current_user
 from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, Tag, User
 from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, StepOut, StepUpdate
-from app.services import active_share, demo_out, next_revision_number, owned_demo, step_out
+from app.services import active_share, current_organization_id, demo_out, next_revision_number, owned_demo, require_organization_role, step_out, viewable_demo, write_audit
 from app.storage import storage
 
 router = APIRouter(prefix="/api/demos", tags=["demos"])
@@ -19,12 +20,17 @@ router = APIRouter(prefix="/api/demos", tags=["demos"])
 
 @router.get("", response_model=list[DemoOut])
 def list_demos(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    demos = db.scalars(select(Demo).where(Demo.owner_id == user.id).order_by(Demo.updated_at.desc())).all()
+    organization_id = current_organization_id(db, user)
+    demos = db.scalars(select(Demo).where(
+        Demo.organization_id == organization_id, Demo.deleted_at.is_(None)
+    ).order_by(Demo.updated_at.desc())).all()
     return [demo_out(db, demo, include_steps=False) for demo in demos]
 
 
 @router.post("", response_model=DemoOut, status_code=201)
 def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    organization_id = current_organization_id(db, user)
+    require_organization_role(db, user, organization_id, {"owner", "admin", "editor"})
     manual_fields = []
     if payload.title != "未命名演示":
         manual_fields.append("title")
@@ -32,10 +38,10 @@ def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User =
         manual_fields.append("description")
     if payload.category_id:
         category = db.get(Category, payload.category_id)
-        if not category or category.owner_id != user.id:
+        if not category or category.organization_id != organization_id:
             raise HTTPException(status_code=400, detail="category not found")
     demo = Demo(
-        owner_id=user.id, title=payload.title, description=payload.description,
+        owner_id=user.id, organization_id=organization_id, title=payload.title, description=payload.description,
         content_locale=payload.content_locale, navigation=navigation_defaults(payload.content_locale),
         category_id=payload.category_id, manual_fields=manual_fields,
     )
@@ -47,7 +53,7 @@ def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User =
 
 @router.get("/{demo_id}", response_model=DemoOut)
 def get_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return demo_out(db, owned_demo(db, demo_id, user))
+    return demo_out(db, viewable_demo(db, demo_id, user))
 
 
 @router.patch("/{demo_id}", response_model=DemoOut)
@@ -64,10 +70,10 @@ def update_demo(payload: DemoUpdate, demo_id: str, db: Session = Depends(get_db)
         demo.navigation = current_navigation
     if "category_id" in values and values["category_id"]:
         category = db.get(Category, values["category_id"])
-        if not category or category.owner_id != user.id:
+        if not category or category.organization_id != demo.organization_id:
             raise HTTPException(status_code=400, detail="category not found")
     if tag_ids is not None:
-        tags = db.scalars(select(Tag).where(Tag.owner_id == user.id, Tag.id.in_(tag_ids))).all() if tag_ids else []
+        tags = db.scalars(select(Tag).where(Tag.organization_id == demo.organization_id, Tag.id.in_(tag_ids))).all() if tag_ids else []
         if len(tags) != len(set(tag_ids)):
             raise HTTPException(status_code=400, detail="one or more tags were not found")
         demo.tags = list(tags)
@@ -79,8 +85,12 @@ def update_demo(payload: DemoUpdate, demo_id: str, db: Session = Depends(get_db)
 
 
 @router.delete("/{demo_id}", status_code=204)
-def delete_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    db.delete(owned_demo(db, demo_id, user))
+def delete_demo(demo_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    demo = owned_demo(db, demo_id, user)
+    demo.deleted_at = datetime.now(timezone.utc)
+    demo.deleted_by_id = user.id
+    db.execute(update(ShareToken).where(ShareToken.demo_id == demo.id).values(revoked=True))
+    write_audit(db, user, "resource.deleted", "resource", demo.id, demo.title, demo.organization_id, request=request)
     db.commit()
 
 
@@ -89,6 +99,7 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
     source = owned_demo(db, demo_id, user)
     duplicate = Demo(
         owner_id=user.id,
+        organization_id=source.organization_id,
         title=f"{source.title}{' (Copy)' if source.content_locale == 'en' else '（副本）'}"[:200],
         description=source.description,
         content_locale=source.content_locale,
@@ -177,13 +188,13 @@ def merge_demos(payload: MergeDemos, db: Session = Depends(get_db), user: User =
     sources = [owned_demo(db, demo_id, user) for demo_id in payload.demo_ids]
     if not all(source.steps for source in sources):
         raise HTTPException(status_code=400, detail="empty demos cannot be merged")
+    first = sources[0]
     if payload.category_id:
         category = db.get(Category, payload.category_id)
-        if not category or category.owner_id != user.id:
+        if not category or category.organization_id != first.organization_id:
             raise HTTPException(status_code=400, detail="category not found")
-    first = sources[0]
     merged = Demo(
-        owner_id=user.id, title=payload.title,
+        owner_id=user.id, organization_id=first.organization_id, title=payload.title,
         description=(f"Merged from {len(sources)} demos" if first.content_locale == "en" else f"由 {len(sources)} 个演示合并生成"),
         content_locale=first.content_locale,
         category_id=payload.category_id or first.category_id, theme=deepcopy(first.theme or {}),
@@ -236,7 +247,7 @@ def delete_step(demo_id: str, step_id: str, db: Session = Depends(get_db), user:
 
 @router.get("/{demo_id}/steps/{step_id}/image")
 def step_image(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    demo = owned_demo(db, demo_id, user)
+    demo = viewable_demo(db, demo_id, user)
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not storage.exists(step.asset_key):
         raise HTTPException(status_code=404, detail="image not found")
@@ -245,7 +256,7 @@ def step_image(demo_id: str, step_id: str, db: Session = Depends(get_db), user: 
 
 @router.get("/{demo_id}/steps/{step_id}/snapshot")
 def step_snapshot(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    demo = owned_demo(db, demo_id, user)
+    demo = viewable_demo(db, demo_id, user)
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not step.dom_snapshot_key:
         raise HTTPException(status_code=404, detail="DOM snapshot not found")

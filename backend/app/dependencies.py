@@ -1,5 +1,5 @@
 from datetime import timezone
-from fastapi import Cookie, Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ def expired(value) -> bool:
 
 
 def current_user(
+    request: Request,
     db: Session = Depends(get_db),
     docflow_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
@@ -30,7 +31,14 @@ def current_user(
     if not credential or expired(credential.expires_at) or getattr(credential, "revoked", False):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session expired")
     user = db.get(User, credential.user_id)
-    if not user or not user.is_active:
+    if not user or not user.is_active or user.deleted_at:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="account disabled")
+    request.state.credential = credential
+    user._active_organization_id = credential.active_organization_id
     return user
 
+
+def admin_user(user: User = Depends(current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="administrator access required")
+    return user

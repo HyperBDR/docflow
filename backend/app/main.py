@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
 from app.errors import http_exception_response, validation_exception_response
-from app.routers import ai, auth, demos, exports, extension, interactions, library, public, recordings, reorder
+from app.routers import admin, ai, auth, demos, exports, extension, interactions, library, organizations, public, recordings, reorder
 
 
 @asynccontextmanager
@@ -26,6 +26,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth.router)
+app.include_router(admin.router)
+app.include_router(organizations.router)
 app.include_router(extension.router)
 app.include_router(demos.router)
 app.include_router(interactions.router)

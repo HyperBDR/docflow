@@ -1,0 +1,14 @@
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { api } from '../api'
+import Icon from '../components/Icon'
+import { formatDate, normalizeLocale } from '../i18n'
+import type { AuditLog } from '../types'
+
+export default function AdminAudit() {
+  const { t, i18n } = useTranslation(['admin', 'common']); const locale = normalizeLocale(i18n.language)
+  const [items, setItems] = useState<AuditLog[]>([]), [query, setQuery] = useState(''), [type, setType] = useState(''), [page, setPage] = useState(1), [total, setTotal] = useState(0), [loading, setLoading] = useState(true)
+  useEffect(() => { const timer = window.setTimeout(() => { setLoading(true); api.auditLogs({ query, target_type: type, page, page_size: 25 }).then(value => { setItems(value.items); setTotal(value.total) }).finally(() => setLoading(false)) }, 200); return () => clearTimeout(timer) }, [query, type, page])
+  const pages = Math.max(1, Math.ceil(total / 25))
+  return <div className="admin-content-page"><div className="admin-page-intro"><div><h1>{t('audit.title')}</h1><p>{t('audit.subtitle')}</p></div><span>{t('audit.total', { count: total })}</span></div><section className="admin-list-card"><div className="audit-filters"><label className="admin-search"><Icon name="search" /><input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }} placeholder={t('audit.search')} /></label><select value={type} onChange={event => { setType(event.target.value); setPage(1) }}><option value="">{t('audit.allTypes')}</option><option value="user">{t('audit.types.user')}</option><option value="resource">{t('audit.types.resource')}</option><option value="organization">{t('audit.types.organization')}</option><option value="member">{t('audit.types.member')}</option><option value="invitation">{t('audit.types.invitation')}</option></select></div><div className="audit-list">{items.map(item => <article key={item.id}><span><Icon name="clock" /></span><div><strong>{t(`audit.actions.${item.action}`, { defaultValue: item.action })}</strong><p>{item.target_label || item.target_id}</p><small>{item.actor_name || item.actor_email || t('audit.system')} · {item.organization_name || '—'} · {item.ip_address || '—'}</small></div><time>{formatDate(item.created_at, locale)}</time></article>)}{loading && <div className="admin-table-state"><span className="action-spinner" />{t('loading')}</div>}{!loading && !items.length && <div className="admin-table-state">{t('audit.empty')}</div>}</div><div className="admin-pagination"><span>{t('pagination.range', { from: total ? (page - 1) * 25 + 1 : 0, to: Math.min(page * 25, total), total })}</span><div><button disabled={page <= 1} onClick={() => setPage(v => v - 1)}><Icon name="chevronLeft" /></button><b>{page} / {pages}</b><button disabled={page >= pages} onClick={() => setPage(v => v + 1)}><Icon name="chevronRight" /></button></div></div></section></div>
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from './api'
 import { applyLocale, normalizeLocale } from './i18n'
@@ -8,7 +8,12 @@ import Editor from './pages/Editor'
 import Player from './pages/Player'
 import SnapshotFrame from './pages/SnapshotFrame'
 import Analytics from './pages/Analytics'
+import Account from './pages/Account'
+import AdminShell from './pages/AdminShell'
+import Invite from './pages/Invite'
+import TeamSpaceSettings from './pages/TeamSpaceSettings'
 import Brand from './components/Brand'
+import AccountMenu, { LAST_WORKSPACE_KEY } from './components/AccountMenu'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import type { User } from './types'
 
@@ -19,6 +24,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const navigate = useNavigate()
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -28,6 +34,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
       const user = await api.me()
       await applyLocale(user.ui_locale)
       onAuthenticated(user)
+      navigate(user.role === 'admin' && localStorage.getItem(LAST_WORKSPACE_KEY) === 'admin' ? '/admin' : '/')
     } catch (value) {
       setError(value instanceof Error ? value.message : t('loginFailed'))
     } finally { setBusy(false) }
@@ -52,14 +59,21 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
   </main>
 }
 
-function Shell({ user, logout }: { user: User; logout: () => void }) {
-  const { t } = useTranslation('common')
-  const location = useLocation()
-  const isDemoDetail = location.pathname.startsWith('/demos/')
-  return <div className={`app-shell ${isDemoDetail ? 'demo-detail-shell' : ''}`}>
-    {!isDemoDetail && <header><Link className="brand" to="/"><Brand /></Link><div className="header-user"><LanguageSwitcher account /><span>{user.email}</span><button className="ghost" onClick={logout}>{t('actions.logout')}</button></div></header>}
-    <Routes><Route path="/" element={<Dashboard />} /><Route path="/demos/:id/analytics" element={<Analytics />} /><Route path="/demos/:id" element={<Editor />} /><Route path="*" element={<Navigate to="/" />} /></Routes>
-  </div>
+function WorkspaceShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
+  useEffect(() => { localStorage.setItem(LAST_WORKSPACE_KEY, 'user') }, [])
+  return <div className="app-shell"><header className="workspace-header"><Link className="brand" to="/"><Brand /></Link><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></header><Dashboard /></div>
+}
+
+function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
+  return <Routes>
+    <Route path="/admin/*" element={user.role === 'admin' ? <AdminShell user={user} onUserChange={onUserChange} logout={logout} /> : <Navigate to="/" />} />
+    <Route path="/account/*" element={<Account user={user} onUserChange={onUserChange} onPasswordChanged={logout} />} />
+    <Route path="/spaces/:id" element={<TeamSpaceSettings user={user} onUserChange={onUserChange} logout={logout} />} />
+    <Route path="/demos/:id/analytics" element={<Analytics />} />
+    <Route path="/demos/:id" element={<Editor />} />
+    <Route path="/" element={<WorkspaceShell user={user} onUserChange={onUserChange} logout={logout} />} />
+    <Route path="*" element={<Navigate to="/" />} />
+  </Routes>
 }
 
 export default function App() {
@@ -71,12 +85,18 @@ export default function App() {
     if (isSnapshotFrame || isPublicPlayer) return
     api.me().then(async value => { await applyLocale(value.ui_locale); setUser(value) }).catch(error => setUser(error instanceof ApiError && error.status === 401 ? null : null))
   }, [isSnapshotFrame, isPublicPlayer])
+  useEffect(() => {
+    const update = (event: Event) => setUser((event as CustomEvent<User>).detail)
+    window.addEventListener('docflow:user-updated', update)
+    return () => window.removeEventListener('docflow:user-updated', update)
+  }, [])
   if (isSnapshotFrame) return <SnapshotFrame />
   if (isPublicPlayer) return <Routes><Route path="/p/:token" element={<Player />} /></Routes>
   if (user === undefined) return <div className="center-page">{t('loadingApp')}</div>
   return <Routes>
     <Route path="/p/:token" element={<Player />} />
     <Route path="/snapshot-frame" element={<SnapshotFrame />} />
-    <Route path="/*" element={user ? <Shell user={user} logout={async () => { await api.logout(); setUser(null) }} /> : <Auth onAuthenticated={setUser} />} />
+    <Route path="/invite/:token" element={<Invite user={user || null} onAuthenticated={setUser} />} />
+    <Route path="/*" element={user ? <AuthenticatedApp user={user} onUserChange={setUser} logout={async () => { try { await api.logout() } finally { setUser(null) } }} /> : <Auth onAuthenticated={setUser} />} />
   </Routes>
 }

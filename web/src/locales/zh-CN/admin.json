@@ -1,0 +1,100 @@
+{
+  "title": "后台管理",
+  "subtitle": "统一管理平台用户、团队空间、安全状态和使用数据。",
+  "nav": { "platform": "平台管理", "overview": "管理总览", "accounts": "账号与空间", "users": "用户管理", "organizations": "团队空间", "content": "内容治理", "resources": "资源管理", "recycle": "回收站", "security": "安全与合规", "audit": "操作日志", "collapse": "折叠菜单", "secure": "安全管理空间" },
+  "overviewCards": { "users": "管理用户、空间关联、角色和安全设置。", "resources": "查看和治理平台中的全部演示资源。" },
+  "users": { "title": "用户管理", "subtitle": "管理平台账号、空间权限和资源使用情况。", "total": "共 {{count}} 个用户" },
+  "pagination": { "range": "显示 {{from}}–{{to}}，共 {{total}} 条" },
+  "resource": {
+    "title": "资源管理", "subtitle": "查看、筛选和治理所有空间中的演示资源。", "detailTitle": "资源详情", "total": "共 {{count}} 个资源",
+    "search": "搜索资源、用户或邮箱", "allOwners": "全部空间", "allStatuses": "全部状态", "allLanguages": "全部语言", "empty": "没有找到符合条件的资源",
+    "table": { "resource": "资源", "owner": "所属空间", "status": "状态", "steps": "步骤", "views": "访问", "storage": "存储", "updated": "更新时间" },
+    "noDescription": "该资源暂无简介。", "readOnly": "管理员只读预览", "noSteps": "该资源尚未录制步骤", "usage": "资源使用情况", "metadata": "基本信息", "created": "创建时间", "updated": "最后更新",
+    "delete": "删除资源", "deleting": "正在删除…", "deleteConfirm": "确定删除“{{title}}”吗？相关发布版本、分享链接和分析数据将同时失效。"
+  },
+  "organizations": {
+    "title": "团队空间", "subtitle": "管理团队空间、成员和邀请。", "current": "当前空间", "members": "成员", "resources": "资源", "storage": "存储", "teamTitle": "空间成员", "teamSubtitle": "邀请成员并设置其访问权限。", "email": "成员邮箱", "role": "成员角色", "invite": "生成邀请链接", "enter": "进入管理", "managing": "正在管理",
+    "roles": { "owner": "所有者", "admin": "管理员", "editor": "编辑者", "viewer": "只读成员" }
+  },
+  "audit": {
+    "title": "操作日志", "subtitle": "追踪平台中的敏感操作、操作者和变更时间。", "total": "共 {{count}} 条日志", "search": "搜索操作对象", "allTypes": "全部对象类型", "system": "系统", "empty": "暂无操作日志",
+    "types": { "user": "用户", "resource": "资源", "organization": "团队空间", "member": "成员", "invitation": "邀请" },
+    "actions": { "user.updated": "更新用户", "user.password_reset": "重置用户密码", "user.deleted": "删除用户", "user.restored": "恢复用户", "user.purged": "彻底删除用户", "resource.deleted": "删除资源", "resource.restored": "恢复资源", "resource.purged": "彻底删除资源", "organization.created": "创建团队空间", "organization.updated": "更新团队空间", "organization.entered": "进入团队空间管理", "organization.archived": "归档团队空间", "organization.restored": "恢复团队空间", "organization.purged": "彻底删除团队空间", "member.added": "添加团队成员", "member.role_updated": "更新成员角色", "member.removed": "移除成员", "invitation.created": "创建邀请", "invitation.accepted": "接受邀请" }
+  },
+  "recycle": { "title": "回收站", "subtitle": "已删除内容保留 30 天，期间可以恢复或彻底清除。", "total": "{{count}} 个项目", "deletedAt": "删除于 {{date}}", "expiresAt": "保留至 {{date}}", "restore": "恢复", "purge": "彻底删除", "purgeConfirm": "彻底删除“{{title}}”吗？此操作无法撤销。", "empty": "回收站为空", "types": { "user": "用户", "resource": "资源", "team_space": "团队空间" } },
+  "overview": {
+    "users": "用户总数",
+    "activeUsers": "活跃用户",
+    "demos": "演示资源",
+    "views": "累计访问",
+    "storage": "存储占用",
+    "admins": "{{count}} 名管理员"
+  },
+  "filters": {
+    "search": "搜索名字或邮箱",
+    "allRoles": "全部角色",
+    "allStatuses": "全部状态",
+    "active": "正常",
+    "disabled": "已禁用"
+  },
+  "roles": { "admin": "管理员", "user": "普通用户" },
+  "table": {
+    "user": "用户",
+    "role": "角色",
+    "status": "状态",
+    "teams": "团队空间",
+    "resources": "资源",
+    "views": "访问",
+    "storage": "存储",
+    "created": "创建时间",
+    "empty": "没有找到符合条件的用户"
+  },
+  "detail": {
+    "title": "用户详情",
+    "subtitle": "账号资料、权限与资源使用情况",
+    "tabs": { "account": "账号资料", "teams": "团队空间", "usage": "资源使用", "security": "安全操作" },
+    "account": "账号信息",
+    "accountHelp": "修改用户的基本资料、平台权限和界面偏好。",
+    "name": "显示名称",
+    "email": "邮箱",
+    "role": "平台角色",
+    "status": "账号状态",
+    "language": "偏好语言",
+    "resources": "资源与使用情况",
+    "demos": "演示资源",
+    "steps": "录制步骤",
+    "published": "已发布",
+    "views": "访问次数",
+    "viewers": "独立访客",
+    "exports": "导出任务",
+    "storage": "存储占用",
+    "usageHelp": "查看该用户在当前平台中的内容规模和访问数据。",
+    "selfProtection": "为了避免管理员锁定自己，当前账号的角色和状态不可在这里修改。",
+    "saved": "用户信息已更新"
+  },
+  "teams": { "title": "团队空间关联", "description": "查看并管理该用户所属的团队空间、团队角色和当前空间。", "organization": "团队空间", "selectOrganization": "选择要关联的团队空间", "role": "团队角色", "add": "添加关联", "added": "已添加团队空间关联", "updated": "团队角色已更新", "removed": "团队空间关联已移除", "remove": "移除关联", "removeConfirm": "确定将该用户从“{{organization}}”移除吗？", "current": "当前空间", "personal": "个人空间", "personalOnly": "仅个人空间", "allLinked": "该用户已关联平台中的全部团队空间。", "platformRoleNote": "平台角色与团队角色相互独立；平台管理员可以管理所有团队空间，但不会自动成为团队成员。" },
+  "spaces": {
+    "title": "团队空间管理", "subtitle": "统一管理团队空间、Owner、成员、资源和生命周期。", "create": "创建团队空间", "createHelp": "创建独立的协作空间并指定首位 Owner。平台管理员不会自动加入成员列表。", "createAction": "创建并进入", "name": "空间名称", "namePlaceholder": "例如：市场团队", "owner": "空间 Owner", "search": "搜索空间、Owner 或邮箱", "total": "共 {{count}} 个团队空间", "empty": "没有找到团队空间", "enter": "进入管理", "managing": "正在管理", "active": "正常", "platformAccess": "平台管理员访问", "selectTitle": "选择一个团队空间", "selectDescription": "点击列表中的“进入管理”，查看成员、资源和空间设置。", "inviteCreated": "邀请链接已生成", "memberUpdated": "成员角色已更新", "memberRemoved": "成员已移除", "removeMember": "移除成员", "removeMemberConfirm": "确定移除成员“{{name}}”吗？", "memberEmail": "成员邮箱", "teamRole": "团队角色", "invite": "生成邀请链接", "ownership": "所有权", "ownershipDescription": "Owner 负责空间设置、成员权限和归档操作。", "basicSettings": "基本设置", "basicSettingsDescription": "空间名称修改后不会改变稳定标识和已有资源链接。", "renamed": "团队空间名称已更新", "archive": "归档团队空间", "archiveDescription": "归档后停止编辑并撤销全部公开分享，空间将进入回收站保留30天。", "archiveAction": "归档空间", "archiveConfirm": "确定归档“{{name}}”吗？所有公开分享将立即失效。",
+    "tabs": { "overview": "概览", "members": "成员与角色", "settings": "空间设置" },
+    "table": { "space": "团队空间", "owner": "Owner", "members": "成员", "resources": "资源", "storage": "存储", "created": "创建时间" }
+  },
+  "security": {
+    "title": "安全操作",
+    "description": "管理登录凭证、会话和账号生命周期。",
+    "newPassword": "设置新密码",
+    "passwordPlaceholder": "至少 8 个字符",
+    "reset": "重置密码",
+    "resetHelp": "设置新密码后，该用户的全部登录会话会立即失效。",
+    "resetting": "正在重置…",
+    "resetDone": "密码已重置，用户需要重新登录。",
+    "selfResetHint": "请前往个人设置修改当前管理员账号的密码。",
+    "delete": "删除用户",
+    "deleteHint": "用户将被禁用并移入回收站，相关登录会话会立即失效。",
+    "deleteConfirm": "确定删除 {{name}} 吗？该用户的资源和数据也会被删除。"
+  },
+  "loading": "正在加载管理数据…",
+  "saving": "正在保存…",
+  "refresh": "刷新数据",
+  "selectUser": "从列表中选择一个用户以查看详细信息。",
+  "self": "当前账号"
+}

@@ -12,6 +12,10 @@ import playerZh from './locales/zh-CN/player.json'
 import playerEn from './locales/en/player.json'
 import editorZh from './locales/zh-CN/editor.json'
 import editorEn from './locales/en/editor.json'
+import accountZh from './locales/zh-CN/account.json'
+import accountEn from './locales/en/account.json'
+import adminZh from './locales/zh-CN/admin.json'
+import adminEn from './locales/en/admin.json'
 
 export type Locale = 'zh-CN' | 'en'
 export const UI_LOCALE_KEY = 'docflow.uiLocale'
@@ -29,8 +33,8 @@ const initialLocale = detectedLocale()
 
 void i18n.use(initReactI18next).init({
   resources: {
-    'zh-CN': { common: commonZh, auth: authZh, dashboard: dashboardZh, analytics: analyticsZh, player: playerZh, editor: editorZh },
-    en: { common: commonEn, auth: authEn, dashboard: dashboardEn, analytics: analyticsEn, player: playerEn, editor: editorEn },
+    'zh-CN': { common: commonZh, auth: authZh, dashboard: dashboardZh, analytics: analyticsZh, player: playerZh, editor: editorZh, account: accountZh, admin: adminZh },
+    en: { common: commonEn, auth: authEn, dashboard: dashboardEn, analytics: analyticsEn, player: playerEn, editor: editorEn, account: accountEn, admin: adminEn },
   },
   lng: initialLocale,
   fallbackLng: 'en',

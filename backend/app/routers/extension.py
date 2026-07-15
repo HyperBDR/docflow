@@ -51,7 +51,8 @@ def exchange_pair(payload: PairExchange, db: Session = Depends(get_db)):
     if not pair or pair.used or expired(pair.expires_at):
         raise HTTPException(status_code=400, detail="invalid or expired pairing code")
     raw = random_token()
-    db.add(ExtensionToken(user_id=pair.user_id, token_hash=hash_token(raw), expires_at=expires_in(days=settings.extension_token_days)))
+    user = db.get(User, pair.user_id)
+    db.add(ExtensionToken(user_id=pair.user_id, token_hash=hash_token(raw), active_organization_id=user.current_organization_id if user else None, expires_at=expires_in(days=settings.extension_token_days)))
     pair.used = True
     db.commit()
     return TokenOut(

@@ -32,10 +32,77 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), default="")
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    role: Mapped[str] = mapped_column(String(20), default="user", index=True)
     ui_locale: Mapped[str] = mapped_column(String(10), default="zh-CN")
+    current_organization_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL", use_alter=True, name="fk_users_current_organization"),
+        nullable=True, index=True,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+    @property
+    def active_organization_id(self) -> str | None:
+        return getattr(self, "_active_organization_id", None) or self.current_organization_id
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120))
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="team", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    personal_owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, unique=True)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scheduled_purge_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class OrganizationMember(Base):
+    __tablename__ = "organization_members"
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_organization_member"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="editor")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class OrganizationInvitation(Base):
+    __tablename__ = "organization_invitations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="editor")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    invited_by_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    actor_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    target_type: Mapped[str] = mapped_column(String(40), index=True)
+    target_id: Mapped[str] = mapped_column(String(36), index=True)
+    target_label: Mapped[str] = mapped_column(String(320), default="")
+    before: Mapped[dict] = mapped_column(JSON, default=dict)
+    after: Mapped[dict] = mapped_column(JSON, default=dict)
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    user_agent: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
 demo_tags = Table(
@@ -51,6 +118,7 @@ class Category(Base):
     __table_args__ = (UniqueConstraint("owner_id", "parent_id", "name", name="uq_category_owner_parent_name"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     parent_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     color: Mapped[str] = mapped_column(String(32), default="#635bff")
@@ -64,6 +132,7 @@ class Tag(Base):
     __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_tag_owner_name"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(60))
     color: Mapped[str] = mapped_column(String(32), default="#635bff")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -74,6 +143,7 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    active_organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
@@ -92,6 +162,7 @@ class ExtensionToken(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    active_organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -101,6 +172,7 @@ class Demo(Base):
     __tablename__ = "demos"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="未命名演示")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -111,6 +183,8 @@ class Demo(Base):
     manual_fields: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[DemoStatus] = mapped_column(Enum(DemoStatus), default=DemoStatus.draft)
     current_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     steps: Mapped[list["Step"]] = relationship(back_populates="demo", cascade="all, delete-orphan", order_by="Step.position")

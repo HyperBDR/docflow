@@ -1,0 +1,100 @@
+{
+  "title": "Admin console",
+  "subtitle": "Manage platform users, team spaces, account security, and usage data.",
+  "nav": { "platform": "Platform management", "overview": "Overview", "accounts": "Accounts & spaces", "users": "Users", "organizations": "Team spaces", "content": "Content governance", "resources": "Resources", "recycle": "Recycle bin", "security": "Security & compliance", "audit": "Audit log", "collapse": "Collapse navigation", "secure": "Secure management space" },
+  "overviewCards": { "users": "Manage users, space access, roles, and security.", "resources": "Review and govern every demo resource on the platform." },
+  "users": { "title": "User management", "subtitle": "Manage platform accounts, space access, and resource usage.", "total": "{{count}} users" },
+  "pagination": { "range": "Showing {{from}}–{{to}} of {{total}}" },
+  "resource": {
+    "title": "Resource management", "subtitle": "Review, filter, and govern demo resources across every space.", "detailTitle": "Resource details", "total": "{{count}} resources",
+    "search": "Search resource, user, or email", "allOwners": "All spaces", "allStatuses": "All statuses", "allLanguages": "All languages", "empty": "No resources match these filters",
+    "table": { "resource": "Resource", "owner": "Space", "status": "Status", "steps": "Steps", "views": "Views", "storage": "Storage", "updated": "Updated" },
+    "noDescription": "This resource has no description.", "readOnly": "Administrator read-only preview", "noSteps": "No steps have been recorded", "usage": "Resource usage", "metadata": "Basic information", "created": "Created", "updated": "Last updated",
+    "delete": "Delete resource", "deleting": "Deleting…", "deleteConfirm": "Delete “{{title}}”? Its published revisions, share links, and analytics data will also become unavailable."
+  },
+  "organizations": {
+    "title": "Team spaces", "subtitle": "Manage team spaces, members, and invitations.", "current": "Current space", "members": "Members", "resources": "Resources", "storage": "Storage", "teamTitle": "Space members", "teamSubtitle": "Invite members and configure their access.", "email": "Member email", "role": "Member role", "invite": "Create invitation link", "enter": "Manage space", "managing": "Managing",
+    "roles": { "owner": "Owner", "admin": "Administrator", "editor": "Editor", "viewer": "Viewer" }
+  },
+  "audit": {
+    "title": "Audit log", "subtitle": "Track sensitive platform operations, actors, and change times.", "total": "{{count}} log entries", "search": "Search target", "allTypes": "All target types", "system": "System", "empty": "No audit activity yet",
+    "types": { "user": "User", "resource": "Resource", "organization": "Organization", "member": "Member", "invitation": "Invitation" },
+    "actions": { "user.updated": "User updated", "user.password_reset": "User password reset", "user.deleted": "User deleted", "user.restored": "User restored", "user.purged": "User permanently deleted", "resource.deleted": "Resource deleted", "resource.restored": "Resource restored", "resource.purged": "Resource permanently deleted", "organization.created": "Team space created", "organization.updated": "Team space updated", "organization.entered": "Team space management entered", "organization.archived": "Team space archived", "organization.restored": "Team space restored", "organization.purged": "Team space permanently deleted", "member.added": "Team member added", "member.role_updated": "Member role updated", "member.removed": "Member removed", "invitation.created": "Invitation created", "invitation.accepted": "Invitation accepted" }
+  },
+  "recycle": { "title": "Recycle bin", "subtitle": "Deleted content is retained for 30 days and can be restored or permanently removed.", "total": "{{count}} items", "deletedAt": "Deleted {{date}}", "expiresAt": "Retained until {{date}}", "restore": "Restore", "purge": "Delete permanently", "purgeConfirm": "Permanently delete “{{title}}”? This cannot be undone.", "empty": "The recycle bin is empty", "types": { "user": "User", "resource": "Resource", "team_space": "Team space" } },
+  "overview": {
+    "users": "Total users",
+    "activeUsers": "Active users",
+    "demos": "Demo resources",
+    "views": "Total views",
+    "storage": "Storage used",
+    "admins": "{{count}} administrators"
+  },
+  "filters": {
+    "search": "Search name or email",
+    "allRoles": "All roles",
+    "allStatuses": "All statuses",
+    "active": "Active",
+    "disabled": "Disabled"
+  },
+  "roles": { "admin": "Administrator", "user": "Regular user" },
+  "table": {
+    "user": "User",
+    "role": "Role",
+    "status": "Status",
+    "teams": "Team spaces",
+    "resources": "Resources",
+    "views": "Views",
+    "storage": "Storage",
+    "created": "Created",
+    "empty": "No users match these filters"
+  },
+  "detail": {
+    "title": "User details",
+    "subtitle": "Account profile, permissions, and resource usage",
+    "tabs": { "account": "Account", "teams": "Team spaces", "usage": "Resource usage", "security": "Security" },
+    "account": "Account information",
+    "accountHelp": "Update the user's profile, platform permissions, and interface preferences.",
+    "name": "Display name",
+    "email": "Email",
+    "role": "Platform role",
+    "status": "Account status",
+    "language": "Preferred language",
+    "resources": "Resources & usage",
+    "demos": "Demo resources",
+    "steps": "Recorded steps",
+    "published": "Published",
+    "views": "Views",
+    "viewers": "Unique viewers",
+    "exports": "Export jobs",
+    "storage": "Storage used",
+    "usageHelp": "Review this user's content footprint and audience activity across the platform.",
+    "selfProtection": "Your own role and status cannot be changed here to prevent an administrator lockout.",
+    "saved": "User updated"
+  },
+  "teams": { "title": "Team space associations", "description": "Review and manage this user's team spaces, team roles, and current space.", "organization": "Team space", "selectOrganization": "Select a team space", "role": "Team role", "add": "Add association", "added": "Team space association added", "updated": "Team role updated", "removed": "Team space association removed", "remove": "Remove association", "removeConfirm": "Remove this user from “{{organization}}”?", "current": "Current space", "personal": "Personal space", "personalOnly": "Personal space only", "allLinked": "This user is already associated with every team space.", "platformRoleNote": "Platform and team roles are independent. Platform administrators can manage every team space without becoming team members." },
+  "spaces": {
+    "title": "Team space management", "subtitle": "Manage team spaces, owners, members, resources, and lifecycle in one place.", "create": "Create team space", "createHelp": "Create an isolated collaboration space and assign its first owner. Platform administrators are not added automatically.", "createAction": "Create and enter", "name": "Space name", "namePlaceholder": "For example: Marketing team", "owner": "Space owner", "search": "Search space, owner, or email", "total": "{{count}} team spaces", "empty": "No team spaces found", "enter": "Manage space", "managing": "Managing", "active": "Active", "platformAccess": "Platform administrator access", "selectTitle": "Select a team space", "selectDescription": "Choose Manage space to review members, resources, and settings.", "inviteCreated": "Invitation link created", "memberUpdated": "Member role updated", "memberRemoved": "Member removed", "removeMember": "Remove member", "removeMemberConfirm": "Remove “{{name}}” from this space?", "memberEmail": "Member email", "teamRole": "Team role", "invite": "Create invitation link", "ownership": "Ownership", "ownershipDescription": "The owner controls space settings, member permissions, and archiving.", "basicSettings": "Basic settings", "basicSettingsDescription": "Renaming does not change the stable identifier or existing resource links.", "renamed": "Team space renamed", "archive": "Archive team space", "archiveDescription": "Archiving blocks edits, revokes public shares, and retains the space in the recycle bin for 30 days.", "archiveAction": "Archive space", "archiveConfirm": "Archive “{{name}}”? All public shares will be revoked immediately.",
+    "tabs": { "overview": "Overview", "members": "Members & roles", "settings": "Space settings" },
+    "table": { "space": "Team space", "owner": "Owner", "members": "Members", "resources": "Resources", "storage": "Storage", "created": "Created" }
+  },
+  "security": {
+    "title": "Security actions",
+    "description": "Manage sign-in credentials, sessions, and the account lifecycle.",
+    "newPassword": "Set new password",
+    "passwordPlaceholder": "At least 8 characters",
+    "reset": "Reset password",
+    "resetHelp": "Setting a new password immediately revokes all of this user's active sessions.",
+    "resetting": "Resetting…",
+    "resetDone": "Password reset. The user must sign in again.",
+    "selfResetHint": "Use Personal settings to change the current administrator password.",
+    "delete": "Delete user",
+    "deleteHint": "The user will be disabled and moved to the recycle bin, and all sessions will be revoked immediately.",
+    "deleteConfirm": "Delete {{name}}? This user's resources and data will also be deleted."
+  },
+  "loading": "Loading administration data…",
+  "saving": "Saving…",
+  "refresh": "Refresh data",
+  "selectUser": "Select a user from the list to view details.",
+  "self": "Current account"
+}

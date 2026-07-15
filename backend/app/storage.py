@@ -30,6 +30,22 @@ class Storage:
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
 
+    def size(self, key: str) -> int:
+        """Return the stored object size without exposing its absolute path."""
+        try:
+            path = self._path(key)
+            return path.stat().st_size if path.is_file() else 0
+        except (OSError, ValueError):
+            return 0
+
+    def delete(self, key: str) -> None:
+        try:
+            path = self._path(key)
+            if path.is_file():
+                path.unlink()
+        except (OSError, ValueError):
+            pass
+
     def absolute(self, key: str) -> str:
         return os.fspath(self._path(key))
 
@@ -58,4 +74,3 @@ class Storage:
 
 
 storage = Storage(settings.storage_dir)
-

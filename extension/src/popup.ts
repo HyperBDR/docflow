@@ -4,11 +4,12 @@ import type { Credentials, Locale } from './types'
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 let locale: Locale = browserLocale()
 const connect = $('connect'), recorder = $('recorder'), setup = $('setup'), activePanel = $('active-recording'), message = $('message')
-const apiInput = $<HTMLInputElement>('api'), codeInput = $<HTMLInputElement>('code'), demoSelect = $<HTMLSelectElement>('demo')
+const apiInput = $<HTMLInputElement>('api'), codeInput = $<HTMLInputElement>('code'), spaceSelect = $<HTMLSelectElement>('space'), demoSelect = $<HTMLSelectElement>('demo')
 const startButton = $<HTMLButtonElement>('start'), pauseButton = $<HTMLButtonElement>('pause')
 const statusText = $('record-status'), modeText = $('record-mode'), countText = $('step-count')
 let timer: number | undefined
 let demos: { id: string; title: string; ai_enabled: boolean; content_locale: Locale }[] = []
+let spaces: { id: string; name: string; kind: 'personal' | 'team' }[] = []
 
 function applyTranslations() {
   document.documentElement.lang = locale
@@ -38,6 +39,22 @@ async function refresh() {
   const auth = await credentials()
   connect.hidden = Boolean(auth); recorder.hidden = !auth
   if (!auth) { window.clearInterval(timer); return }
+  const headers = { Authorization: `Bearer ${auth.token}` }
+  const [spaceResponse, meResponse] = await Promise.all([
+    fetch(`${auth.api}/api/organizations`, { headers }),
+    fetch(`${auth.api}/api/auth/me`, { headers }),
+  ])
+  if (!spaceResponse.ok || !meResponse.ok) { message.textContent = tr(locale, 'connectionExpired'); await chrome.storage.local.remove('credentials'); return refresh() }
+  spaces = await spaceResponse.json()
+  const me = await meResponse.json()
+  const savedSpace = (await chrome.storage.local.get('activeOrganizationId')).activeOrganizationId as string | undefined
+  const activeSpace = spaces.some(item => item.id === savedSpace) ? savedSpace : me.active_organization_id || me.current_organization_id || spaces[0]?.id
+  spaceSelect.replaceChildren(...spaces.map(space => { const option = document.createElement('option'); option.value = space.id; option.textContent = `${space.kind === 'personal' ? tr(locale, 'personalSpace') : tr(locale, 'teamSpace')} · ${space.name}`; return option }))
+  if (activeSpace) spaceSelect.value = activeSpace
+  if (activeSpace && activeSpace !== me.active_organization_id) {
+    const switched = await fetch(`${auth.api}/api/organizations/${activeSpace}/switch`, { method: 'POST', headers })
+    if (!switched.ok) { message.textContent = tr(locale, 'spaceSwitchFailed'); return }
+  }
   const response = await fetch(`${auth.api}/api/demos`, { headers: { Authorization: `Bearer ${auth.token}` } })
   if (!response.ok) { message.textContent = tr(locale, 'connectionExpired'); await chrome.storage.local.remove('credentials'); return refresh() }
   demos = await response.json()
@@ -72,6 +89,16 @@ startButton.addEventListener('click', async () => {
 pauseButton.addEventListener('click', async () => { renderState(await chrome.runtime.sendMessage({ type: 'PAUSE' })) })
 $('stop').addEventListener('click', async () => { statusText.textContent = tr(locale, 'finishing'); await chrome.runtime.sendMessage({ type: 'STOP' }); await refresh() })
 $('disconnect').addEventListener('click', async () => { await chrome.runtime.sendMessage({ type: 'STOP', open: false }); await chrome.storage.local.remove('credentials'); await refresh() })
+spaceSelect.addEventListener('change', async () => {
+  const auth = await credentials()
+  if (!auth || !spaceSelect.value) return
+  message.textContent = tr(locale, 'switchingSpace')
+  const response = await fetch(`${auth.api}/api/organizations/${spaceSelect.value}/switch`, { method: 'POST', headers: { Authorization: `Bearer ${auth.token}` } })
+  if (!response.ok) { message.textContent = tr(locale, 'spaceSwitchFailed'); return }
+  await chrome.storage.local.set({ activeOrganizationId: spaceSelect.value })
+  message.textContent = ''
+  await refresh()
+})
 $<HTMLSelectElement>('locale').addEventListener('change', async event => {
   locale = (event.currentTarget as HTMLSelectElement).value as Locale
   await chrome.storage.local.set({ uiLocale: locale })

@@ -9,7 +9,13 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     email: str
+    name: str = ""
+    role: Literal["user", "admin"] = "user"
+    is_active: bool = True
     ui_locale: Locale = "zh-CN"
+    current_organization_id: str | None = None
+    active_organization_id: str | None = None
+    created_at: datetime
 
 
 class AuthInput(BaseModel):
@@ -19,7 +25,217 @@ class AuthInput(BaseModel):
 
 
 class UserPreferenceUpdate(BaseModel):
-    ui_locale: Locale
+    name: str | None = Field(default=None, max_length=100)
+    ui_locale: Locale | None = None
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+OrganizationRole = Literal["owner", "admin", "editor", "viewer"]
+
+
+class OrganizationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    owner_id: str | None = None
+
+
+class OrganizationUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class OrganizationOut(BaseModel):
+    id: str
+    name: str
+    slug: str
+    kind: Literal["personal", "team"] = "team"
+    status: Literal["active", "archived"] = "active"
+    role: OrganizationRole
+    access_source: Literal["membership", "platform_admin"] = "membership"
+    member_count: int = 0
+    demo_count: int = 0
+    created_at: datetime
+
+
+class OrganizationMemberOut(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    email: str
+    role: OrganizationRole
+    is_active: bool
+    created_at: datetime
+
+
+class OrganizationMemberUpdate(BaseModel):
+    role: OrganizationRole
+
+
+class InvitationCreate(BaseModel):
+    email: EmailStr
+    role: OrganizationRole = "editor"
+
+
+class InvitationOut(BaseModel):
+    id: str
+    email: str
+    role: OrganizationRole
+    organization_id: str
+    organization_name: str
+    invite_url: str | None = None
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    created_at: datetime
+
+
+class InvitationRegister(BaseModel):
+    name: str = Field(default="", max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+    ui_locale: Locale = "zh-CN"
+
+
+class AuditLogOut(BaseModel):
+    id: str
+    actor_id: str | None
+    actor_name: str
+    actor_email: str
+    organization_id: str | None
+    organization_name: str
+    action: str
+    target_type: str
+    target_id: str
+    target_label: str
+    before: dict
+    after: dict
+    ip_address: str
+    created_at: datetime
+
+
+class RecycleItemOut(BaseModel):
+    id: str
+    item_type: Literal["user", "resource", "team_space"]
+    title: str
+    owner_email: str = ""
+    deleted_at: datetime
+    deleted_by_name: str = ""
+    expires_at: datetime
+
+
+class AdminOrganizationOut(BaseModel):
+    id: str
+    name: str
+    slug: str
+    kind: Literal["personal", "team"]
+    status: Literal["active", "archived"]
+    owner_name: str = ""
+    owner_email: str = ""
+    member_count: int
+    demo_count: int
+    storage_bytes: int
+    created_by_email: str
+    created_at: datetime
+    archived_at: datetime | None = None
+
+
+class AuditLogPage(BaseModel):
+    items: list[AuditLogOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminUserUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=100)
+    email: EmailStr | None = None
+    role: Literal["user", "admin"] | None = None
+    is_active: bool | None = None
+    ui_locale: Locale | None = None
+
+
+class AdminPasswordReset(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AdminMembershipCreate(BaseModel):
+    organization_id: str
+    role: OrganizationRole = "viewer"
+
+
+class AdminMembershipUpdate(BaseModel):
+    role: OrganizationRole
+
+
+class AdminMembershipOut(BaseModel):
+    id: str
+    organization_id: str
+    organization_name: str
+    organization_slug: str
+    organization_kind: Literal["personal", "team"] = "team"
+    role: OrganizationRole
+    is_current: bool = False
+    created_at: datetime
+
+
+class UserStats(BaseModel):
+    demos: int = 0
+    steps: int = 0
+    published_demos: int = 0
+    views: int = 0
+    unique_viewers: int = 0
+    exports: int = 0
+    storage_bytes: int = 0
+
+
+class AdminUserOut(UserOut):
+    stats: UserStats = Field(default_factory=UserStats)
+    memberships: list[AdminMembershipOut] = Field(default_factory=list)
+
+
+class AdminUserPage(BaseModel):
+    items: list[AdminUserOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminOverview(BaseModel):
+    users: int = 0
+    active_users: int = 0
+    admins: int = 0
+    demos: int = 0
+    views: int = 0
+    storage_bytes: int = 0
+
+
+class AdminResourceOwner(BaseModel):
+    id: str
+    name: str
+    email: str
+
+
+class AdminResourceOut(BaseModel):
+    id: str
+    title: str
+    description: str
+    status: Literal["draft", "published"]
+    content_locale: Locale
+    owner: AdminResourceOwner
+    step_count: int
+    views: int
+    unique_viewers: int
+    storage_bytes: int
+    thumbnail_url: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminResourcePage(BaseModel):
+    items: list[AdminResourceOut]
+    total: int
+    page: int
+    page_size: int
 
 
 class Hotspot(BaseModel):
@@ -263,6 +479,10 @@ class DemoOut(BaseModel):
     ai_enabled: bool = False
     category_id: str | None = None
     tags: list[TagOut] = Field(default_factory=list)
+
+
+class AdminResourceDetail(AdminResourceOut):
+    demo: DemoOut
 
 
 class RecordingStepMeta(BaseModel):

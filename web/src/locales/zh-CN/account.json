@@ -1,0 +1,58 @@
+{
+  "title": "个人设置",
+  "subtitle": "管理个人资料、安全设置与界面偏好。",
+  "backToAdmin": "返回管理后台",
+  "backToWorkspace": "返回我的工作台",
+  "profile": {
+    "title": "个人资料",
+    "description": "这些信息会显示在团队空间和后台管理中。",
+    "name": "显示名称",
+    "namePlaceholder": "请输入你的名字",
+    "email": "登录邮箱",
+    "emailHint": "登录邮箱只能由管理员修改。",
+    "saved": "个人资料已保存"
+  },
+  "preferences": {
+    "title": "偏好设置",
+    "description": "选择登录后默认使用的界面语言。",
+    "language": "界面语言",
+    "languageHint": "保存后会立即应用到当前账号。"
+  },
+  "security": {
+    "title": "密码与安全",
+    "description": "修改密码后，所有网页和浏览器插件会话都会退出。",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认新密码",
+    "passwordHint": "至少 8 个字符",
+    "mismatch": "两次输入的新密码不一致",
+    "changed": "密码已修改，请重新登录。",
+    "change": "修改密码"
+  },
+  "saving": "正在保存…",
+  "changing": "正在修改…",
+  "invite": { "title": "加入团队空间", "description": "你已受邀加入 {{organization}}。", "signedIn": "当前登录账号：{{email}}", "accept": "接受邀请", "accepting": "正在加入…", "loading": "正在加载邀请…", "roles": { "owner": "所有者", "admin": "管理员", "editor": "编辑者", "viewer": "只读成员" } },
+  "space": {
+    "title": "团队空间设置",
+    "subtitle": "管理团队成员、角色和空间设置。",
+    "notFound": "团队空间不存在或已归档。",
+    "forbidden": "你没有管理该团队空间的权限。",
+    "yourRole": "你的角色",
+    "tabs": { "members": "成员与角色", "settings": "空间设置" },
+    "email": "成员邮箱",
+    "role": "团队角色",
+    "invite": "邀请成员",
+    "inviteCreated": "邀请已创建，可以复制链接发送给成员。",
+    "memberUpdated": "成员角色已更新。",
+    "memberRemoved": "成员已移除。",
+    "removeConfirm": "确定从团队空间移除 {{name}} 吗？",
+    "renamed": "团队空间名称已更新。",
+    "basic": "基本设置",
+    "basicDescription": "团队空间名称会显示在成员的空间切换器中。",
+    "name": "团队空间名称",
+    "archive": "归档团队空间",
+    "archiveDescription": "归档后成员将无法进入，公开分享会立即失效；平台管理员可以在回收站恢复或永久删除。",
+    "archiveAction": "归档团队空间",
+    "archiveConfirm": "确定归档“{{name}}”吗？现有公开分享将立即失效。"
+  }
+}
