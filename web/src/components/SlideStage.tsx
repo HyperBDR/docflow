@@ -1,5 +1,5 @@
 import { arrow, autoUpdate, flip, FloatingArrow, offset, shift, useFloating, type Placement, type VirtualElement } from '@floating-ui/react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { HotspotData, Rect, SelectorInfo, Step } from '../types'
 
 type TargetSelection = { selector: SelectorInfo; rect: Rect }
@@ -20,6 +20,9 @@ type Props = {
   onGuidePrevious?: () => void
   onGuideNext?: (hotspot: HotspotData) => void
   onRectChange?: (hotspot: HotspotData, rect: Rect) => void
+  showZoomEditor?: boolean
+  onZoomRectChange?: (rect: Rect) => void
+  onZoomDelete?: () => void
 }
 
 function placement(value?: string, alignment?: string): Placement {
@@ -60,6 +63,7 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
   }, [wrapper, rect, refs])
 
   const color = hotspot.style?.color || theme?.primary_color || '#635bff'
+  const hotspotBackground = /^#[0-9a-f]{6}$/i.test(color) ? `${color}1f` : 'rgba(99, 91, 255, .12)'
   const tooltipTheme = theme?.tooltip || {}
   const guideNavigation = {
     previous_label: '上一步', next_label: '下一步', previous_color: '#ffffff', next_color: color,
@@ -101,7 +105,7 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
       style={{
         left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `calc(${Math.max(rect.w, .012) * 100}% + ${hotspotPadding * 2}px)`,
         height: `calc(${Math.max(rect.h, .012) * 100}% + ${hotspotPadding * 2}px)`, borderRadius: hotspot.style?.shape === 'circle' ? '999px' : '9px',
-        borderColor: color, color,
+        borderColor: color, color, backgroundColor: hotspotBackground,
         boxShadow: hotspot.style?.spotlight && active ? `0 0 0 9999px rgba(17,24,39,${hotspot.style.overlay_opacity ?? .45})` : undefined,
       }}
       onClick={event => { event.stopPropagation(); mode === 'editor' ? onSelect?.() : onActivate?.() }}
@@ -138,7 +142,70 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
   </>
 }
 
-export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange }: Props) {
+function ZoomRegionLayer({ rect, wrapper, hotspots, onChange, onPreview, onDelete }: {
+  rect: Rect
+  wrapper: HTMLDivElement | null
+  hotspots: HotspotData[]
+  onChange?: (rect: Rect) => void
+  onPreview: () => void
+  onDelete?: () => void
+}) {
+  const [help, setHelp] = useState(false)
+  const primary = hotspots[0]?.fallback_rect
+  const containsPrimary = !primary || (
+    primary.x - primary.w / 2 >= rect.x - rect.w / 2
+    && primary.x + primary.w / 2 <= rect.x + rect.w / 2
+    && primary.y - primary.h / 2 >= rect.y - rect.h / 2
+    && primary.y + primary.h / 2 <= rect.y + rect.h / 2
+  )
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!wrapper) return
+    event.preventDefault(); event.stopPropagation()
+    const region = event.currentTarget, box = wrapper.getBoundingClientRect(), startX = event.clientX, startY = event.clientY
+    const resizing = (event.target as HTMLElement).classList.contains('zoom-resize-handle')
+    region.setPointerCapture(event.pointerId)
+    const calculate = (next: PointerEvent) => {
+      const dx = (next.clientX - startX) / box.width, dy = (next.clientY - startY) / box.height
+      if (resizing) return {
+        ...rect,
+        w: Math.max(.12, Math.min(2 * Math.min(rect.x, 1 - rect.x), rect.w + dx * 2)),
+        h: Math.max(.12, Math.min(2 * Math.min(rect.y, 1 - rect.y), rect.h + dy * 2)),
+      }
+      return {
+        ...rect,
+        x: Math.max(rect.w / 2, Math.min(1 - rect.w / 2, rect.x + dx)),
+        y: Math.max(rect.h / 2, Math.min(1 - rect.h / 2, rect.y + dy)),
+      }
+    }
+    const move = (next: PointerEvent) => {
+      const value = calculate(next)
+      Object.assign(region.style, { left: `${value.x * 100}%`, top: `${value.y * 100}%`, width: `${value.w * 100}%`, height: `${value.h * 100}%` })
+    }
+    const up = (next: PointerEvent) => {
+      region.removeEventListener('pointermove', move); region.removeEventListener('pointerup', up)
+      onChange?.(calculate(next))
+    }
+    region.addEventListener('pointermove', move); region.addEventListener('pointerup', up)
+  }
+  return <>
+    <div className="zoom-region-editor" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} onPointerDown={startDrag}>
+      <span className="zoom-region-label">Zoom area</span><span className="zoom-resize-handle" />
+    </div>
+    <div className="zoom-region-controls" style={{ left: `${rect.x * 100}%`, top: `${Math.min(.94, rect.y + rect.h / 2) * 100}%` }} onClick={event => event.stopPropagation()}>
+      <button className="zoom-preview" onClick={onPreview}><span>▶</span>Zoom Preview</button>
+      <button title="删除 Zoom 区域" onClick={onDelete}>×</button>
+      <button title="Zoom 会把选中的页面区域放大到演示视口" onClick={() => setHelp(value => !value)}>?</button>
+      {!containsPrimary && <button className="zoom-warning" title="当前 Zoom 区域没有包含主要 Hotspot，请调整 Zoom 区域或 Hotspot。">!</button>}
+      {help && <div className="zoom-help">拖动边框移动区域，使用右下角手柄缩放。预览会放大 3 秒后自动还原。</div>}
+    </div>
+  </>
+}
+
+function zoomedRect(rect: Rect, scale: number, offsetX: number, offsetY: number): Rect {
+  return { x: rect.x * scale + offsetX, y: rect.y * scale + offsetY, w: rect.w * scale, h: rect.h * scale }
+}
+
+export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, onZoomRectChange, onZoomDelete }: Props) {
   const shellRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -147,10 +214,22 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const [dynamicRects, setDynamicRects] = useState<Record<string, Rect>>({})
   const [error, setError] = useState('')
   const [scale, setScale] = useState(1)
+  const [contentReady, setContentReady] = useState(false)
+  const [zoomActive, setZoomActive] = useState(false)
+  const zoomTimer = useRef<number | undefined>(undefined)
   const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url)
+  const zoom = step.animation?.zoom
+  const zoomRect = zoom?.rect
+
+  const runZoomPreview = useCallback(() => {
+    if (!zoomRect) return
+    window.clearTimeout(zoomTimer.current)
+    setZoomActive(true)
+    zoomTimer.current = window.setTimeout(() => setZoomActive(false), zoom.duration_ms || 3000)
+  }, [zoom?.duration_ms, zoomRect])
 
   useEffect(() => {
-    setSnapshot(null); setError(''); setDynamicRects({})
+    setSnapshot(null); setError(''); setDynamicRects({}); setContentReady(false); setZoomActive(false)
     if (!useDom || !step.snapshot_url) return
     fetch(step.snapshot_url, { credentials: 'include' })
       .then(response => { if (!response.ok) throw new Error('DOM 快照加载失败'); return response.json() })
@@ -176,7 +255,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
       // failed reconstruction. A counter guarantees that the load effect runs
       // again instead of being swallowed by an already-true boolean state.
       if (event.data?.type === 'DOCFLOW_READY') setFrameReadyVersion(value => value + 1)
-      if (event.data?.type === 'DOCFLOW_LOADED') onReady?.()
+      if (event.data?.type === 'DOCFLOW_LOADED') { setContentReady(true); onReady?.() }
       if (event.data?.type === 'DOCFLOW_RECTS') setDynamicRects(event.data.rects || {})
       if (event.data?.type === 'DOCFLOW_HOTSPOT') {
         const hotspot = step.hotspots.find(item => item.id === event.data.hotspotId)
@@ -196,10 +275,32 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     }, '*')
   }, [snapshot, frameReadyVersion, step.id, step.hotspots, step.scroll_state, mode])
 
+  useEffect(() => {
+    if (!error) return
+    const frame = requestAnimationFrame(() => { setContentReady(true); onReady?.() })
+    return () => cancelAnimationFrame(frame)
+  }, [error, onReady])
+
+  useEffect(() => {
+    if (mode !== 'player' || !contentReady || !zoom?.enabled || !zoomRect) return
+    const start = window.setTimeout(runZoomPreview, 250)
+    return () => { window.clearTimeout(start); window.clearTimeout(zoomTimer.current); setZoomActive(false) }
+  }, [mode, contentReady, step.id, zoom?.enabled, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h, runZoomPreview])
+
+  useEffect(() => () => window.clearTimeout(zoomTimer.current), [])
+
   const activeId = activeHotspotId || step.hotspots[0]?.id
   const stageHeight = fit === 'viewport' ? Math.max(1, step.viewport_height * scale) : Math.max(240, step.viewport_height * scale)
   const stageWidth = fit === 'viewport' ? Math.max(1, step.viewport_width * scale) : undefined
   const fallback = !useDom || Boolean(error)
+  const showDomFrame = useDom && !error && Boolean(snapshot)
+  const showScreenshot = fallback || !contentReady
+  const zoomTransform = useMemo(() => {
+    if (!zoomActive || !zoomRect) return { scale: 1, x: 0, y: 0, css: 'translate(0, 0) scale(1)' }
+    const zoomScale = Math.max(1, Math.min(4, Math.min(1 / zoomRect.w, 1 / zoomRect.h) * .94))
+    const x = .5 - zoomRect.x * zoomScale, y = .5 - zoomRect.y * zoomScale
+    return { scale: zoomScale, x, y, css: `translate(${x * 100}%, ${y * 100}%) scale(${zoomScale})` }
+  }, [zoomActive, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h])
   // SnapshotFrame is trusted DocFlow code and needs same-origin access to the
   // script-free inner iframe created by rrweb. Captured content stays in the
   // inner iframe, whose sandbox does not permit scripts.
@@ -207,7 +308,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     {error && <div className="capture-warning">{error}，已切换截图预览。</div>}
     <div
       ref={wrapperRef}
-      className={`slide-stage ${mode}`}
+      className={`slide-stage ${mode} ${zoomActive ? 'zoom-previewing' : ''}`}
       style={{ width: stageWidth, height: stageHeight, aspectRatio: `${step.viewport_width}/${step.viewport_height}` }}
       onClick={event => {
         if (mode !== 'editor' || !fallback || !onTarget) return
@@ -215,20 +316,27 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
         onTarget({ selector: {}, rect: { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height, w: .05, h: .05 } })
       }}
     >
-      {fallback ? <img src={step.image_url} draggable={false} alt={step.title} onLoad={onReady} /> : <iframe
-        ref={iframeRef}
-        title={step.title}
-        src="/snapshot-frame"
-        sandbox="allow-scripts allow-same-origin"
-        style={{ width: step.viewport_width, height: step.viewport_height, transform: `scale(${scale})` }}
-      />}
-      {step.hotspots.map(hotspot => <HotspotLayer
-        key={hotspot.id} hotspot={hotspot} rect={dynamicRects[hotspot.id] || hotspot.fallback_rect}
+      <div className={`slide-visual-surface ${zoomActive ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css }}>
+        {showScreenshot && <img src={step.image_url} draggable={false} alt={step.title} onLoad={() => {
+          if (fallback) { setContentReady(true); onReady?.() }
+        }} />}
+        {showDomFrame && <iframe
+          ref={iframeRef}
+          title={step.title}
+          src="/snapshot-frame"
+          sandbox="allow-scripts allow-same-origin"
+          style={{ width: step.viewport_width, height: step.viewport_height, transform: `scale(${scale})`, opacity: contentReady ? 1 : 0 }}
+        />}
+      </div>
+      {!contentReady && <div className="slide-transition-loading"><span /><b>正在加载下一步…</b></div>}
+      {contentReady && step.hotspots.map(hotspot => <HotspotLayer
+        key={hotspot.id} hotspot={hotspot} rect={zoomedRect(dynamicRects[hotspot.id] || hotspot.fallback_rect, zoomTransform.scale, zoomTransform.x, zoomTransform.y)}
         active={hotspot.id === activeId} mode={mode} wrapper={wrapperRef.current} theme={theme} navigation={navigation} stepIndex={stepIndex} stepCount={stepCount}
         onActivate={() => onHotspot?.(hotspot)} onSelect={() => onSelectHotspot?.(hotspot)}
         onGuidePrevious={onGuidePrevious} onGuideNext={() => onGuideNext?.(hotspot)}
         onRectChange={rect => onRectChange?.(hotspot, rect)}
       />)}
+      {contentReady && showZoomEditor && zoomRect && !zoomActive && <ZoomRegionLayer rect={zoomRect} wrapper={wrapperRef.current} hotspots={step.hotspots} onChange={onZoomRectChange} onPreview={runZoomPreview} onDelete={onZoomDelete} />}
     </div>
   </div>
 }

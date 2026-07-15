@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "DocFlow Recorder",
   "description": "将网页操作录制为 DocFlow 交互文档",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "action": { "default_popup": "popup.html", "default_title": "DocFlow Recorder" },

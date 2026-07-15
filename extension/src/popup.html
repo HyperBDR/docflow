@@ -1,19 +1,16 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><link rel="stylesheet" href="popup.css"></head><body>
-  <main><h1><span>◉</span> DocFlow</h1><div id="message"></div>
-    <section id="connect"><label>DocFlow API 地址<input id="api" value="http://localhost:8001"></label><label>六位配对码<input id="code" maxlength="6" inputmode="numeric" placeholder="000000"></label><button id="pair">连接账号</button></section>
+  <main><header><span class="logo">◉</span><div><h1>DocFlow</h1><small>RECORDER</small></div></header><div id="message"></div>
+    <section id="connect"><label><span data-i18n="apiAddress">DocFlow API 地址</span><input id="api" value="http://localhost:8001"></label><label><span data-i18n="pairingCode">六位配对码</span><input id="code" maxlength="6" inputmode="numeric" placeholder="000000"></label><button id="pair" data-i18n="connect">连接账号</button></section>
     <section id="recorder" hidden>
-      <div id="setup"><label>选择演示<select id="demo"></select></label>
-        <fieldset><legend>录制模式</legend>
-          <label class="mode-card"><input type="radio" name="mode" value="html" checked><span><strong>HTML Cloning</strong><small>克隆 HTML 与 CSS，生成像素级、可交互步骤</small><em>推荐销售与产品演示</em></span></label>
-          <label class="mode-card"><input type="radio" name="mode" value="screenshot"><span><strong>Screenshot</strong><small>每次点击保存静态截图，兼容复杂页面</small></span></label>
-        </fieldset>
-        <button id="start">开始录制当前标签页</button>
+      <div id="setup"><label><span data-i18n="chooseDemo">选择演示</span><select id="demo"></select></label>
+        <div class="setup-note"><span class="setup-icon">✦</span><p data-i18n="setupHint">录制模式、AI 和快速教学将在当前页面中打开。</p></div>
+        <button id="start"><span>↗</span><b data-i18n="openRecorder">开始录制当前标签页</b></button>
       </div>
       <div id="active-recording" hidden>
         <div class="recording-summary"><span class="record-dot"></span><div><strong id="record-status">Recording</strong><small id="record-mode"></small></div><b id="step-count">0 Steps</b></div>
-        <button id="pause" class="secondary">Pause</button><button id="stop" class="danger">Stop Recording</button>
+        <div class="active-actions"><button id="pause" class="secondary">Pause</button><button id="stop" class="danger" data-i18n="stop">Stop Recording</button></div>
       </div>
-      <button id="disconnect" class="link">断开账号</button>
+      <button id="disconnect" class="link" data-i18n="disconnect">断开账号</button>
     </section>
   </main><script src="popup.js"></script>
 </body></html>

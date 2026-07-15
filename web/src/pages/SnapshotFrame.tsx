@@ -18,10 +18,17 @@ function isInjectedNode(node: Record<string, any>, parentTag = '') {
   const classes = new Set(String(attributes.class || '').split(/\s+/))
   return (
     (parentTag === 'html' && tag !== 'head' && tag !== 'body')
+    || (tag === 'body' && parentTag !== 'html')
     || tag === 'chatgpt-sidebar'
     || tag === 'doubao-ai-csui'
+    || tag.startsWith('sider-')
     || id.startsWith('aix-')
     || id.startsWith('doubao-ai-')
+    || id.startsWith('cici-')
+    || id.startsWith('sider-')
+    || id === 'host-style-container'
+    || id === 'cici-inline-container'
+    || classes.has('mamba-table-floating-scroll')
     || classes.has('docflow-recorder-ui')
   )
 }

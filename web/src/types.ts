@@ -34,6 +34,7 @@ export type Step = {
   capture_warnings: string[]
   manual_fields: string[]
   ai_metadata: { warnings?: string[]; redundant?: boolean; job_id?: string }
+  animation: { zoom?: { enabled?: boolean; rect?: Rect; duration_ms?: number } }
   hotspots: HotspotData[]
 }
 
@@ -45,9 +46,11 @@ export type Demo = {
   created_at: string
   updated_at: string
   steps: Step[]
+  thumbnail_url?: string
   share_url?: string
   theme: Record<string, any>
   navigation: Record<string, any>
+  playback: { autoplay?: boolean; step_duration_ms?: number; transition_delay_ms?: number; loop?: boolean }
   manual_fields: string[]
   ai_enabled: boolean
 }

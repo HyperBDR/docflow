@@ -11,7 +11,7 @@ from app.storage import storage
 
 BLOCKED_TAGS = {"script", "iframe", "frame", "object", "embed", "applet", "base", "portal"}
 INJECTED_TAGS = {"chatgpt-sidebar", "doubao-ai-csui"}
-INJECTED_ID_PREFIXES = ("aix-", "doubao-ai-")
+INJECTED_ID_PREFIXES = ("aix-", "doubao-ai-", "cici-", "sider-")
 URL_ATTRIBUTES = {"src", "href", "xlink:href", "srcset", "poster", "action", "formaction"}
 BLOCKED_ATTRIBUTES = {"srcdoc", "nonce", "integrity", "ping", "autofocus"}
 CSS_IMPORT = re.compile(r"@import\s+[^;]+;?", re.I)
@@ -32,7 +32,10 @@ def injected_node(tag: str, attrs: dict) -> bool:
     classes = set(str(attrs.get("class", "")).split())
     return (
         tag in INJECTED_TAGS
+        or tag.startswith("sider-")
         or "docflow-recorder-ui" in classes
+        or "mamba-table-floating-scroll" in classes
+        or element_id in {"host-style-container", "cici-inline-container"}
         or element_id.startswith(INJECTED_ID_PREFIXES)
     )
 
@@ -84,13 +87,16 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
             # those before body and a blocked full-screen host can push the real
             # application below the viewport.
             if parent_tag == "html" and tag not in {"head", "body"}:
-                warnings.append(f"removed injected <{tag}> outside <body>")
+                return None
+            # Browser translation/assistant extensions sometimes inject an
+            # invalid nested <body>. rrweb can move that node during rebuild
+            # and displace the actual application, so only the document body
+            # directly below <html> is retained.
+            if tag == "body" and parent_tag != "html":
                 return None
             if injected_node(tag, attrs):
-                warnings.append(f"removed recorder or browser-extension <{tag}> element")
                 return None
             if tag in BLOCKED_TAGS or (tag == "meta" and str(attrs.get("http-equiv", "")).lower() == "refresh"):
-                warnings.append(f"removed unsafe <{tag}> element")
                 return None
             cleaned: dict[str, str] = {}
             for raw_name, raw_value in attrs.items():
@@ -104,7 +110,19 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
                     if allowed is not None:
                         cleaned[original_name] = allowed
                     elif value:
-                        warnings.append(f"removed external {name} from <{tag}>")
+                        has_inline_css = tag == "link" and bool(attrs.get("_cssText") or attrs.get("_csstext"))
+                        has_inline_image = tag == "img" and bool(attrs.get("rr_dataURL") or attrs.get("rr_dataurl"))
+                        relation = str(attrs.get("rel", "")).lower()
+                        # Scripts, navigation links, icons/preloads, and the
+                        # original URL of an already-inlined asset are expected
+                        # to be removed in a static replay. Only report a real
+                        # visual degradation that the recorder could not inline.
+                        if tag == "link" and "stylesheet" in relation and not has_inline_css:
+                            warnings.append("Stylesheet could not be embedded; preview may differ from the source page")
+                        elif tag == "img" and name in {"src", "srcset"} and not has_inline_image:
+                            warnings.append("Image could not be embedded; preview may differ from the source page")
+                        elif tag == "use" and name == "xlink:href":
+                            warnings.append("SVG icon resource could not be embedded; preview may omit some icons")
                     continue
                 if name in {"style", "_csstext"}:
                     cleaned[original_name] = sanitize_css(value)
@@ -182,6 +200,8 @@ def sanitize_page_context(value: dict) -> dict:
     if not isinstance(value, dict):
         return {}
     result: dict = {}
+    if value.get("manual_capture") is True:
+        result["manual_capture"] = True
     for key in ["page_title", "target_text", "target_role", "target_aria", "nearby_text", "visible_text"]:
         if key in value:
             limit = 6000 if key == "visible_text" else 1500

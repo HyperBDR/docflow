@@ -102,7 +102,10 @@ export default function Dashboard() {
     <div className="demo-grid">
       {filtered.map(demo => <article className={`demo-card ${selected.has(demo.id) ? 'selected' : ''}`} key={demo.id}>
         <label className="card-select" title="选择资源"><input type="checkbox" checked={selected.has(demo.id)} onChange={() => toggle(demo.id)} /></label>
-        <Link to={`/demos/${demo.id}`} className="demo-preview"><span>{demo.status === 'published' ? <Icon name="play" size={38} /> : <Icon name="image" size={38} />}</span><em>{demo.status === 'published' ? 'HTML 演示' : '草稿'}</em></Link>
+        <Link to={`/demos/${demo.id}`} className={`demo-preview ${demo.thumbnail_url ? 'has-image' : ''}`}>
+          {demo.thumbnail_url ? <img src={demo.thumbnail_url} alt={`${demo.title} 缩略图`} loading="lazy" /> : <span><Icon name="image" size={38} /></span>}
+          <em><Icon name={demo.status === 'published' ? 'play' : 'edit'} size={11} />{demo.status === 'published' ? '交互演示' : '草稿'}</em>
+        </Link>
         <div className="demo-card-body"><div className="demo-card-title"><h3 title={demo.title}>{demo.title}</h3><span className={`status ${demo.status}`}>{demo.status === 'published' ? '已发布' : '草稿'}</span></div><p>更新于 {new Date(demo.updated_at).toLocaleString()}</p></div>
         <div className="card-actions">
           <Link to={`/demos/${demo.id}`} className="card-action"><Icon name="edit" />编辑</Link>

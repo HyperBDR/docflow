@@ -25,6 +25,23 @@ class Redaction(Hotspot):
     pass
 
 
+class PlaybackConfig(BaseModel):
+    autoplay: bool = False
+    step_duration_ms: int = Field(default=2000, ge=250, le=60000)
+    transition_delay_ms: int = Field(default=1000, ge=0, le=30000)
+    loop: bool = False
+
+
+class ZoomAnimation(BaseModel):
+    enabled: bool = True
+    rect: Hotspot
+    duration_ms: int = Field(default=3000, ge=500, le=10000)
+
+
+class StepAnimation(BaseModel):
+    zoom: ZoomAnimation | None = None
+
+
 TooltipPlacement = Literal[
     "auto", "top", "top-start", "top-end", "bottom", "bottom-start", "bottom-end",
     "left", "left-start", "left-end", "right", "right-start", "right-end",
@@ -58,7 +75,7 @@ class TooltipConfig(BaseModel):
 class HotspotStyle(BaseModel):
     shape: Literal["rectangle", "circle"] = "rectangle"
     pulse: bool = True
-    spotlight: bool = True
+    spotlight: bool = False
     padding: int = Field(default=6, ge=0, le=100)
     color: str = Field(default="#635bff", max_length=32)
     overlay_opacity: float = Field(default=0.45, ge=0, le=0.9)
@@ -115,6 +132,7 @@ class StepOut(BaseModel):
     capture_warnings: list = Field(default_factory=list)
     manual_fields: list = Field(default_factory=list)
     ai_metadata: dict = Field(default_factory=dict)
+    animation: dict = Field(default_factory=dict)
     hotspots: list[HotspotOut] = Field(default_factory=list)
 
 
@@ -128,6 +146,7 @@ class DemoUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     theme: dict | None = None
     navigation: dict | None = None
+    playback: PlaybackConfig | None = None
 
 
 class StepUpdate(BaseModel):
@@ -138,6 +157,7 @@ class StepUpdate(BaseModel):
     duration: float | None = Field(default=None, ge=1, le=15)
     position: int | None = Field(default=None, ge=0)
     render_mode: Literal["image", "dom"] | None = None
+    animation: StepAnimation | None = None
 
 
 class DemoOut(BaseModel):
@@ -148,9 +168,11 @@ class DemoOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     steps: list[StepOut] = []
+    thumbnail_url: str | None = None
     share_url: str | None = None
     theme: dict = Field(default_factory=dict)
     navigation: dict = Field(default_factory=dict)
+    playback: dict = Field(default_factory=dict)
     manual_fields: list = Field(default_factory=list)
     ai_enabled: bool = False
 
@@ -163,6 +185,7 @@ class RecordingStepMeta(BaseModel):
     viewport_height: int = Field(gt=0, le=10000)
     hotspot: Hotspot
     duration: float = Field(default=3, ge=1, le=15)
+    ai_enabled: bool = True
     password_rect: Redaction | None = None
 
 
@@ -173,6 +196,7 @@ class RecordingDomMeta(BaseModel):
     viewport_width: int = Field(gt=0, le=10000)
     viewport_height: int = Field(gt=0, le=10000)
     duration: float = Field(default=3, ge=1, le=15)
+    ai_enabled: bool = True
     terminal: bool = False
     target: SelectorInfo | None = None
     hotspot: Hotspot | None = None

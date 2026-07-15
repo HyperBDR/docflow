@@ -23,6 +23,13 @@ DEFAULT_NAVIGATION = {
     "show_progress": True,
 }
 
+DEFAULT_PLAYBACK = {
+    "autoplay": False,
+    "step_duration_ms": 2000,
+    "transition_delay_ms": 1000,
+    "loop": False,
+}
+
 DEFAULT_TOOLTIP = {
     "content": "",
     "placement": "auto",
@@ -35,7 +42,7 @@ DEFAULT_TOOLTIP = {
 DEFAULT_HOTSPOT_STYLE = {
     "shape": "rectangle",
     "pulse": True,
-    "spotlight": True,
+    "spotlight": False,
     "padding": 6,
     "color": "#635bff",
     "overlay_opacity": 0.45,

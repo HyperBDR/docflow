@@ -92,7 +92,6 @@ export function passwordRects(): Rect[] {
 export function captureWarnings(): string[] {
   const warnings: string[] = []
   if (document.querySelector('canvas')) warnings.push('Canvas content may use a raster fallback')
-  if (document.querySelector('video')) warnings.push('Video playback is not included in the DOM snapshot')
   if (document.querySelector('iframe')) warnings.push('Cross-origin iframe content may use a raster fallback')
   return warnings
 }
@@ -105,10 +104,17 @@ function isInjectedNode(node: Record<string, any>, parentTag = '') {
   const classes = new Set(String(attributes.class || '').split(/\s+/))
   return (
     (parentTag === 'html' && tag !== 'head' && tag !== 'body')
+    || (tag === 'body' && parentTag !== 'html')
     || tag === 'chatgpt-sidebar'
     || tag === 'doubao-ai-csui'
+    || tag.startsWith('sider-')
     || id.startsWith('aix-')
     || id.startsWith('doubao-ai-')
+    || id.startsWith('cici-')
+    || id.startsWith('sider-')
+    || id === 'host-style-container'
+    || id === 'cici-inline-container'
+    || classes.has('mamba-table-floating-scroll')
     || classes.has('docflow-recorder-ui')
   )
 }

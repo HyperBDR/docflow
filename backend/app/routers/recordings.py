@@ -65,7 +65,7 @@ async def upload_step(
     except IntegrityError:
         db.rollback()
         step = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.event_id == parsed.event_id))
-    if settings.ai_enabled and settings.ai_api_key and step:
+    if parsed.ai_enabled and settings.ai_enabled and settings.ai_api_key and step:
         try:
             enqueue_ai_job(db, demo, user, step.id)
         except Exception:
@@ -158,7 +158,7 @@ async def upload_dom_slide(
     except IntegrityError:
         db.rollback()
         step = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.event_id == parsed.event_id))
-    if settings.ai_enabled and settings.ai_api_key and step:
+    if parsed.ai_enabled and settings.ai_enabled and settings.ai_api_key and step:
         try:
             enqueue_ai_job(db, demo, user, step.id)
         except Exception:

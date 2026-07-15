@@ -40,7 +40,7 @@ def render_export(job_id: str):
             else:
                 data = render_pdf(revision.snapshot)
         else:
-            data = render_markdown_zip(revision.snapshot)
+            data = render_markdown_zip(revision.snapshot, share.token if share else None)
         extension = {"pdf": "pdf", "mp4": "mp4", "markdown": "zip"}[job.kind]
         job.result_key = storage.write(f"exports/{job.id}.{extension}", data)
         job.status = JobStatus.complete

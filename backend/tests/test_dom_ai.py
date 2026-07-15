@@ -50,7 +50,32 @@ def test_snapshot_sanitizer_removes_active_content():
     assert "aix-drop-panel" not in encoded
     assert "docflow-recorder-ui" not in encoded
     assert '"id": 6' in encoded
-    assert warnings
+    # Routine security actions are intentionally silent in the editor. They
+    # are expected for every static clone and are not rendering failures.
+    assert warnings == []
+
+
+def test_snapshot_sanitizer_only_warns_for_missing_visual_assets():
+    payload = rrweb_payload()
+    head = payload["snapshot"]["childNodes"][0]["childNodes"][0]
+    body = payload["snapshot"]["childNodes"][0]["childNodes"][1]
+    head["childNodes"].append({
+        "type": 2, "id": 20, "tagName": "link",
+        "attributes": {"rel": "stylesheet", "href": "https://assets.test/app.css"}, "childNodes": [],
+    })
+    body["childNodes"].append({
+        "type": 2, "id": 21, "tagName": "img",
+        "attributes": {"src": "https://assets.test/logo.png", "rr_dataURL": "data:image/png;base64,AA=="}, "childNodes": [],
+    })
+    body["childNodes"].append({
+        "type": 2, "id": 22, "tagName": "body",
+        "attributes": {"id": "cici-inline-container"}, "childNodes": [],
+    })
+    value, warnings = sanitize_snapshot(payload)
+    encoded = json.dumps(value)
+    assert "cici-inline-container" not in encoded
+    assert "data:image/png;base64,AA==" in encoded
+    assert warnings == ["Stylesheet could not be embedded; preview may differ from the source page"]
 
 
 def test_dom_slide_hotspot_and_public_playback(authenticated):

@@ -4,10 +4,11 @@ import { API_URL } from '../api'
 import SlideStage from '../components/SlideStage'
 import type { Demo, HotspotData, Step } from '../types'
 
-type Published = Pick<Demo, 'title' | 'description' | 'theme' | 'navigation'> & { steps: Step[] }
+type Published = Pick<Demo, 'title' | 'description' | 'theme' | 'navigation' | 'playback'> & { steps: Step[] }
 
 const defaultTheme = { primary_color: '#635bff', tooltip: { background: '#fff', text_color: '#172033', border_color: '#e2e6ed', radius: 12 } }
 const defaultNavigation = { previous_label: '上一步', next_label: '下一步', previous_color: '#fff', next_color: '#635bff', text_color: '#172033', next_text_color: '#fff', radius: 9, show_previous: true, show_next: true, show_progress: true }
+const defaultPlayback = { autoplay: false, step_duration_ms: 2000, transition_delay_ms: 1000, loop: false }
 
 export default function Player() {
   const { token } = useParams()
@@ -30,11 +31,24 @@ export default function Player() {
   useEffect(() => setReady(false), [index])
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowRight' || event.key === ' ') setIndex(value => Math.min((demo?.steps.length || 1) - 1, value + 1))
-      if (event.key === 'ArrowLeft') setIndex(value => Math.max(0, value - 1))
+      if (!ready) return
+      if (event.key === 'ArrowRight' || event.key === ' ') goTo(index + 1)
+      if (event.key === 'ArrowLeft') goTo(index - 1)
     }
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
-  }, [demo])
+  }, [demo, index, ready])
+  useEffect(() => {
+    if (!demo || exportMode || !ready) return
+    const playback = { ...defaultPlayback, ...(demo.playback || {}) }
+    if (!playback.autoplay || demo.steps.length < 2) return
+    const duration = Math.max(250, Math.min(60000, Number(playback.step_duration_ms) || 2000))
+    const transitionDelay = Math.max(0, Math.min(30000, Number(playback.transition_delay_ms) || 0))
+    const timer = window.setTimeout(() => {
+      if (index < demo.steps.length - 1) goTo(index + 1)
+      else if (playback.loop) goTo(0)
+    }, duration + transitionDelay)
+    return () => window.clearTimeout(timer)
+  }, [demo, exportMode, index, ready])
 
   if (!demo) return <main className="player-shell center-page">{error || '正在加载演示…'}</main>
   const step = demo.steps[index]
@@ -42,10 +56,18 @@ export default function Player() {
   const theme = { ...defaultTheme, ...(demo.theme || {}), tooltip: { ...defaultTheme.tooltip, ...(demo.theme?.tooltip || {}) } }
   const navigation = { ...defaultNavigation, ...(demo.navigation || {}) }
 
+  function goTo(next: number) {
+    if (!ready) return
+    const target = Math.max(0, Math.min(demo!.steps.length - 1, next))
+    if (target === index) return
+    setReady(false)
+    setIndex(target)
+  }
+
   function activate(hotspot: HotspotData) {
     if (hotspot.action.type === 'goto' && hotspot.action.target_step_id) {
       const target = demo!.steps.findIndex(item => item.id === hotspot.action.target_step_id)
-      if (target >= 0) setIndex(target)
+      if (target >= 0) goTo(target)
       return
     }
     if (hotspot.action.type === 'link' && hotspot.action.url) {
@@ -53,26 +75,26 @@ export default function Player() {
       return
     }
     if (hotspot.action.type === 'end') {
-      setIndex(demo!.steps.length - 1)
+      goTo(demo!.steps.length - 1)
       return
     }
-    setIndex(value => Math.min(demo!.steps.length - 1, value + 1))
+    goTo(index + 1)
   }
 
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
     <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><button onClick={() => document.documentElement.requestFullscreen()}>全屏</button></header>
-    <section className="player-stage"><SlideStage
+    <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage key={step.id}
       step={step} mode="player" fit="viewport" theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
-      onHotspot={activate} onGuidePrevious={() => setIndex(value => Math.max(0, value - 1))} onGuideNext={activate} onReady={() => setReady(true)}
+      onHotspot={activate} onGuidePrevious={() => goTo(index - 1)} onGuideNext={activate} onReady={() => setReady(true)}
     /></section>
     <footer>
       <button
-        hidden={!navigation.show_previous} disabled={index === 0} onClick={() => setIndex(index - 1)}
+        hidden={!navigation.show_previous} disabled={!ready || index === 0} onClick={() => goTo(index - 1)}
         style={{ background: navigation.previous_color, color: navigation.text_color, borderRadius: navigation.radius }}
       >← {navigation.previous_label}</button>
       <div><h2>{step.title || `步骤 ${index + 1}`}</h2><p>{step.body}</p>{navigation.show_progress && <div className="player-progress"><span style={{ width: `${(index + 1) / demo.steps.length * 100}%`, background: theme.primary_color }} /></div>}</div>
       <button
-        hidden={!navigation.show_next} disabled={index === demo.steps.length - 1} onClick={() => setIndex(index + 1)}
+        hidden={!navigation.show_next} disabled={!ready || index === demo.steps.length - 1} onClick={() => goTo(index + 1)}
         style={{ background: navigation.next_color, color: navigation.next_text_color, borderRadius: navigation.radius }}
       >{navigation.next_label} →</button>
     </footer>

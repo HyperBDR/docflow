@@ -1,4 +1,5 @@
 import type { Credentials, Recording, RecordingMode } from './types'
+import { browserLocale } from './locale'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
 let recording: Recording | null = null
@@ -35,6 +36,7 @@ async function notify(state: Recording | null) {
     await chrome.tabs.sendMessage(state.tabId, {
       type: 'RECORDING_STATE', active: state.active, paused: state.paused,
       capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode,
+      aiEnabled: state.aiEnabled, locale: state.locale,
     })
   } catch { /* restricted or navigating page */ }
   const badge = !state.active ? '' : state.capturing ? '…' : state.paused ? 'Ⅱ' : state.steps ? (state.steps > 99 ? '99+' : String(state.steps)) : 'REC'
@@ -43,14 +45,14 @@ async function notify(state: Recording | null) {
   await chrome.action.setTitle({ tabId: state.tabId, title: state.active ? `${state.steps} Steps Recorded · ${state.mode === 'html' ? 'HTML Cloning' : 'Screenshot'}` : 'DocFlow Recorder' })
 }
 
-async function begin(demoId: string, mode: RecordingMode = 'html') {
+async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number) {
   const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
   if (!auth || !tab.id || !tab.url?.startsWith('http')) throw new Error('请打开可录制的网页并确认扩展已连接')
   recording = {
     tabId: tab.id, demoId, api: auth.api, token: auth.token,
     screenshot: await capture(tab.id), active: true, paused: false,
-    capturing: false, phase: '', steps: 0, mode,
+    capturing: false, phase: '', steps: 0, mode, aiEnabled, locale: browserLocale(),
   }
   await persist(recording)
   await notify(recording)
@@ -66,6 +68,7 @@ async function restore(): Promise<Recording | null> {
       paused: Boolean(saved.paused), capturing: false,
       phase: '',
       steps: Number(saved.steps || 0), mode: saved.mode || 'html',
+      aiEnabled: Boolean(saved.aiEnabled), locale: saved.locale || browserLocale(),
     }
     return recording
   } catch { await chrome.storage.session.remove('recording'); return null }
@@ -112,6 +115,36 @@ async function inlineCssAssets(css: string, stylesheetUrl: string, budget: { rem
   return css
 }
 
+async function inlineCssImports(
+  css: string,
+  stylesheetUrl: string,
+  budget: { remaining: number },
+  seen = new Set<string>(),
+  depth = 0,
+) {
+  if (depth >= 3 || budget.remaining <= 0) return css
+  const imports = [...css.matchAll(/@import\s+(?:url\(\s*)?(['"]?)([^'"\)\s;]+)\1\s*\)?\s*([^;]*);/gi)].slice(0, 12)
+  for (const match of imports) {
+    const original = match[0], raw = match[2].trim(), media = match[3].trim()
+    if (!raw || raw.startsWith('data:')) continue
+    try {
+      const url = new URL(raw, stylesheetUrl).href
+      if (seen.has(url)) { css = css.replace(original, ''); continue }
+      seen.add(url)
+      const response = await fetch(url, { credentials: 'include' })
+      if (!response.ok) continue
+      let imported = await response.text()
+      const bytes = new TextEncoder().encode(imported).byteLength
+      if (bytes > 1_500_000 || bytes > budget.remaining) continue
+      budget.remaining -= bytes
+      imported = await inlineCssImports(imported, url, budget, seen, depth + 1)
+      imported = await inlineCssAssets(imported, url, budget)
+      css = css.replace(original, media ? `@media ${media}{${imported}}` : imported)
+    } catch { /* the server removes an unresolved @import safely */ }
+  }
+  return css
+}
+
 async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl: string): Promise<Record<string, any> | undefined> {
   if (!snapshot?.snapshot) return snapshot
   const nodes: Record<string, any>[] = []
@@ -127,6 +160,7 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
       if (!response.ok) continue
       let css = await response.text()
       if (css.length > 2_000_000) continue
+      css = await inlineCssImports(css, url, budget, new Set([url]))
       css = await inlineCssAssets(css, url, budget)
       node.attributes = { ...attrs, href: '', _cssText: css }
       delete node.attributes.integrity
@@ -150,7 +184,7 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
   if (!state.active || !state.screenshot) throw new Error('录制状态已结束')
   const response = await fetch(screenshotOverride || state.screenshot)
   const form = new FormData()
-  form.append('meta', JSON.stringify(data))
+  form.append('meta', JSON.stringify({ ...data, ai_enabled: state.aiEnabled }))
   form.append('screenshot', await response.blob(), 'step.png')
   if (domSnapshot) form.append('snapshot', await gzipJson(domSnapshot), 'snapshot.json.gz')
   const upload = await fetch(`${state.api}/api/recordings/${state.demoId}/slides`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` }, body: form })
@@ -162,11 +196,11 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
   return upload.json() as Promise<{ id: string }>
 }
 
-async function recordStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording) {
+async function recordStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording, screenshotOverride?: string) {
   state.phase = 'uploading'; await persist(state); await notify(state)
   const pageUrl = String(data.page_context?.url || '')
   const enriched = state.mode === 'html' ? await enrichSnapshot(snapshot, pageUrl) : undefined
-  await uploadStep(data, enriched, undefined, state)
+  await uploadStep(data, enriched, screenshotOverride, state)
   if (recording === state && state.active) {
     try { state.screenshot = await captureClean(state.tabId) } catch { /* page may be navigating */ }
     state.steps += 1
@@ -197,9 +231,11 @@ async function stop(open = true) {
     const final = await chrome.tabs.sendMessage(state.tabId, { type: 'CAPTURE_FINAL' })
     if (final?.data) await uploadStep(final.data, state.mode === 'html' ? final.snapshot : undefined, await captureClean(state.tabId), state)
   } catch (error) { console.warn('DocFlow final slide:', error) }
-  try {
-    await fetch(`${state.api}/api/demos/${state.demoId}/ai/generate`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } })
-  } catch { /* AI is optional */ }
+  if (state.aiEnabled) {
+    try {
+      await fetch(`${state.api}/api/demos/${state.demoId}/ai/generate`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } })
+    } catch { /* AI is optional */ }
+  }
   state.active = false; state.capturing = false; state.phase = ''
   await notify(state)
   recording = null
@@ -214,15 +250,35 @@ async function stop(open = true) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   ;(async () => {
-    if (message.type === 'START') { await begin(message.demoId, message.mode); return { ok: true } }
+    if (message.type === 'OPEN_SETUP') {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id || !tab.url?.startsWith('http')) throw new Error('Please open a recordable web page first.')
+      await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_RECORDING_SETUP', demoId: message.demoId, aiAvailable: Boolean(message.aiAvailable), locale: browserLocale() })
+      return { ok: true }
+    }
+    if (message.type === 'START') { await begin(message.demoId, message.mode, Boolean(message.aiEnabled), sender.tab?.id); return { ok: true } }
     if (message.type === 'PAUSE') { const state = await pause(); return state ? { active: true, paused: state.paused, steps: state.steps, mode: state.mode } : { active: false } }
     if (message.type === 'STOP') { await stop(message.open !== false); return { ok: true } }
-    if (message.type === 'STATUS') { const state = await restore(); return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode } : { active: false, steps: 0 } }
+    if (message.type === 'STATUS') { const state = await restore(); return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale } : { active: false, steps: 0 } }
     if (message.type === 'IS_RECORDING') {
       const state = await restore()
       return state?.active && state.tabId === sender.tab?.id
-        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode }
+        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale }
         : { active: false }
+    }
+    if (message.type === 'MANUAL_STEP' && sender.tab?.id) {
+      const state = await restore()
+      if (!state || state.tabId !== sender.tab.id || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
+      state.capturing = true; state.phase = 'uploading'
+      await persist(state); await notify(state)
+      const screenshot = await captureClean(state.tabId)
+      const task = queue.then(() => recordStep(message.data, message.snapshot, state, screenshot))
+      queue = task.catch(() => {})
+      try { await task; return { accepted: true, steps: state.steps } }
+      catch (error) {
+        state.capturing = false; state.phase = ''; await persist(state); await notify(state)
+        throw error
+      }
     }
     if (message.type === 'STEP_EVENT' && sender.tab?.id) {
       const state = await restore()

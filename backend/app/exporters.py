@@ -1,6 +1,10 @@
 import io
+import json
+import os
+import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -70,7 +74,7 @@ def render_pdf(snapshot: dict) -> bytes:
 
 
 def render_player_images(snapshot: dict, token: str | None) -> list[Image.Image] | None:
-    if not token or not any(step.get("render_mode") == "dom" for step in snapshot.get("steps", [])):
+    if not token:
         return None
     try:
         from playwright.sync_api import sync_playwright
@@ -83,16 +87,22 @@ def render_player_images(snapshot: dict, token: str | None) -> list[Image.Image]
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
             page = browser.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
-            for index in range(len(snapshot["steps"])):
+            for index, step in enumerate(snapshot["steps"]):
+                page.set_viewport_size(export_viewport(step, 3840, 2160))
                 url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}"
                 page.goto(url, wait_until="networkidle", timeout=60_000)
                 page.wait_for_selector('main[data-export-ready="true"]', timeout=30_000)
-                content = page.locator("main.player-shell").screenshot(type="jpeg", quality=92)
+                zoom = (step.get("animation") or {}).get("zoom") or {}
+                page.wait_for_timeout(700 if zoom.get("enabled") and zoom.get("rect") else 150)
+                # PNG preserves the captured page's exact text and UI colors.
+                # Capturing the stage rather than the player shell excludes all
+                # title, fullscreen and footer navigation chrome.
+                content = page.locator("main.export-mode .slide-stage").screenshot(type="png")
                 pages.append(Image.open(io.BytesIO(content)).convert("RGB"))
             browser.close()
         return pages
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"interactive player rendering failed: {exc}") from exc
 
 
 def markdown_text(snapshot: dict, base_url: str, token: str | None = None, local: bool = False) -> str:
@@ -106,47 +116,124 @@ def markdown_text(snapshot: dict, base_url: str, token: str | None = None, local
     return "\n".join(lines)
 
 
-def render_markdown_zip(snapshot: dict) -> bytes:
+def render_markdown_zip(snapshot: dict, token: str | None = None) -> bytes:
+    rendered = render_player_images(snapshot, token)
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("README.md", markdown_text(snapshot, settings.public_base_url, local=True))
         for index, step in enumerate(snapshot["steps"], 1):
-            archive.writestr(f"images/{index:03d}.webp", storage.read(step["asset_key"]))
+            if rendered:
+                image = io.BytesIO()
+                rendered[index - 1].save(image, "WEBP", quality=92, method=6)
+                content = image.getvalue()
+            else:
+                content = storage.read(step["asset_key"])
+            archive.writestr(f"images/{index:03d}.webp", content)
     return output.getvalue()
 
 
 def render_mp4(snapshot: dict, token: str | None = None) -> bytes:
+    if not token:
+        raise RuntimeError("interactive player rendering requires an active share token")
+    if not snapshot.get("steps"):
+        raise RuntimeError("cannot render an empty demo")
     with tempfile.TemporaryDirectory(prefix="docflow-") as temp:
         directory = Path(temp)
-        manifest_lines: list[str] = []
-        previous = (960.0, 450.0)
-        frame_number = 0
-        rendered = render_player_images(snapshot, token)
-        for index, step in enumerate(snapshot["steps"], 1):
-            hotspot = (step.get("hotspots") or [{}])[0].get("fallback_rect", step.get("hotspot", {}))
-            target = (float(hotspot.get("x", 0.5)) * 1920, 62 + float(hotspot.get("y", 0.5)) * 898)
-            base = rendered[index - 1] if rendered else None
-            for part in range(6):
-                progress = (part + 1) / 6
-                pointer = (previous[0] + (target[0] - previous[0]) * progress, previous[1] + (target[1] - previous[1]) * progress)
-                path = directory / f"frame-{frame_number:05d}.jpg"
-                frame = base.copy() if base else slide(step, index)
-                draw = ImageDraw.Draw(frame)
-                draw.ellipse((pointer[0] - 16, pointer[1] - 16, pointer[0] + 16, pointer[1] + 16), fill="#ef4444", outline="white", width=4)
-                frame.save(path, "JPEG", quality=92)
-                manifest_lines += [f"file '{path.as_posix()}'", "duration 0.08"]
-                frame_number += 1
-            hold = directory / f"frame-{frame_number:05d}.jpg"
-            (base.copy() if base else slide(step, index)).save(hold, "JPEG", quality=92)
-            manifest_lines += [f"file '{hold.as_posix()}'", f"duration {max(1, min(15, float(step.get('duration', 3))))}"]
-            frame_number += 1
-            previous = target
-        manifest_lines.append(manifest_lines[-2])
-        manifest = directory / "frames.txt"
-        manifest.write_text("\n".join(manifest_lines), encoding="utf-8")
+        source_video = record_player_video(snapshot, token, directory)
         target_file = directory / "result.mp4"
-        command = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(manifest), "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-movflags", "+faststart", str(target_file)]
+        source_path, trim_start, duration = source_video
+        command = [
+            "ffmpeg", "-y", "-i", str(source_path), "-ss", f"{trim_start:.3f}", "-t", f"{duration:.3f}",
+            "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "medium",
+            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-movflags", "+faststart", str(target_file),
+        ]
         result = subprocess.run(command, capture_output=True, timeout=900)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.decode(errors="replace")[-2000:])
         return target_file.read_bytes()
+
+
+def export_viewport(step: dict, max_width: int, max_height: int) -> dict[str, int]:
+    width = max(320, int(step.get("viewport_width") or 1920))
+    height = max(240, int(step.get("viewport_height") or 1080))
+    ratio = min(1.0, max_width / width, max_height / height)
+    # Video codecs require even dimensions; using even values is harmless for
+    # browser screenshots and keeps one sizing rule across all export formats.
+    return {"width": max(2, int(width * ratio) // 2 * 2), "height": max(2, int(height * ratio) // 2 * 2)}
+
+
+def record_player_video(snapshot: dict, token: str, directory: Path) -> tuple[Path, float, float]:
+    try:
+        ensure_playwright_ffmpeg()
+        from playwright.sync_api import sync_playwright
+
+        viewport = export_viewport(snapshot["steps"][0], 1920, 1080)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                headless=True,
+                executable_path=settings.chromium_executable,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            context = browser.new_context(
+                viewport=viewport,
+                device_scale_factor=1,
+                record_video_dir=str(directory),
+                record_video_size=viewport,
+            )
+            started_at = time.monotonic()
+            page = context.new_page()
+            video = page.video
+            url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step=0"
+            page.goto(url, wait_until="networkidle", timeout=60_000)
+            page.wait_for_selector('main[data-export-ready="true"][data-step-index="0"]', timeout=30_000)
+            ready_at = time.monotonic()
+            page.wait_for_timeout(150)
+            for index, step in enumerate(snapshot["steps"]):
+                if index:
+                    page.keyboard.press("ArrowRight")
+                    page.wait_for_selector(
+                        f'main[data-export-ready="true"][data-step-index="{index}"]', timeout=30_000
+                    )
+                hold_ms = int(max(1, min(15, float(step.get("duration", 3)))) * 1000)
+                page.wait_for_timeout(hold_ms)
+            ended_at = time.monotonic()
+            context.close()
+            if video is None:
+                raise RuntimeError("Chromium did not create an export video")
+            source_path = Path(video.path())
+            browser.close()
+        trim_start = max(0.0, ready_at - started_at)
+        duration = max(0.1, ended_at - ready_at)
+        return source_path, trim_start, duration
+    except Exception as exc:
+        raise RuntimeError(f"interactive player video recording failed: {exc}") from exc
+
+
+def ensure_playwright_ffmpeg() -> None:
+    """Let Playwright recording reuse the distro FFmpeg already in the worker.
+
+    Playwright otherwise expects a second downloaded media binary in its cache.
+    Reading its bundled revision keeps this compatible with package upgrades and
+    avoids another large, slow external download during image builds.
+    """
+    import playwright
+
+    package = Path(playwright.__file__).parent / "driver" / "package"
+    registry = json.loads((package / "browsers.json").read_text(encoding="utf-8"))
+    revision = next(item["revision"] for item in registry["browsers"] if item["name"] == "ffmpeg")
+    configured = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    base = package / ".local-browsers" if configured == "0" else Path(configured).expanduser() if configured else Path.home() / ".cache" / "ms-playwright"
+    target = base / f"ffmpeg-{revision}" / "ffmpeg-linux"
+    if target.exists():
+        return
+    system_ffmpeg = shutil.which("ffmpeg")
+    if not system_ffmpeg:
+        raise RuntimeError("system ffmpeg is not installed")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.symlink_to(system_ffmpeg)
+    except FileExistsError:
+        pass
+    if not target.exists():
+        raise RuntimeError(f"could not prepare Playwright ffmpeg at {target}")

@@ -1,7 +1,6 @@
 import io
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -27,14 +26,6 @@ def create_export(payload: ExportCreate, demo_id: str, db: Session = Depends(get
     demo = owned_demo(db, demo_id, user)
     if not demo.current_revision_id:
         raise HTTPException(status_code=400, detail="publish the demo before exporting")
-    cached = db.scalar(
-        select(ExportJob).where(
-            ExportJob.owner_id == user.id, ExportJob.revision_id == demo.current_revision_id,
-            ExportJob.kind == payload.kind, ExportJob.status == JobStatus.complete,
-        ).order_by(ExportJob.created_at.desc())
-    )
-    if cached and cached.result_key and storage.exists(cached.result_key):
-        return export_out(cached)
     job = ExportJob(owner_id=user.id, demo_id=demo.id, revision_id=demo.current_revision_id, kind=payload.kind)
     db.add(job)
     db.commit()

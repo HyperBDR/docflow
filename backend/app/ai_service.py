@@ -82,7 +82,8 @@ def step_context(step: Step) -> dict:
         "target_aria": str(context.get("target_aria", ""))[:500],
         "nearby_text": str(context.get("nearby_text", ""))[:1500],
         "visible_text": str(context.get("visible_text", ""))[:4000],
-        "terminal": hotspot is None,
+        "manual_capture": bool(context.get("manual_capture", False)),
+        "terminal": hotspot is None and not context.get("manual_capture", False),
     }
 
 

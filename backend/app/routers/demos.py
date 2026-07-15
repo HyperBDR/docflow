@@ -68,6 +68,7 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
         description=source.description,
         theme=deepcopy(source.theme or {}),
         navigation=deepcopy(source.navigation or {}),
+        playback=deepcopy(source.playback or {}),
         manual_fields=sorted(set(source.manual_fields or []) | {"title"}),
     )
     db.add(duplicate)
@@ -91,6 +92,7 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
             capture_warnings=deepcopy(source_step.capture_warnings or []),
             manual_fields=deepcopy(source_step.manual_fields or []),
             ai_metadata=deepcopy(source_step.ai_metadata or {}),
+            animation=deepcopy(source_step.animation or {}),
             duration=source_step.duration,
         )
         db.add(step)
@@ -196,6 +198,7 @@ def publish_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depen
             "hotspot": step.hotspot, "hotspots": hotspots, "duration": step.duration,
             "asset_key": public_key, "render_mode": step.render_mode,
             "dom_snapshot_key": step.dom_snapshot_key, "scroll_state": step.scroll_state,
+            "animation": step.animation or {},
         })
     revision = PublishedRevision(
         id=revision_id,
@@ -203,7 +206,7 @@ def publish_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depen
         number=next_revision_number(db, demo.id),
         snapshot={
             "title": demo.title, "description": demo.description, "steps": steps,
-            "theme": demo.theme, "navigation": demo.navigation,
+            "theme": demo.theme, "navigation": demo.navigation, "playback": demo.playback,
         },
     )
     db.add(revision)
