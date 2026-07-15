@@ -9,6 +9,7 @@ import type { AIJob, Demo, ExportJob, HotspotData, Rect, SelectorInfo, Step } fr
 type InspectorTab = 'content' | 'hotspot' | 'tooltip' | 'theme' | 'animation' | 'ai'
 type CanvasMode = 'preview' | 'edit'
 type DetailMode = 'present' | 'edit'
+type ExportCenterAction = 'publish' | 'copy-share' | 'copy-markdown' | ExportJob['kind'] | null
 
 const defaultTooltip = { content: '点击此处继续', placement: 'auto', alignment: 'center' as const, offset: 12, max_width: 320, show_arrow: true }
 const defaultStyle = { shape: 'rectangle' as const, pulse: true, spotlight: false, padding: 6, color: '#635bff', overlay_opacity: .45 }
@@ -67,6 +68,7 @@ export default function Editor() {
   const [jobs, setJobs] = useState<ExportJob[]>([])
   const [aiJob, setAIJob] = useState<AIJob | null>(null)
   const [exportCenterOpen, setExportCenterOpen] = useState(false)
+  const [exportAction, setExportAction] = useState<ExportCenterAction>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
@@ -177,26 +179,43 @@ export default function Editor() {
     setDemo(current => current ? { ...current, steps: [...current.steps, step] } : current); setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null)
   }
   async function publish() {
-    try { setDemo(await api.publish(id)); setNotice('发布成功，公开版本已更新。') } catch (value) { setError((value as Error).message) }
+    if (exportAction) return
+    setExportAction('publish'); setError(''); setNotice('')
+    try { setDemo(await api.publish(id)); setNotice('发布成功，公开版本已更新。') }
+    catch (value) { setError((value as Error).message) }
+    finally { setExportAction(null) }
   }
   async function copyMarkdown() {
-    if (!demo?.share_url) return
-    const token = demo.share_url.split('/').pop(), response = await fetch(`${API_URL}/public/${token}/markdown`)
-    await copyText(await response.text()); setNotice('Markdown 已复制到剪贴板。')
+    if (!demo?.share_url || exportAction) return
+    setExportAction('copy-markdown'); setError(''); setNotice('')
+    try {
+      const token = demo.share_url.split('/').pop(), response = await fetch(`${API_URL}/public/${token}/markdown`)
+      if (!response.ok) throw new Error(`获取 Markdown 失败（${response.status}）`)
+      await copyText(await response.text()); setNotice('Markdown 已复制到剪贴板。')
+    } catch (value) { setError((value as Error).message) }
+    finally { setExportAction(null) }
   }
   async function copyShareLink() {
-    if (!demo?.share_url) return
-    await copyText(demo.share_url)
-    setNotice('共享链接已复制到剪贴板。')
+    if (!demo?.share_url || exportAction) return
+    setExportAction('copy-share'); setError(''); setNotice('')
+    try {
+      await copyText(demo.share_url)
+      setNotice('共享链接已复制到剪贴板。')
+    } catch (value) { setError((value as Error).message) }
+    finally { setExportAction(null) }
   }
   async function startExport(kind: ExportJob['kind']) {
+    if (exportAction) return
+    setExportAction(kind); setError(''); setNotice('')
     try {
       // Export the current editor state instead of a potentially stale
       // published revision, so timing/Zoom changes take effect immediately.
       setDemo(await api.publish(id))
       const job = await api.createExport(id, kind)
       setJobs(current => [job, ...current.filter(item => item.kind !== kind)])
+      setNotice('导出任务已创建，可在导出记录中查看进度。')
     } catch (value) { setError((value as Error).message) }
+    finally { setExportAction(null) }
   }
   async function generateAI(stepId?: string) {
     try { setAIJob(await api.generateAI(id, stepId)); setTab('ai') } catch (value) { setError((value as Error).message) }
@@ -261,6 +280,8 @@ export default function Editor() {
 
   if (!demo) return <main className="page"><Link to="/">← 返回</Link><div className="center-page">{error || '正在加载…'}</div></main>
   const presentationIndex = Math.max(0, demo.steps.findIndex(step => step.id === selected?.id))
+  const actionBusy = exportAction !== null
+  const pendingExportKind = exportAction === 'pdf' || exportAction === 'mp4' || exportAction === 'markdown' ? exportAction : null
   return <main className={`editor-page ${detailMode === 'present' ? 'presentation-mode' : 'editing-mode'}`}>
     <div className="editor-topbar">
       <div className="editor-context"><Link to="/" className="back">← 我的演示</Link><span className={`status ${demo.status}`}><i />{demo.status === 'published' ? '已发布' : '草稿'}</span></div>
@@ -276,7 +297,7 @@ export default function Editor() {
         </> : <button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />演示模式</button>}
         {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title="打开公开链接"><Icon name="share" /></a>}
         {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />AI 优化</button>}
-        <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''}`} onClick={() => setExportCenterOpen(value => !value)}><Icon name="share" />分享与导出</button>
+        <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''} ${actionBusy ? 'action-pending' : ''}`} aria-busy={actionBusy} disabled={actionBusy} onClick={() => setExportCenterOpen(value => !value)}>{actionBusy ? <span className="action-spinner" /> : <Icon name="share" />}{actionBusy ? '处理中…' : '分享与导出'}</button>
       </div>
     </div>
     {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
@@ -295,29 +316,34 @@ export default function Editor() {
 
           <section>
             <div className="export-section-heading"><span><Icon name="link" />共享链接</span></div>
-            {demo.share_url ? <div className="share-link-card"><span title={demo.share_url}>{demo.share_url}</span><button className="icon-button" onClick={copyShareLink}><Icon name="copy" />复制</button><a className="icon-button" href={demo.share_url} target="_blank" rel="noreferrer"><Icon name="play" />打开</a></div> : <div className="export-empty-note"><Icon name="link" /><span>当前资源尚未发布，发布后即可获得公开访问链接。</span></div>}
-            <button className="publish-version-button icon-button" onClick={publish}><Icon name="publish" />{demo.status === 'published' ? '更新当前发布版本' : '发布并创建共享链接'}</button>
+            {demo.share_url ? <div className="share-link-card"><span title={demo.share_url}>{demo.share_url}</span><button className={`icon-button ${exportAction === 'copy-share' ? 'action-pending' : ''}`} aria-busy={exportAction === 'copy-share'} disabled={actionBusy} onClick={copyShareLink}>{exportAction === 'copy-share' ? <span className="action-spinner" /> : <Icon name="copy" />}{exportAction === 'copy-share' ? '复制中' : '复制'}</button><a className="icon-button" href={demo.share_url} target="_blank" rel="noreferrer"><Icon name="play" />打开</a></div> : <div className="export-empty-note"><Icon name="link" /><span>当前资源尚未发布，发布后即可获得公开访问链接。</span></div>}
+            <button className={`publish-version-button icon-button ${exportAction === 'publish' ? 'action-pending' : ''}`} aria-busy={exportAction === 'publish'} disabled={actionBusy} onClick={publish}>{exportAction === 'publish' ? <span className="action-spinner" /> : <Icon name="publish" />}{exportAction === 'publish' ? '正在同步并发布…' : demo.status === 'published' ? '更新当前发布版本' : '发布并创建共享链接'}</button>
           </section>
 
           <section>
             <div className="export-section-heading"><span><Icon name="download" />导出格式</span><small>导出前会自动同步当前编辑内容</small></div>
             <div className="export-format-grid">
-              <button disabled={!demo.steps.length} onClick={() => startExport('pdf')}><span><Icon name="text" /></span><div><strong>PDF</strong><small>逐步骤高清页面</small></div><Icon name="download" /></button>
-              <button disabled={!demo.steps.length} onClick={() => startExport('mp4')}><span><Icon name="play" /></span><div><strong>MP4 视频</strong><small>包含引导与 Zoom</small></div><Icon name="download" /></button>
-              <button disabled={!demo.steps.length} onClick={() => startExport('markdown')}><span><Icon name="image" /></span><div><strong>文档图片包</strong><small>Markdown 与 WebP</small></div><Icon name="download" /></button>
-              <button disabled={!demo.share_url} onClick={copyMarkdown}><span><Icon name="copy" /></span><div><strong>复制 Markdown</strong><small>直接粘贴到文档</small></div><Icon name="copy" /></button>
+              <button className={exportAction === 'pdf' ? 'action-pending' : ''} aria-busy={exportAction === 'pdf'} disabled={actionBusy || !demo.steps.length} onClick={() => startExport('pdf')}><span><Icon name="text" /></span><div><strong>{exportAction === 'pdf' ? '正在创建 PDF…' : 'PDF'}</strong><small>{exportAction === 'pdf' ? '正在同步当前版本' : '逐步骤高清页面'}</small></div>{exportAction === 'pdf' ? <i className="action-spinner" /> : <Icon name="download" />}</button>
+              <button className={exportAction === 'mp4' ? 'action-pending' : ''} aria-busy={exportAction === 'mp4'} disabled={actionBusy || !demo.steps.length} onClick={() => startExport('mp4')}><span><Icon name="play" /></span><div><strong>{exportAction === 'mp4' ? '正在创建视频…' : 'MP4 视频'}</strong><small>{exportAction === 'mp4' ? '正在同步当前版本' : '包含引导与 Zoom'}</small></div>{exportAction === 'mp4' ? <i className="action-spinner" /> : <Icon name="download" />}</button>
+              <button className={exportAction === 'markdown' ? 'action-pending' : ''} aria-busy={exportAction === 'markdown'} disabled={actionBusy || !demo.steps.length} onClick={() => startExport('markdown')}><span><Icon name="image" /></span><div><strong>{exportAction === 'markdown' ? '正在创建图片包…' : '文档图片包'}</strong><small>{exportAction === 'markdown' ? '正在同步当前版本' : 'Markdown 与 WebP'}</small></div>{exportAction === 'markdown' ? <i className="action-spinner" /> : <Icon name="download" />}</button>
+              <button className={exportAction === 'copy-markdown' ? 'action-pending' : ''} aria-busy={exportAction === 'copy-markdown'} disabled={actionBusy || !demo.share_url} onClick={copyMarkdown}><span><Icon name="copy" /></span><div><strong>{exportAction === 'copy-markdown' ? '正在复制…' : '复制 Markdown'}</strong><small>{exportAction === 'copy-markdown' ? '正在获取文档内容' : '直接粘贴到文档'}</small></div>{exportAction === 'copy-markdown' ? <i className="action-spinner" /> : <Icon name="copy" />}</button>
             </div>
           </section>
 
           <section className="export-history-section">
-            <div className="export-section-heading"><span><Icon name="clock" />导出记录</span><small>{jobs.length ? `最近 ${jobs.length} 条` : '暂无记录'}</small></div>
-            <div className="export-history-list">
+            <div className="export-section-heading"><span><Icon name="clock" />导出记录</span><small>{pendingExportKind ? '正在创建任务' : jobs.length ? `最近 ${jobs.length} 条` : '暂无记录'}</small></div>
+            <div className="export-history-list" aria-live="polite">
+              {pendingExportKind && <article className="export-history-item creating">
+                <span className="export-history-kind"><Icon name={pendingExportKind === 'mp4' ? 'play' : pendingExportKind === 'pdf' ? 'text' : 'image'} /></span>
+                <div><strong>{pendingExportKind === 'mp4' ? 'MP4 视频' : pendingExportKind === 'pdf' ? 'PDF 文档' : 'Markdown 图片包'}</strong><small>正在同步当前版本并创建导出任务…</small><span className="export-progress indeterminate"><i /></span></div>
+                <span className="job-status creating"><i className="action-spinner" />创建中</span>
+              </article>}
               {jobs.map(job => <article className={`export-history-item ${job.status}`} key={job.id}>
                 <span className="export-history-kind"><Icon name={job.kind === 'mp4' ? 'play' : job.kind === 'pdf' ? 'text' : 'image'} /></span>
                 <div><strong>{job.kind === 'mp4' ? 'MP4 视频' : job.kind === 'pdf' ? 'PDF 文档' : 'Markdown 图片包'}</strong><small>{new Date(job.created_at).toLocaleString()}</small>{['queued', 'running'].includes(job.status) && <span className="export-progress"><i style={{ width: `${job.progress}%` }} /></span>}{job.status === 'failed' && <em title={job.error}>导出失败 · {job.error?.split('\n')[0] || '请重试'}</em>}</div>
                 {job.status === 'complete' && job.download_url ? <a className="icon-button" href={`${API_URL}${job.download_url}`}><Icon name="download" />下载</a> : <span className={`job-status ${job.status}`}>{job.status === 'failed' ? '失败' : job.status === 'queued' ? '排队中' : `${job.progress}%`}</span>}
               </article>)}
-              {!jobs.length && <div className="export-empty-note history-empty"><Icon name="clock" /><span>完成一次导出后，文件和任务状态会显示在这里。</span></div>}
+              {!jobs.length && !pendingExportKind && <div className="export-empty-note history-empty"><Icon name="clock" /><span>完成一次导出后，文件和任务状态会显示在这里。</span></div>}
             </div>
           </section>
         </div>

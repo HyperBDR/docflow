@@ -96,7 +96,7 @@ export default function Dashboard() {
     catch (value) { showError(value) } finally { setBusy(false) }
   }
 
-  return <main className="page resource-page library-page">
+  return <main className={`page resource-page library-page ${selected.size ? 'has-bulk-selection' : ''}`}>
     <div className="page-title"><div><h1>我的演示</h1><p className="muted">按产品与标签组织内容，管理共享、分析和导出资源。</p></div><button className="secondary icon-button" onClick={async () => setPair((await api.pair()).code)}><Icon name="link" />连接浏览器扩展</button></div>
     {pair && <div className="pair-banner"><div><strong>扩展配对码</strong><p>在扩展弹窗中输入，10 分钟内有效。</p></div><code>{pair}</code><button className="ghost" onClick={() => setPair(null)}>关闭</button></div>}
     {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
@@ -129,7 +129,7 @@ export default function Dashboard() {
           <button disabled={busy} onClick={() => { setTagTargets(null); setDialog('tags') }}><Icon name="tag" />设置标签</button>
           <button disabled={busy || selected.size < 2 || selected.size > 5} title="请选择 2–5 个资源" onClick={() => setDialog('merge')}><Icon name="move" />合并</button>
           <button disabled={busy} onClick={() => share(selectedDemos)}><Icon name="share" />共享</button><button disabled={busy} onClick={() => duplicate(selectedDemos)}><Icon name="copy" />复制</button><button className="danger" disabled={busy} onClick={() => remove([...selected])}><Icon name="delete" />删除</button>
-        </div></div>}
+        </div><button className="bulk-selection-clear" title="取消全部选择" aria-label="取消全部选择" onClick={() => setSelected(new Set())}>×</button></div>}
 
         <div className={`demo-grid ${view === 'list' ? 'list-view' : ''}`}>
           {filtered.map(demo => <article className={`demo-card ${selected.has(demo.id) ? 'selected' : ''} ${openMenu === demo.id ? 'menu-open' : ''}`} key={demo.id}>
