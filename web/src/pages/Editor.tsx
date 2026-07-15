@@ -8,6 +8,7 @@ import type { AIJob, Demo, ExportJob, HotspotData, Rect, SelectorInfo, Step } fr
 
 type InspectorTab = 'content' | 'hotspot' | 'tooltip' | 'theme' | 'animation' | 'ai'
 type CanvasMode = 'preview' | 'edit'
+type DetailMode = 'present' | 'edit'
 
 const defaultTooltip = { content: '点击此处继续', placement: 'auto', alignment: 'center' as const, offset: 12, max_width: 320, show_arrow: true }
 const defaultStyle = { shape: 'rectangle' as const, pulse: true, spotlight: false, padding: 6, color: '#635bff', overlay_opacity: .45 }
@@ -59,6 +60,9 @@ export default function Editor() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null)
   const [canvasMode, setCanvasMode] = useState<CanvasMode>('preview')
+  const [detailMode, setDetailMode] = useState<DetailMode>(() => new URLSearchParams(window.location.search).get('mode') === 'edit' ? 'edit' : 'present')
+  const [titleEditing, setTitleEditing] = useState(false)
+  const [presentationReady, setPresentationReady] = useState(false)
   const [tab, setTab] = useState<InspectorTab>('content')
   const [jobs, setJobs] = useState<ExportJob[]>([])
   const [aiJob, setAIJob] = useState<AIJob | null>(null)
@@ -90,6 +94,28 @@ export default function Editor() {
     }, 1800)
     return () => clearInterval(timer)
   }, [aiJob?.id, aiJob?.status, id])
+  useEffect(() => {
+    if (detailMode !== 'present' || !demo || !presentationReady) return
+    const handler = (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement)?.matches('input, textarea, select')) return
+      const index = demo.steps.findIndex(step => step.id === selected?.id)
+      if (event.key === 'ArrowRight') selectPresentationStep(index + 1)
+      if (event.key === 'ArrowLeft') selectPresentationStep(index - 1)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [detailMode, demo, selected?.id, presentationReady])
+  useEffect(() => {
+    if (detailMode !== 'present' || !demo || !selected || !presentationReady || !demo.playback?.autoplay || demo.steps.length < 2) return
+    const duration = Math.max(250, Math.min(60000, Number(demo.playback.step_duration_ms) || 2000))
+    const delay = Math.max(0, Math.min(30000, Number(demo.playback.transition_delay_ms) || 0))
+    const index = demo.steps.findIndex(step => step.id === selected.id)
+    const timer = window.setTimeout(() => {
+      if (index < demo.steps.length - 1) selectPresentationStep(index + 1)
+      else if (demo.playback?.loop) selectPresentationStep(0)
+    }, duration + delay)
+    return () => window.clearTimeout(timer)
+  }, [detailMode, demo, selected?.id, presentationReady])
 
   async function patchDemo(values: Partial<Demo>) {
     setDemo(current => current ? { ...current, ...values } : current)
@@ -164,6 +190,42 @@ export default function Editor() {
     try { setAIJob(await api.generateAI(id, stepId)); setTab('ai') } catch (value) { setError((value as Error).message) }
   }
 
+  function selectPresentationStep(index: number) {
+    if (!demo?.steps.length || !presentationReady) return
+    const target = demo.steps[Math.max(0, Math.min(demo.steps.length - 1, index))]
+    if (!target || target.id === selected?.id) return
+    setPresentationReady(false)
+    setSelectedId(target.id)
+    setSelectedHotspotId(target.hotspots[0]?.id || null)
+  }
+
+  function activatePresentation(hotspot: HotspotData) {
+    if (!demo || !selected) return
+    const index = demo.steps.findIndex(step => step.id === selected.id)
+    if (hotspot.action.type === 'goto' && hotspot.action.target_step_id) {
+      const target = demo.steps.findIndex(step => step.id === hotspot.action.target_step_id)
+      if (target >= 0) selectPresentationStep(target)
+      return
+    }
+    if (hotspot.action.type === 'link' && hotspot.action.url) {
+      window.open(hotspot.action.url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    if (hotspot.action.type === 'end') {
+      selectPresentationStep(demo.steps.length - 1)
+      return
+    }
+    selectPresentationStep(index + 1)
+  }
+
+  function finishTitleEditing() {
+    if (!demo) return
+    const title = demo.title.trim() || '未命名演示'
+    setTitleEditing(false)
+    setDemo({ ...demo, title })
+    patchDemo({ title })
+  }
+
   function defaultZoomRect(step: Step): Rect {
     const hotspot = step.hotspots[0]?.fallback_rect
     if (!hotspot) return { x: .5, y: .5, w: .5, h: .5 }
@@ -186,14 +248,41 @@ export default function Editor() {
   }
 
   if (!demo) return <main className="page"><Link to="/">← 返回</Link><div className="center-page">{error || '正在加载…'}</div></main>
-  return <main className="editor-page">
+  const presentationIndex = Math.max(0, demo.steps.findIndex(step => step.id === selected?.id))
+  return <main className={`editor-page ${detailMode === 'present' ? 'presentation-mode' : 'editing-mode'}`}>
     <div className="editor-topbar">
-      <Link to="/" className="back">← 我的演示</Link>
-      <div className="editor-meta"><input value={demo.title} onChange={event => setDemo({ ...demo, title: event.target.value })} onBlur={() => patchDemo({ title: demo.title })} /><span className={`status ${demo.status}`}>{demo.status === 'published' ? '已发布' : '草稿'}</span></div>
-      <div className="toolbar-actions">{demo.share_url && <a className="secondary button icon-button" href={demo.share_url} target="_blank"><Icon name="play" />预览</a>}{demo.ai_enabled && <button className="secondary icon-button" onClick={() => generateAI()}><Icon name="ai" />AI 优化</button>}<button className="primary icon-button" onClick={publish}><Icon name="publish" />发布与共享</button></div>
+      <div className="editor-context"><Link to="/" className="back">← 我的演示</Link><span className={`status ${demo.status}`}><i />{demo.status === 'published' ? '已发布' : '草稿'}</span></div>
+      <div className={`editor-title ${titleEditing ? 'editing' : ''}`}>
+        {titleEditing
+          ? <input autoFocus aria-label="演示名称" value={demo.title} maxLength={200} onChange={event => setDemo({ ...demo, title: event.target.value })} onBlur={finishTitleEditing} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+          : <button title="点击编辑演示名称" onClick={() => setTitleEditing(true)}><strong>{demo.title}</strong><Icon name="edit" size={14} /></button>}
+      </div>
+      <div className="toolbar-actions">
+        {detailMode === 'present' ? <>
+          <button className="topbar-action icon-button" onClick={() => { setDetailMode('edit'); setCanvasMode('preview'); window.history.replaceState(null, '', `${window.location.pathname}?mode=edit`) }}><Icon name="edit" />编辑</button>
+          <button className="topbar-action icon-button compact-action" title="全屏演示" onClick={() => document.documentElement.requestFullscreen()}><Icon name="layout" /></button>
+        </> : <button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />演示模式</button>}
+        {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title="打开公开链接"><Icon name="share" /></a>}
+        {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />AI 优化</button>}
+        <button className="primary icon-button publish-action" onClick={publish}><Icon name="publish" />{demo.status === 'published' ? '更新发布' : '发布与共享'}</button>
+      </div>
     </div>
     {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
-    <div className="editor-layout">
+    {detailMode === 'present' ? <section className="immersive-demo">
+      {selected ? <>
+        <div className="immersive-stage"><SlideStage key={selected.id}
+          step={selected} mode="player" fit="viewport" persistZoom theme={demo.theme} navigation={demo.navigation}
+          stepIndex={presentationIndex} stepCount={demo.steps.length} activeHotspotId={selected.hotspots[0]?.id}
+          onHotspot={activatePresentation} onGuidePrevious={() => selectPresentationStep(presentationIndex - 1)} onGuideNext={activatePresentation}
+          onReady={() => setPresentationReady(true)}
+        /></div>
+        <nav className="immersive-nav" aria-label="演示步骤导航">
+          <button disabled={!presentationReady || presentationIndex === 0} onClick={() => selectPresentationStep(presentationIndex - 1)} aria-label="上一步">‹</button>
+          <span><b>{presentationIndex + 1}</b><i />{demo.steps.length}<small>{selected.title || `步骤 ${presentationIndex + 1}`}</small></span>
+          <button disabled={!presentationReady || presentationIndex === demo.steps.length - 1} onClick={() => selectPresentationStep(presentationIndex + 1)} aria-label="下一步">›</button>
+        </nav>
+      </> : <div className="immersive-empty"><Icon name="image" size={42} /><h2>这个演示还没有步骤</h2><p>进入编辑模式添加截图或使用浏览器扩展录制。</p><button className="primary icon-button" onClick={() => setDetailMode('edit')}><Icon name="edit" />开始编辑</button></div>}
+    </section> : <div className="editor-layout">
       <aside className="step-list">
         <div className="panel-heading"><span>步骤资源</span><small>{demo.steps.length}</small></div><label className="upload-button icon-button"><Icon name="image" />添加截图<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => event.target.files?.[0] && upload(event.target.files[0])} /></label>
         {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} title={step.title || `步骤 ${index + 1}`} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} /><div><strong>步骤 {index + 1}</strong><small>{step.render_mode === 'dom' ? 'HTML Clone' : '截图'}</small></div></button>)}
@@ -334,6 +423,6 @@ export default function Editor() {
           {jobs.map(job => <div className="job" key={job.id}><span>{job.kind.toUpperCase()}</span><span>{job.status === 'complete' ? <a href={`${API_URL}${job.download_url}`}>下载</a> : job.status === 'failed' ? '失败' : `${job.progress}%`}</span></div>)}
         </div>
       </aside>
-    </div>
+    </div>}
   </main>
 }

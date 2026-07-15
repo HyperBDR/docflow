@@ -23,7 +23,7 @@ export default function Dashboard() {
   async function create(event: React.FormEvent) {
     event.preventDefault()
     const demo = await api.createDemo(title || '未命名演示')
-    navigate(`/demos/${demo.id}`)
+    navigate(`/demos/${demo.id}?mode=edit`)
   }
 
   function toggle(id: string) {
@@ -92,7 +92,7 @@ export default function Dashboard() {
       <select value={status} onChange={event => setStatus(event.target.value as typeof status)}><option value="all">全部状态</option><option value="draft">草稿</option><option value="published">已发布</option></select>
       <span className="resource-count">{selected.size ? `已选择 ${selected.size} 项` : `共 ${demos.length} 项`}</span>
       {selected.size > 0 && <div className="selection-actions">
-        <button className="icon-button" disabled={busy || selected.size !== 1} title={selected.size === 1 ? '编辑选中的演示' : '编辑操作一次只能选择一个演示'} onClick={() => navigate(`/demos/${selectedDemos[0].id}`)}><Icon name="edit" />编辑</button>
+        <button className="icon-button" disabled={busy || selected.size !== 1} title={selected.size === 1 ? '编辑选中的演示' : '编辑操作一次只能选择一个演示'} onClick={() => navigate(`/demos/${selectedDemos[0].id}?mode=edit`)}><Icon name="edit" />编辑</button>
         <button className="icon-button" disabled={busy} onClick={() => share(selectedDemos)}><Icon name="share" />共享</button>
         <button className="icon-button" disabled={busy} onClick={() => duplicate(selectedDemos)}><Icon name="copy" />复制</button>
         <button className="danger icon-button" disabled={busy} onClick={() => remove([...selected])}><Icon name="delete" />删除</button>
@@ -108,7 +108,7 @@ export default function Dashboard() {
         </Link>
         <div className="demo-card-body"><div className="demo-card-title"><h3 title={demo.title}>{demo.title}</h3><span className={`status ${demo.status}`}>{demo.status === 'published' ? '已发布' : '草稿'}</span></div><p>更新于 {new Date(demo.updated_at).toLocaleString()}</p></div>
         <div className="card-actions">
-          <Link to={`/demos/${demo.id}`} className="card-action"><Icon name="edit" />编辑</Link>
+          <Link to={`/demos/${demo.id}?mode=edit`} className="card-action"><Icon name="edit" />编辑</Link>
           {demo.share_url && <a href={demo.share_url} target="_blank" className="card-action"><Icon name="play" />预览</a>}
           <button disabled={busy} onClick={() => share([demo])}><Icon name="share" />{demo.share_url ? '复制链接' : '发布共享'}</button>
           <button disabled={busy} onClick={() => duplicate([demo])}><Icon name="copy" />复制</button>

@@ -232,7 +232,16 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
 
   useEffect(() => {
     setSnapshot(null); setError(''); setDynamicRects({}); setContentReady(false); setZoomActive(false)
-    if (!useDom || !step.snapshot_url) return
+    if (!useDom || !step.snapshot_url) {
+      // Cached screenshots (and data URLs) can finish before this effect runs.
+      // Re-check the actual image after resetting state so the loading overlay
+      // cannot remain stuck when revisiting an already cached step.
+      const frame = requestAnimationFrame(() => {
+        const image = wrapperRef.current?.querySelector('img')
+        if (image?.complete && image.naturalWidth > 0) { setContentReady(true); onReady?.() }
+      })
+      return () => cancelAnimationFrame(frame)
+    }
     fetch(step.snapshot_url, { credentials: 'include' })
       .then(response => { if (!response.ok) throw new Error('DOM 快照加载失败'); return response.json() })
       .then(setSnapshot).catch(value => setError(value.message))

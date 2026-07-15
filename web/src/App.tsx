@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, api } from './api'
 import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
@@ -46,8 +46,10 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
 }
 
 function Shell({ user, logout }: { user: User; logout: () => void }) {
-  return <div className="app-shell">
-    <header><Link className="brand" to="/"><Brand /></Link><div className="header-user"><span>{user.email}</span><button className="ghost" onClick={logout}>退出</button></div></header>
+  const location = useLocation()
+  const isDemoDetail = location.pathname.startsWith('/demos/')
+  return <div className={`app-shell ${isDemoDetail ? 'demo-detail-shell' : ''}`}>
+    {!isDemoDetail && <header><Link className="brand" to="/"><Brand /></Link><div className="header-user"><span>{user.email}</span><button className="ghost" onClick={logout}>退出</button></div></header>}
     <Routes><Route path="/" element={<Dashboard />} /><Route path="/demos/:id" element={<Editor />} /><Route path="*" element={<Navigate to="/" />} /></Routes>
   </div>
 }
