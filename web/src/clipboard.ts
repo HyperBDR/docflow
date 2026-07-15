@@ -1,3 +1,5 @@
+import i18n from './i18n'
+
 export async function copyText(value: string) {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -18,5 +20,5 @@ export async function copyText(value: string) {
   textarea.select()
   const copied = document.execCommand('copy')
   textarea.remove()
-  if (!copied) throw new Error('浏览器禁止访问剪贴板，请手动复制')
+  if (!copied) throw new Error(i18n.t('errors.copyBlocked', { ns: 'common' }))
 }

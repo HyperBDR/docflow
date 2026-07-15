@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createCache, createMirror, rebuildIntoSandboxedIframe } from 'rrweb-snapshot'
 import type { HotspotData } from '../types'
 
@@ -137,6 +138,7 @@ function findTarget(hotspot: HotspotData, doc: Document, view: Window) {
 }
 
 export default function SnapshotFrame() {
+  const { t } = useTranslation('player')
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -159,7 +161,7 @@ export default function SnapshotFrame() {
         if (root?.isConnected && root.ownerDocument === document) return root
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
       }
-      throw new Error('页面重建容器尚未挂载，请重试')
+      throw new Error(t('guide.rebuildFailed'))
     }
 
     const sendRects = () => {
@@ -270,5 +272,5 @@ export default function SnapshotFrame() {
     parent.postMessage({ type: 'DOCFLOW_READY' }, '*')
     return () => { disposed = true; loadVersion += 1; cleanupFrame(); window.removeEventListener('message', onMessage) }
   }, [])
-  return <div ref={rootRef} id="snapshot-frame-root" className="snapshot-frame-root"><div className="snapshot-loading">正在重建页面…</div></div>
+  return <div ref={rootRef} id="snapshot-frame-root" className="snapshot-frame-root"><div className="snapshot-loading">{t('guide.loadingPage')}</div></div>
 }

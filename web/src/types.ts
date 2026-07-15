@@ -1,4 +1,6 @@
 export type Rect = { x: number; y: number; w: number; h: number }
+export type Locale = 'zh-CN' | 'en'
+export type User = { id: string; email: string; ui_locale: Locale }
 
 export type SelectorInfo = { css?: string; node_id?: number; tag?: string; role?: string; aria_label?: string; text?: string }
 export type HotspotAction = { type: 'next' | 'goto' | 'link' | 'end'; target_step_id?: string; url?: string }
@@ -43,6 +45,7 @@ export type Demo = {
   id: string
   title: string
   description: string
+  content_locale: Locale
   status: 'draft' | 'published'
   created_at: string
   updated_at: string
@@ -77,6 +80,7 @@ export type ExportJob = {
   status: 'queued' | 'running' | 'complete' | 'failed'
   progress: number
   error?: string
+  error_code?: string
   download_url?: string
   created_at: string
 }
@@ -90,5 +94,6 @@ export type AIJob = {
   model: string
   result: Record<string, any>
   error?: string
+  error_code?: string
   can_revert: boolean
 }

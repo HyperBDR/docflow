@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api", tags=["ai"])
 def job_out(job: AIJob) -> AIJobOut:
     return AIJobOut(
         id=job.id, demo_id=job.demo_id, step_id=job.step_id, status=job.status.value,
-        progress=job.progress, model=job.model, result=job.result or {}, error=job.error,
+        progress=job.progress, model=job.model, result=job.result or {}, error=job.error, error_code=job.error_code,
         can_revert=bool(job.inverse_patch and any(job.inverse_patch.get(key) for key in ["demo", "steps", "hotspots"])),
     )
 

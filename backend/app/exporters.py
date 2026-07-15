@@ -44,7 +44,7 @@ def wrap_text(draw: ImageDraw.ImageDraw, text: str, text_font, max_width: int) -
     return lines
 
 
-def slide(step: dict, index: int, size=(1920, 1080), pointer: tuple[float, float] | None = None) -> Image.Image:
+def slide(step: dict, index: int, size=(1920, 1080), pointer: tuple[float, float] | None = None, locale: str = "zh-CN") -> Image.Image:
     canvas = Image.new("RGB", size, "#111827")
     draw = ImageDraw.Draw(canvas)
     source = Image.open(io.BytesIO(storage.read(step["asset_key"]))).convert("RGB")
@@ -57,14 +57,15 @@ def slide(step: dict, index: int, size=(1920, 1080), pointer: tuple[float, float
         px, py = pointer
     draw.ellipse((px - 18, py - 18, px + 18, py + 18), fill="#ef4444", outline="white", width=5)
     draw.rectangle((0, size[1] - 170, size[0], size[1]), fill="#111827")
-    draw.text((52, size[1] - 148), f"{index}. {step.get('title') or f'步骤 {index}'}", font=font(42), fill="white")
+    fallback = f"Step {index}" if locale == "en" else f"步骤 {index}"
+    draw.text((52, size[1] - 148), f"{index}. {step.get('title') or fallback}", font=font(42), fill="white")
     lines = wrap_text(draw, step.get("body", ""), font(27), size[0] - 104)[:2]
     draw.multiline_text((52, size[1] - 88), "\n".join(lines), font=font(27), fill="#d1d5db", spacing=6)
     return canvas
 
 
 def render_pdf(snapshot: dict) -> bytes:
-    pages = render_player_images(snapshot, None) or [slide(step, index, size=(1600, 1131)) for index, step in enumerate(snapshot["steps"], 1)]
+    pages = render_player_images(snapshot, None) or [slide(step, index, size=(1600, 1131), locale=snapshot.get("content_locale", "zh-CN")) for index, step in enumerate(snapshot["steps"], 1)]
     output = io.BytesIO()
     pages[0].save(output, "PDF", save_all=True, append_images=pages[1:], resolution=144, quality=90)
     return output.getvalue()
@@ -86,7 +87,7 @@ def render_player_images(snapshot: dict, token: str | None) -> list[Image.Image]
             page = browser.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
             for index, step in enumerate(snapshot["steps"]):
                 page.set_viewport_size(export_viewport(step, 3840, 2160))
-                url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}"
+                url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}&lang={snapshot.get('content_locale', 'zh-CN')}"
                 page.goto(url, wait_until="networkidle", timeout=60_000)
                 page.wait_for_selector('main[data-export-ready="true"]', timeout=30_000)
                 zoom = (step.get("animation") or {}).get("zoom") or {}
@@ -111,7 +112,7 @@ def markdown_text(snapshot: dict, base_url: str, token: str | None = None, local
         lines += [snapshot["description"], ""]
     for index, step in enumerate(snapshot["steps"], 1):
         image = f"images/{index:03d}.webp" if local else f"{base_url}/public/{token}/assets/{step['id']}.webp"
-        title = step.get("title") or f"步骤 {index}"
+        title = step.get("title") or (f"Step {index}" if snapshot.get("content_locale") == "en" else f"步骤 {index}")
         lines += [f"## {index}. {title}", "", step.get("body", ""), "", f"![{title}]({image})", ""]
     return "\n".join(lines)
 
@@ -216,7 +217,7 @@ def render_video_timeline(snapshot: dict, token: str, directory: Path) -> tuple[
             )
             page = browser.new_page(viewport=viewport, device_scale_factor=1)
             for index, step in enumerate(snapshot["steps"]):
-                url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}"
+                url = f"{settings.render_web_url.rstrip('/')}/p/{token}?api=/backend&export=1&step={index}&lang={snapshot.get('content_locale', 'zh-CN')}"
                 page.goto(url, wait_until="networkidle", timeout=60_000)
                 page.wait_for_selector(
                     f'main[data-export-ready="true"][data-step-index="{index}"]', timeout=30_000

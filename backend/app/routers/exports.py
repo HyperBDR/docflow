@@ -29,7 +29,7 @@ def export_filename(title: str, created_at, suffix: str) -> tuple[str, str]:
 
 def export_out(job: ExportJob) -> ExportOut:
     return ExportOut(
-        id=job.id, kind=job.kind, status=job.status.value, progress=job.progress, error=job.error,
+        id=job.id, kind=job.kind, status=job.status.value, progress=job.progress, error=job.error, error_code=job.error_code,
         download_url=f"/api/exports/{job.id}/download" if job.status == JobStatus.complete else None,
         created_at=job.created_at,
     )

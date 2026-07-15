@@ -1,0 +1,27 @@
+{
+  "language": { "label": "Language", "zh-CN": "中文", "en": "English", "switchTo": "Change language" },
+  "actions": { "close": "Close", "cancel": "Cancel", "confirm": "Confirm", "save": "Save", "create": "Create", "edit": "Edit", "delete": "Delete", "copy": "Copy", "share": "Share", "open": "Open", "download": "Download", "back": "Back", "next": "Next", "previous": "Previous", "retry": "Retry", "more": "More actions", "publish": "Publish", "preview": "Preview", "search": "Search", "clear": "Clear", "remove": "Remove", "add": "Add", "apply": "Apply", "logout": "Log out" },
+  "status": { "draft": "Draft", "published": "Published", "queued": "Queued", "running": "Processing", "complete": "Complete", "failed": "Failed", "loading": "Loading…", "creating": "Creating" },
+  "contentLanguage": { "label": "Demo content language", "description": "Controls the language used by future AI generation and newly recorded steps. Existing content will not be changed.", "zh-CN": "Simplified Chinese", "en": "English" },
+  "errors": {
+    "requestFailed": "The request failed. Please try again.",
+    "operationFailed": "Operation failed",
+    "copyBlocked": "Clipboard access was blocked. Please copy the text manually.",
+    "codes": {
+      "auth": { "not_authenticated": "Please sign in first.", "session_expired": "Your session expired. Sign in again.", "account_disabled": "This account is disabled.", "email_registered": "This email is already registered.", "invalid_credentials": "Incorrect email or password." },
+      "demo": { "not_found": "This demo does not exist or was deleted.", "empty_publish": "Record at least one step before publishing." },
+      "step": { "not_found": "This step does not exist." },
+      "export": { "publish_first": "Publish the demo before exporting.", "not_found": "This export job does not exist.", "render_failed": "Export rendering failed. Please try again." },
+      "ai": { "not_configured": "AI is not configured on the server.", "no_steps": "Record at least one step first.", "job_not_found": "This AI job does not exist.", "generation_failed": "AI generation failed. Please try again." },
+      "extension": { "invalid_pairing_code": "The pairing code is invalid or expired." },
+      "category": { "not_found": "This category does not exist." },
+      "tag": { "not_found": "This tag does not exist." },
+      "public": { "not_found": "This demo does not exist or is no longer shared." },
+      "asset": { "not_found": "This asset does not exist." },
+      "snapshot": { "not_found": "This page snapshot does not exist." },
+      "request": { "validation": "Some submitted values are invalid.", "failed": "The request failed. Please try again." }
+    }
+  },
+  "date": { "updatedAt": "Updated {{date}}" },
+  "units": { "items": "{{count}} items", "steps": "{{count}} steps", "records": "{{count}} records" }
+}

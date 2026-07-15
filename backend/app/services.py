@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.defaults import DEFAULT_NAVIGATION, DEFAULT_PLAYBACK, DEFAULT_THEME, DEFAULT_TOOLTIP, DEFAULT_HOTSPOT_STYLE
+from app.defaults import DEFAULT_PLAYBACK, DEFAULT_THEME, DEFAULT_TOOLTIP, DEFAULT_HOTSPOT_STYLE, navigation_defaults
 from app.models import Demo, PublishedRevision, ShareToken, Step, User
 from app.schemas import DemoOut, HotspotOut, StepOut
 
@@ -47,6 +47,7 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         id=demo.id,
         title=demo.title,
         description=demo.description,
+        content_locale=demo.content_locale or "zh-CN",
         status=demo.status.value,
         created_at=demo.created_at,
         updated_at=demo.updated_at,
@@ -57,7 +58,7 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         ),
         share_url=f"{settings.web_origin}/p/{share.token}" if share else None,
         theme={**DEFAULT_THEME, **(demo.theme or {})},
-        navigation={**DEFAULT_NAVIGATION, **(demo.navigation or {})},
+        navigation={**navigation_defaults(demo.content_locale), **(demo.navigation or {})},
         playback={**DEFAULT_PLAYBACK, **(demo.playback or {})},
         manual_fields=demo.manual_fields or [],
         ai_enabled=settings.ai_enabled and bool(settings.ai_api_key),

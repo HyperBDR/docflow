@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { API_URL } from '../api'
+import { applyLocale, detectedLocale, formatDate, normalizeLocale, PUBLIC_LOCALE_KEY } from '../i18n'
 import SlideStage, { preloadSnapshot } from '../components/SlideStage'
 import Icon from '../components/Icon'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 import type { Demo, HotspotData, Step, StepComment } from '../types'
 
-type Published = Pick<Demo, 'title' | 'description' | 'theme' | 'navigation' | 'playback'> & { steps: Step[] }
+type Published = Pick<Demo, 'title' | 'description' | 'content_locale' | 'theme' | 'navigation' | 'playback'> & { steps: Step[] }
 
 const defaultTheme = { primary_color: '#635bff', tooltip: { background: '#fff', text_color: '#172033', border_color: '#e2e6ed', radius: 12 } }
-const defaultNavigation = { previous_label: '上一步', next_label: '下一步', previous_color: '#fff', next_color: '#635bff', text_color: '#172033', next_text_color: '#fff', radius: 9, show_previous: true, show_next: true, show_progress: true }
+const defaultNavigation = { previous_color: '#fff', next_color: '#635bff', text_color: '#172033', next_text_color: '#fff', radius: 9, show_previous: true, show_next: true, show_progress: true }
 const defaultPlayback = { autoplay: false, step_duration_ms: 2000, transition_delay_ms: 1000, loop: false }
 
 function stableId(storage: Storage, key: string) {
@@ -23,6 +26,7 @@ function stableId(storage: Storage, key: string) {
 }
 
 export default function Player() {
+  const { t } = useTranslation('player')
   const { token } = useParams()
   const params = new URLSearchParams(window.location.search)
   const publicApi = params.get('api') || API_URL
@@ -41,11 +45,15 @@ export default function Player() {
   const [commentBusy, setCommentBusy] = useState(false)
   const visitorId = useMemo(() => stableId(localStorage, 'docflow-visitor-id'), [])
   const sessionId = useMemo(() => stableId(sessionStorage, `docflow-session-${token}`), [token])
+  useEffect(() => {
+    const requested = params.get('lang')
+    void applyLocale(requested ? normalizeLocale(requested) : detectedLocale(PUBLIC_LOCALE_KEY), PUBLIC_LOCALE_KEY)
+  }, [])
   function track(event_type: 'view' | 'step_view' | 'interaction' | 'complete', step_id?: string) {
     if (exportMode) return
     fetch(`${publicApi}/public/${token}/events`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type, visitor_id: visitorId, session_id: sessionId, step_id }), keepalive: true }).catch(() => undefined)
   }
-  useEffect(() => { fetch(`${publicApi}/public/${token}`).then(response => { if (!response.ok) throw new Error('演示不存在或已撤销'); return response.json() }).then(value => {
+  useEffect(() => { fetch(`${publicApi}/public/${token}`).then(response => { if (!response.ok) throw new Error(t('notFound')); return response.json() }).then(async value => {
     value.steps = value.steps.map((step: Step) => ({
       ...step,
       image_url: `${publicApi}/public/${token}/assets/${step.id}.webp`,
@@ -55,6 +63,7 @@ export default function Player() {
       render_mode: exportMode ? 'image' : step.render_mode,
       snapshot_url: !exportMode && step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot${step.snapshot_version ? `?v=${encodeURIComponent(step.snapshot_version)}` : ''}` : undefined,
     }))
+    if (exportMode) await applyLocale(value.content_locale || 'zh-CN', PUBLIC_LOCALE_KEY)
     setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1))); track('view')
   }).catch(value => setError(value.message)) }, [token, publicApi, requestedStep])
   useEffect(() => setReady(false), [index])
@@ -108,11 +117,16 @@ export default function Player() {
     return () => window.clearTimeout(timer)
   }, [demo, exportMode, index, ready])
 
-  if (!demo) return <main className="player-shell center-page">{error || '正在加载演示…'}</main>
+  if (!demo) return <main className="player-shell center-page">{error || t('loading')}</main>
   const step = demo.steps[index]
-  if (!step) return <main className="player-shell center-page">这个演示还没有步骤。</main>
+  if (!step) return <main className="player-shell center-page">{t('empty')}</main>
   const theme = { ...defaultTheme, ...(demo.theme || {}), tooltip: { ...defaultTheme.tooltip, ...(demo.theme?.tooltip || {}) } }
-  const navigation = { ...defaultNavigation, ...(demo.navigation || {}) }
+  const navigation = {
+    ...defaultNavigation,
+    previous_label: demo.content_locale === 'en' ? 'Previous' : '上一步',
+    next_label: demo.content_locale === 'en' ? 'Next' : '下一步',
+    ...(demo.navigation || {}),
+  }
 
   function goTo(next: number) {
     if (!ready) return
@@ -144,14 +158,14 @@ export default function Player() {
     event.preventDefault(); if (!commentText.trim()) return
     setCommentBusy(true)
     try {
-      const response = await fetch(`${publicApi}/public/${token}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step_id: step.id, visitor_id: visitorId, author_name: commentName || '访客', author_email: commentEmail, content: commentText }) })
-      if (!response.ok) throw new Error('评论发布失败')
+      const response = await fetch(`${publicApi}/public/${token}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step_id: step.id, visitor_id: visitorId, author_name: commentName || t('guest'), author_email: commentEmail, content: commentText }) })
+      if (!response.ok) throw new Error(t('submitFailed'))
       const comment = await response.json(); setComments(current => [comment, ...current]); setCommentText(''); localStorage.setItem('docflow-comment-name', commentName); localStorage.setItem('docflow-comment-email', commentEmail)
-    } catch (value) { setError(value instanceof Error ? value.message : '评论发布失败') } finally { setCommentBusy(false) }
+    } catch (value) { setError(value instanceof Error ? value.message : t('submitFailed')) } finally { setCommentBusy(false) }
   }
 
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
-    <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><button onClick={() => document.documentElement.requestFullscreen()}>全屏</button></header>
+    <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><div className="player-header-actions">{!exportMode && <LanguageSwitcher publicMode compact />}<button onClick={() => document.documentElement.requestFullscreen()}>{t('fullscreen')}</button></div></header>
     <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage
       step={step} mode="player" fit="viewport" persistZoom exportZoomProgress={exportZoomProgress} theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
       onHotspot={activate} onGuidePrevious={() => goTo(index - 1)} onGuideNext={activate} onReady={() => setReady(true)}
@@ -161,12 +175,12 @@ export default function Player() {
         hidden={!navigation.show_previous} disabled={!ready || index === 0} onClick={() => goTo(index - 1)}
         style={{ background: navigation.previous_color, color: navigation.text_color, borderRadius: navigation.radius }}
       >← {navigation.previous_label}</button>
-      <div><h2>{step.title || `步骤 ${index + 1}`}</h2><p>{step.body}</p>{navigation.show_progress && <div className="player-progress"><span style={{ width: `${(index + 1) / demo.steps.length * 100}%`, background: theme.primary_color }} /></div>}</div>
+      <div><h2>{step.title || t('step', { index: index + 1 })}</h2><p>{step.body}</p>{navigation.show_progress && <div className="player-progress"><span style={{ width: `${(index + 1) / demo.steps.length * 100}%`, background: theme.primary_color }} /></div>}</div>
       <button
         hidden={!navigation.show_next} disabled={!ready || index === demo.steps.length - 1} onClick={() => goTo(index + 1)}
         style={{ background: navigation.next_color, color: navigation.next_text_color, borderRadius: navigation.radius }}
       >{navigation.next_label} →</button>
     </footer>
-    {!exportMode && <><button className="player-comment-toggle" onClick={() => setCommentsOpen(value => !value)}><Icon name="message" /><span>评论</span>{comments.length > 0 && <b>{comments.length}</b>}</button>{commentsOpen && <aside className="player-comments"><header><div><strong>步骤评论</strong><small>针对步骤 {index + 1} 提出建议</small></div><button onClick={() => setCommentsOpen(false)}>×</button></header><div className="player-comment-list">{comments.map(comment => <article key={comment.id}><div><strong>{comment.author_name}</strong><time>{new Date(comment.created_at).toLocaleString()}</time></div><p>{comment.content}</p></article>)}{!comments.length && <div className="player-comment-empty"><Icon name="message" size={28} /><p>还没有评论，欢迎留下第一条建议。</p></div>}</div><form onSubmit={submitComment}><div><input value={commentName} onChange={event => setCommentName(event.target.value)} placeholder="姓名（可选）" maxLength={100} /><input type="email" value={commentEmail} onChange={event => setCommentEmail(event.target.value)} placeholder="邮箱（可选）" maxLength={320} /></div><textarea required value={commentText} onChange={event => setCommentText(event.target.value)} placeholder="输入对当前步骤的建议…" maxLength={5000} /><button className="primary" disabled={commentBusy || !commentText.trim()}>{commentBusy ? '发布中…' : '发布评论'}</button></form></aside>}</>}
+    {!exportMode && <><button className="player-comment-toggle" onClick={() => setCommentsOpen(value => !value)}><Icon name="message" /><span>{t('comments')}</span>{comments.length > 0 && <b>{comments.length}</b>}</button>{commentsOpen && <aside className="player-comments"><header><div><strong>{t('commentTitle')}</strong><small>{t('commentSubtitle', { index: index + 1 })}</small></div><button onClick={() => setCommentsOpen(false)}>×</button></header><div className="player-comment-list">{comments.map(comment => <article key={comment.id}><div><strong>{comment.author_name}</strong><time>{formatDate(comment.created_at)}</time></div><p>{comment.content}</p></article>)}{!comments.length && <div className="player-comment-empty"><Icon name="message" size={28} /><p>{t('commentEmpty')}</p></div>}</div><form onSubmit={submitComment}><div><input value={commentName} onChange={event => setCommentName(event.target.value)} placeholder={t('namePlaceholder')} maxLength={100} /><input type="email" value={commentEmail} onChange={event => setCommentEmail(event.target.value)} placeholder={t('emailPlaceholder')} maxLength={320} /></div><textarea required value={commentText} onChange={event => setCommentText(event.target.value)} placeholder={t('commentPlaceholder')} maxLength={5000} /><button className="primary" disabled={commentBusy || !commentText.trim()}>{commentBusy ? t('submitting') : t('submit')}</button></form></aside>}</>}
   </main>
 }

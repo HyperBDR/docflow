@@ -87,25 +87,37 @@ def step_context(step: Step) -> dict:
     }
 
 
-def outline_prompt(steps: list[Step]) -> list[dict]:
+def outline_prompt(steps: list[Step], locale: str = "zh-CN") -> list[dict]:
     compact = [{k: v for k, v in step_context(step).items() if k not in {"visible_text", "nearby_text"}} for step in steps]
+    if locale == "en":
+        system = "You are an enterprise software documentation editor. Generate a concise, accurate English demo title and summary from the ordered click flow. Return JSON only."
+        task = "Return {title, description}. Keep the title under 60 characters and the summary under 240 characters. Do not invent functionality that is not present on the page."
+    else:
+        system = "你是企业软件操作文档编辑。根据按顺序排列的点击流程生成简洁、准确的中文演示标题和摘要。只输出 JSON。"
+        task = "输出 {title, description}。标题不超过30字，摘要不超过120字，不编造页面不存在的功能。"
     return [
-        {"role": "system", "content": "你是企业软件操作文档编辑。根据按顺序排列的点击流程生成简洁、准确的中文演示标题和摘要。只输出 JSON。"},
+        {"role": "system", "content": system},
         {"role": "user", "content": json.dumps({
-            "task": "输出 {title, description}。标题不超过30字，摘要不超过120字，不编造页面不存在的功能。",
+            "task": task,
             "steps": compact,
         }, ensure_ascii=False)},
     ]
 
 
-def chunk_prompt(chunk: list[Step], outline: dict) -> list[dict]:
+def chunk_prompt(chunk: list[Step], outline: dict, locale: str = "zh-CN") -> list[dict]:
+    task = (
+        "For every step return title, body, tooltip, placement, warnings, and redundant. "
+        "Use concise, natural English. title is an action heading under 60 characters; body is one directly actionable sentence; "
+        "tooltip is under 90 characters; placement must be auto/top/bottom/left/right; warnings is an array of potential sensitive-data warnings; "
+        "redundant indicates whether the step may be redundant. Never output passwords or tokens and never guess missing content."
+    ) if locale == "en" else (
+        "为每一步输出 title、body、tooltip、placement、warnings、redundant。"
+        "title 是动作标题且不超过30字；body 是用户可直接执行的一句话；tooltip 不超过45字；"
+        "placement 只能是 auto/top/bottom/left/right；warnings 是潜在敏感信息数组；"
+        "redundant 表示该步骤是否疑似冗余。禁止输出密码、Token 或猜测内容。"
+    )
     content: list[dict] = [{"type": "text", "text": json.dumps({
-        "task": (
-            "为每一步输出 title、body、tooltip、placement、warnings、redundant。"
-            "title 是动作标题且不超过30字；body 是用户可直接执行的一句话；tooltip 不超过45字；"
-            "placement 只能是 auto/top/bottom/left/right；warnings 是潜在敏感信息数组；"
-            "redundant 表示该步骤是否疑似冗余。禁止输出密码、Token 或猜测内容。"
-        ),
+        "task": task,
         "demo": outline,
         "steps": [step_context(step) for step in chunk],
         "output_schema": {"steps": [{"id": "step id", "title": "", "body": "", "tooltip": "", "placement": "auto", "warnings": [], "redundant": False}]},
@@ -117,7 +129,11 @@ def chunk_prompt(chunk: list[Step], outline: dict) -> list[dict]:
                 content.append({"type": "text", "text": f"步骤截图 id={step.id}"})
                 content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
     return [
-        {"role": "system", "content": "你是企业软件交互演示编辑器。结合流程上下文、目标元素和脱敏截图生成准确中文文案。只输出 JSON。"},
+        {"role": "system", "content": (
+            "You are an enterprise software interactive-demo editor. Use the flow context, target element, and redacted screenshots to produce accurate English copy. Return JSON only."
+            if locale == "en" else
+            "你是企业软件交互演示编辑器。结合流程上下文、目标元素和脱敏截图生成准确中文文案。只输出 JSON。"
+        )},
         {"role": "user", "content": content},
     ]
 
@@ -195,7 +211,7 @@ def run_ai_generation(job_id: str) -> None:
         if job.step_id:
             outline = {"title": demo.title, "description": demo.description}
         else:
-            outline = chat_json(outline_prompt(steps))
+            outline = chat_json(outline_prompt(steps, demo.content_locale))
         job.progress = 20
         db.commit()
 
@@ -203,14 +219,14 @@ def run_ai_generation(job_id: str) -> None:
         chunk_size = max(1, min(12, settings.ai_chunk_size))
         for start in range(0, len(steps), chunk_size):
             chunk = steps[start:start + chunk_size]
-            response = chat_json(chunk_prompt(chunk, outline))
+            response = chat_json(chunk_prompt(chunk, outline, demo.content_locale))
             if isinstance(response.get("steps"), list):
                 generated.extend(item for item in response["steps"] if isinstance(item, dict))
             job.progress = 20 + int(65 * min(len(steps), start + len(chunk)) / len(steps))
             db.commit()
 
         apply_results(db, job, demo, outline, generated)
-        job.result = {"outline": outline, "steps": generated}
+        job.result = {"outline": outline, "steps": generated, "content_locale": demo.content_locale}
         job.status = JobStatus.complete
         job.progress = 100
         db.commit()
@@ -220,6 +236,7 @@ def run_ai_generation(job_id: str) -> None:
         if job:
             job.status = JobStatus.failed
             job.error = f"{exc}\n{traceback.format_exc()[-1500:]}"
+            job.error_code = "ai.generation_failed"
             db.commit()
         raise
     finally:

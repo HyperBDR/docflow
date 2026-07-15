@@ -3,6 +3,8 @@
 body { margin: 0; width: 360px; background: #f7f8fb; }
 main { padding: 17px; }
 header { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
+.locale { width: auto; display: flex; grid-template-columns: auto auto; align-items: center; gap: 5px; margin-left: auto; font-size: 9px; }
+.locale select { width: 67px; padding: 5px 6px; border-radius: 7px; font-size: 10px; }
 .logo { width: 34px; height: 34px; display: grid; place-items: center; }
 .logo img { width: 34px; height: 34px; display: block; border-radius: 10px; box-shadow: 0 6px 16px #635bff3d; }
 h1 { margin: 0; font-size: 17px; line-height: 1.1; } header small { color: #8a94a6; font-size: 8px; font-weight: 800; letter-spacing: .13em; }

@@ -11,6 +11,7 @@ type RecorderState = {
   mode?: RecordingMode
   aiEnabled?: boolean
   locale?: Locale
+  contentLocale?: Locale
 }
 
 let active = false
@@ -21,6 +22,7 @@ let steps = 0
 let mode: RecordingMode = 'html'
 let aiEnabled = false
 let locale: Locale = browserLocale()
+let contentLocale: Locale = locale
 let currentSnapshot: CapturedSnapshot | null = null
 let refreshTimer: number | undefined
 let hudHost: HTMLDivElement | null = null
@@ -60,10 +62,11 @@ function selectableTarget(raw: Element | null): HTMLElement | null {
   return !target || target === document.documentElement || target === document.body ? null : target
 }
 
-function showRecordingSetup(message: { demoId: string; aiAvailable?: boolean; locale?: Locale }) {
+function showRecordingSetup(message: { demoId: string; aiAvailable?: boolean; locale?: Locale; contentLocale?: Locale }) {
   if (window.top !== window || active) return
   setupHost?.remove()
   locale = message.locale || browserLocale()
+  contentLocale = message.contentLocale || locale
   const host = document.createElement('div')
   host.className = 'docflow-recorder-ui'
   const shadow = host.attachShadow({ mode: 'closed' })
@@ -109,7 +112,7 @@ function showRecordingSetup(message: { demoId: string; aiAvailable?: boolean; lo
     view.querySelector('#next')?.addEventListener('click', async () => {
       if (tutorialIndex < tutorial.length - 1) { tutorialIndex += 1; renderTutorial(); return }
       host.remove(); setupHost = null
-      const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, mode: selectedMode, aiEnabled: selectedAI })
+      const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, mode: selectedMode, aiEnabled: selectedAI, locale, contentLocale })
       if (result?.error) { window.alert(result.error); showRecordingSetup(message) }
     })
   }
@@ -167,7 +170,7 @@ function ensureHud() {
     if (!active || paused || capturing) return
     const snapshot = mode === 'html' ? (captureDom() || currentSnapshot) : undefined
     const data = {
-      event_id: crypto.randomUUID(), title: tr(locale, 'manualTitle'), body: tr(locale, 'manualBody'),
+      event_id: crypto.randomUUID(), title: tr(contentLocale, 'manualTitle'), body: tr(contentLocale, 'manualBody'),
       viewport_width: innerWidth, viewport_height: innerHeight, page_context: { ...pageContext(), manual_capture: true },
       scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(),
       capture_warnings: captureWarnings(), duration: 3, terminal: false,
@@ -220,7 +223,7 @@ function renderHud() {
 function applyState(state: RecorderState) {
   active = Boolean(state.active); paused = Boolean(state.paused); capturing = Boolean(state.capturing)
   phase = state.phase || ''; steps = Number(state.steps || 0); mode = state.mode || 'html'
-  aiEnabled = Boolean(state.aiEnabled); locale = state.locale || locale
+  aiEnabled = Boolean(state.aiEnabled); locale = state.locale || locale; contentLocale = state.contentLocale || contentLocale
   if (!capturing) lastError = ''
   renderHud()
   if (active && !paused && mode === 'html') window.setTimeout(refreshSnapshot, document.readyState === 'complete' ? 0 : 500)
@@ -288,8 +291,8 @@ async function onPointer(event: PointerEvent) {
   // cached value as a fallback for restricted pages or extension messaging.
   const snapshot = mode === 'html' ? (currentSnapshot || undefined) : undefined
   const info = targetInfo(target), isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
-  const label = info.text || info.aria_label || info.tag || (locale === 'zh' ? '目标元素' : 'target element')
-  const body = locale === 'zh'
+  const label = info.text || info.aria_label || info.tag || tr(contentLocale, 'targetElement')
+  const body = contentLocale === 'zh-CN'
     ? (isInput ? `在「${label}」中输入或选择内容` : `点击「${label}」`)
     : (isInput ? `Enter or select a value in “${label}”` : `Click “${label}”`)
   const data = {
@@ -333,7 +336,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({
       snapshot: mode === 'html' ? currentSnapshot : undefined,
       data: {
-        event_id: crypto.randomUUID(), title: locale === 'zh' ? '流程完成' : 'Flow complete', body: locale === 'zh' ? '已完成此操作流程。' : 'This walkthrough is complete.',
+        event_id: crypto.randomUUID(), title: tr(contentLocale, 'flowComplete'), body: tr(contentLocale, 'flowCompleteBody'),
         viewport_width: innerWidth, viewport_height: innerHeight, page_context: pageContext(), scroll_state: { x: scrollX, y: scrollY },
         password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: true,
       },

@@ -52,6 +52,7 @@ def render_export(job_id: str):
         if job:
             job.status = JobStatus.failed
             job.error = f"{exc}\n{traceback.format_exc()[-1500:]}"
+            job.error_code = "export.render_failed"
             db.commit()
         raise
     finally:

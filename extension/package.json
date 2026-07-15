@@ -4,7 +4,8 @@
   "version": "0.3.2",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "build": "npm run check:i18n && node build.mjs",
     "watch": "node build.mjs --watch"
   },
   "devDependencies": {

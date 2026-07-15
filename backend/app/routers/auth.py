@@ -6,7 +6,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import current_user
 from app.models import Session as UserSession, User
-from app.schemas import AuthInput, UserOut
+from app.schemas import AuthInput, UserOut, UserPreferenceUpdate
 from app.security import expires_in, hash_password, hash_token, random_token, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -32,7 +32,7 @@ def register(payload: AuthInput, response: Response, db: Session = Depends(get_d
     email = payload.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=409, detail="email already registered")
-    user = User(email=email, password_hash=hash_password(payload.password))
+    user = User(email=email, password_hash=hash_password(payload.password), ui_locale=payload.ui_locale or "zh-CN")
     db.add(user)
     db.flush()
     create_session(db, user, response)
@@ -66,3 +66,10 @@ def logout(
 def me(user: User = Depends(current_user)):
     return user
 
+
+@router.patch("/me", response_model=UserOut)
+def update_preferences(payload: UserPreferenceUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    user.ui_locale = payload.ui_locale
+    db.commit()
+    db.refresh(user)
+    return user

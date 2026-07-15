@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
+from app.errors import http_exception_response, validation_exception_response
 from app.routers import ai, auth, demos, exports, extension, interactions, library, public, recordings, reorder
 
 
@@ -14,6 +16,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="DocFlow API", version="0.1.0", lifespan=lifespan)
+app.add_exception_handler(HTTPException, http_exception_response)
+app.add_exception_handler(RequestValidationError, validation_exception_response)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin],

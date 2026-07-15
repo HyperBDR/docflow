@@ -1,5 +1,7 @@
 import { arrow, autoUpdate, flip, FloatingArrow, offset, shift, useFloating, type Placement, type VirtualElement } from '@floating-ui/react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 import type { HotspotData, Rect, SelectorInfo, Step } from '../types'
 
 const snapshotCache = new Map<string, Promise<Record<string, unknown>>>()
@@ -10,7 +12,7 @@ export function preloadSnapshot(url?: string) {
   const cached = snapshotCache.get(url)
   if (cached) return cached
   const pending = fetch(url, { credentials: 'include' })
-    .then(response => { if (!response.ok) throw new Error('DOM 快照加载失败'); return response.json() })
+    .then(response => { if (!response.ok) throw new Error(i18n.t('guide.snapshotFailed', { ns: 'player' })); return response.json() })
     .catch(error => { snapshotCache.delete(url); throw error })
   snapshotCache.set(url, pending)
   while (snapshotCache.size > SNAPSHOT_CACHE_LIMIT) snapshotCache.delete(snapshotCache.keys().next().value!)
@@ -57,6 +59,7 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
   theme?: Record<string, any>; navigation?: Record<string, any>; stepIndex?: number; stepCount?: number
   onActivate?: () => void; onSelect?: () => void; onGuidePrevious?: () => void; onGuideNext?: () => void; onRectChange?: (rect: Rect) => void
 }) {
+  const { t } = useTranslation('player')
   const arrowRef = useRef<SVGSVGElement>(null)
   const { refs, floatingStyles, context } = useFloating({
     placement: placement(hotspot.tooltip?.placement, hotspot.tooltip?.alignment),
@@ -83,7 +86,7 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
   const hotspotBackground = /^#[0-9a-f]{6}$/i.test(color) ? `${color}1f` : 'rgba(99, 91, 255, .12)'
   const tooltipTheme = theme?.tooltip || {}
   const guideNavigation = {
-    previous_label: '上一步', next_label: '下一步', previous_color: '#ffffff', next_color: color,
+    previous_label: t('common:actions.previous'), next_label: t('common:actions.next'), previous_color: '#ffffff', next_color: color,
     text_color: '#172033', next_text_color: '#ffffff', radius: 9, show_previous: true, show_next: true,
     ...(navigation || {}),
   }
@@ -117,7 +120,7 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
   return <>
     <button
       type="button"
-      aria-label={hotspot.tooltip?.content || '交互热点'}
+      aria-label={hotspot.tooltip?.content || t('guide.hotspot')}
       className={`interactive-hotspot ${hotspot.style?.pulse ? 'pulse' : ''} ${mode === 'editor' ? 'editing' : ''}`}
       style={{
         left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `calc(${Math.max(rect.w, .012) * 100}% + ${hotspotPadding * 2}px)`,
@@ -139,9 +142,9 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
       }}
     >
       {hotspot.tooltip.show_arrow !== false && <FloatingArrow ref={arrowRef} context={context} width={18} height={9} tipRadius={2} fill={tooltipTheme.background || '#fff'} stroke={tooltipTheme.border_color || '#e2e6ed'} strokeWidth={1} />}
-      <span className="tooltip-kicker"><i style={{ background: color }} />操作引导</span>
+      <span className="tooltip-kicker"><i style={{ background: color }} />{t('guide.kicker')}</span>
       <strong>{hotspot.tooltip.content}</strong>
-      <small>{hotspot.trigger === 'hover' ? '悬停目标或使用下方按钮继续' : '点击高亮区域或使用下方按钮继续'}</small>
+      <small>{hotspot.trigger === 'hover' ? t('guide.hoverHint') : t('guide.clickHint')}</small>
       <div className="tooltip-actions">
         {guideNavigation.show_previous !== false && <button
           type="button" disabled={stepIndex <= 0 || !onGuidePrevious}
@@ -167,6 +170,7 @@ function ZoomRegionLayer({ rect, wrapper, hotspots, onChange, onPreview, onDelet
   onPreview: () => void
   onDelete?: () => void
 }) {
+  const { t } = useTranslation('player')
   const [help, setHelp] = useState(false)
   const primary = hotspots[0]?.fallback_rect
   const containsPrimary = !primary || (
@@ -210,10 +214,10 @@ function ZoomRegionLayer({ rect, wrapper, hotspots, onChange, onPreview, onDelet
     </div>
     <div className="zoom-region-controls" style={{ left: `${rect.x * 100}%`, top: `${Math.min(.94, rect.y + rect.h / 2) * 100}%` }} onClick={event => event.stopPropagation()}>
       <button className="zoom-preview" onClick={onPreview}><span>▶</span>Zoom Preview</button>
-      <button title="删除 Zoom 区域" onClick={onDelete}>×</button>
-      <button title="Zoom 会把选中的页面区域放大到演示视口" onClick={() => setHelp(value => !value)}>?</button>
-      {!containsPrimary && <button className="zoom-warning" title="当前 Zoom 区域没有包含主要 Hotspot，请调整 Zoom 区域或 Hotspot。">!</button>}
-      {help && <div className="zoom-help">拖动边框移动区域，使用右下角手柄缩放。预览会放大 3 秒后自动还原。</div>}
+      <button title={t('guide.deleteZoom')} onClick={onDelete}>×</button>
+      <button title={t('guide.zoomHelpTitle')} onClick={() => setHelp(value => !value)}>?</button>
+      {!containsPrimary && <button className="zoom-warning" title={t('guide.zoomWarning')}>!</button>}
+      {help && <div className="zoom-help">{t('guide.zoomHelp')}</div>}
     </div>
   </>
 }
@@ -223,6 +227,7 @@ function zoomedRect(rect: Rect, scale: number, offsetX: number, offsetY: number)
 }
 
 export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, persistZoom = false, exportZoomProgress, onZoomRectChange, onZoomDelete }: Props) {
+  const { t } = useTranslation('player')
   const shellRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -296,7 +301,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
         if (hotspot) onHotspot?.(hotspot)
       }
       if (event.data?.type === 'DOCFLOW_TARGET') onTarget?.({ selector: event.data.selector, rect: event.data.rect })
-      if (event.data?.type === 'DOCFLOW_ERROR') setError(event.data.error || '页面重建失败')
+      if (event.data?.type === 'DOCFLOW_ERROR') setError(event.data.error || t('guide.rebuildFailed'))
     }
     window.addEventListener('message', listener)
     return () => window.removeEventListener('message', listener)
@@ -341,7 +346,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   // script-free inner iframe created by rrweb. Captured content stays in the
   // inner iframe, whose sandbox does not permit scripts.
   return <div ref={shellRef} className={`slide-stage-shell ${fit === 'viewport' ? 'viewport-fit' : ''}`}>
-    {error && <div className="capture-warning">{error}，已切换截图预览。</div>}
+    {error && <div className="capture-warning">{t('guide.fallback', { error })}</div>}
     <div
       ref={wrapperRef}
       className={`slide-stage ${mode} ${zoomVisible ? 'zoom-previewing' : ''}`}
@@ -365,8 +370,8 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
           style={{ width: step.viewport_width, height: step.viewport_height, transform: `scale(${scale})`, opacity: contentReady ? 1 : 0 }}
         />}
       </div>
-      {!contentReady && !previewReady && <div className="slide-transition-loading"><span /><b>正在加载下一步…</b></div>}
-      {!contentReady && previewReady && useDom && <div className="slide-background-loading"><span />交互页面加载中</div>}
+      {!contentReady && !previewReady && <div className="slide-transition-loading"><span /><b>{t('guide.loadingNext')}</b></div>}
+      {!contentReady && previewReady && useDom && <div className="slide-background-loading"><span />{t('guide.loadingPage')}</div>}
       {contentReady && step.hotspots.map(hotspot => <HotspotLayer
         key={hotspot.id} hotspot={hotspot} rect={zoomedRect(dynamicRects[hotspot.id] || hotspot.fallback_rect, zoomTransform.scale, zoomTransform.x, zoomTransform.y)}
         active={hotspot.id === activeId} mode={mode} wrapper={wrapperRef.current} theme={theme} navigation={navigation} stepIndex={stepIndex} stepCount={stepCount}

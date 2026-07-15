@@ -29,14 +29,14 @@ def user_agent_info(value: str) -> tuple[str, str, str]:
     elif "chrome/" in lower and "chromium" not in lower: browser = "Chrome"
     elif "firefox/" in lower: browser = "Firefox"
     elif "safari/" in lower: browser = "Safari"
-    else: browser = "其他"
+    else: browser = "Other"
     if "windows" in lower: operating_system = "Windows"
     elif "android" in lower: operating_system = "Android"
     elif "iphone" in lower or "ipad" in lower: operating_system = "iOS"
     elif "mac os" in lower or "macintosh" in lower: operating_system = "macOS"
     elif "linux" in lower: operating_system = "Linux"
-    else: operating_system = "其他"
-    device = "移动设备" if any(item in lower for item in ("mobile", "iphone", "android")) else "桌面设备"
+    else: operating_system = "Other"
+    device = "mobile" if any(item in lower for item in ("mobile", "iphone", "android")) else "desktop"
     return operating_system, browser, device
 
 
@@ -85,7 +85,8 @@ def create_comment(token: str, payload: CommentCreate, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="step not found")
     comment = StepComment(
         share_id=share.id, demo_id=share.demo_id, revision_id=revision.id, step_id=payload.step_id,
-        visitor_id=payload.visitor_id, author_name=payload.author_name.strip() or "访客",
+        visitor_id=payload.visitor_id,
+        author_name=payload.author_name.strip() or ("Guest" if revision.snapshot.get("content_locale") == "en" else "访客"),
         author_email=payload.author_email.strip(), content=payload.content.strip(),
     )
     db.add(comment); db.commit(); db.refresh(comment)
@@ -155,5 +156,6 @@ def public_markdown(token: str, db: Session = Depends(get_db)):
     if snapshot.get("description"):
         lines += [snapshot["description"], ""]
     for index, step in enumerate(snapshot["steps"], 1):
-        lines += [f"## {index}. {step['title'] or f'步骤 {index}'}", "", step.get("body", ""), "", f"![{step['title'] or f'步骤 {index}'}]({settings.public_base_url}/public/{token}/assets/{step['id']}.webp)", ""]
+        fallback = f"Step {index}" if snapshot.get("content_locale") == "en" else f"步骤 {index}"
+        lines += [f"## {index}. {step['title'] or fallback}", "", step.get("body", ""), "", f"![{step['title'] or fallback}]({settings.public_base_url}/public/{token}/assets/{step['id']}.webp)", ""]
     return "\n".join(lines)

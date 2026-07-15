@@ -23,6 +23,15 @@ DEFAULT_NAVIGATION = {
     "show_progress": True,
 }
 
+
+def navigation_defaults(locale: str = "zh-CN") -> dict:
+    """Return content-language defaults without sharing a mutable dictionary."""
+    return {
+        **DEFAULT_NAVIGATION,
+        "previous_label": "Previous" if locale == "en" else "上一步",
+        "next_label": "Next" if locale == "en" else "下一步",
+    }
+
 DEFAULT_PLAYBACK = {
     "autoplay": False,
     "step_duration_ms": 2000,

@@ -1,4 +1,4 @@
-import type { Credentials, Recording, RecordingMode } from './types'
+import type { Credentials, Locale, Recording, RecordingMode } from './types'
 import { browserLocale } from './locale'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
@@ -45,7 +45,7 @@ async function notify(state: Recording | null) {
     await chrome.tabs.sendMessage(state.tabId, {
       type: 'RECORDING_STATE', active: state.active, paused: state.paused,
       capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode,
-      aiEnabled: state.aiEnabled, locale: state.locale,
+      aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale,
     })
   } catch { /* restricted or navigating page */ }
   const badge = !state.active ? '' : state.capturing ? '…' : state.paused ? 'Ⅱ' : state.steps ? (state.steps > 99 ? '99+' : String(state.steps)) : 'REC'
@@ -54,14 +54,14 @@ async function notify(state: Recording | null) {
   await chrome.action.setTitle({ tabId: state.tabId, title: state.active ? `${state.steps} Steps Recorded · ${state.mode === 'html' ? 'HTML Cloning' : 'Screenshot'}` : 'DocFlow Recorder' })
 }
 
-async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number) {
+async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale) {
   const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
   if (!auth || !tab.id || !tab.url?.startsWith('http')) throw new Error('请打开可录制的网页并确认扩展已连接')
   recording = {
     tabId: tab.id, demoId, api: auth.api, token: auth.token,
     screenshot: await capture(tab.id), active: true, paused: false,
-    capturing: false, phase: '', steps: 0, mode, aiEnabled, locale: browserLocale(),
+    capturing: false, phase: '', steps: 0, mode, aiEnabled, locale, contentLocale,
   }
   await persist(recording)
   await notify(recording)
@@ -77,7 +77,7 @@ async function restore(): Promise<Recording | null> {
       paused: Boolean(saved.paused), capturing: false,
       phase: '',
       steps: Number(saved.steps || 0), mode: saved.mode || 'html',
-      aiEnabled: Boolean(saved.aiEnabled), locale: saved.locale || browserLocale(),
+      aiEnabled: Boolean(saved.aiEnabled), locale: saved.locale || browserLocale(), contentLocale: saved.contentLocale || saved.locale || browserLocale(),
     }
     return recording
   } catch { await chrome.storage.session.remove('recording'); return null }
@@ -283,17 +283,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'OPEN_SETUP') {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (!tab?.id || !tab.url?.startsWith('http')) throw new Error('Please open a recordable web page first.')
-      await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_RECORDING_SETUP', demoId: message.demoId, aiAvailable: Boolean(message.aiAvailable), locale: browserLocale() })
+      await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_RECORDING_SETUP', demoId: message.demoId, aiAvailable: Boolean(message.aiAvailable), locale: message.locale || browserLocale(), contentLocale: message.contentLocale || message.locale || browserLocale() })
       return { ok: true }
     }
-    if (message.type === 'START') { await begin(message.demoId, message.mode, Boolean(message.aiEnabled), sender.tab?.id); return { ok: true } }
+    if (message.type === 'START') { await begin(message.demoId, message.mode, Boolean(message.aiEnabled), sender.tab?.id, message.locale || browserLocale(), message.contentLocale || message.locale || browserLocale()); return { ok: true } }
     if (message.type === 'PAUSE') { const state = await pause(); return state ? { active: true, paused: state.paused, steps: state.steps, mode: state.mode } : { active: false } }
     if (message.type === 'STOP') { await stop(message.open !== false); return { ok: true } }
-    if (message.type === 'STATUS') { const state = await restore(); return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale } : { active: false, steps: 0 } }
+    if (message.type === 'STATUS') { const state = await restore(); return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale } : { active: false, steps: 0 } }
     if (message.type === 'IS_RECORDING') {
       const state = await restore()
       return state?.active && state.tabId === sender.tab?.id
-        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale }
+        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale }
         : { active: false }
     }
     if (message.type === 'MANUAL_STEP' && sender.tab?.id) {

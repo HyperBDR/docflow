@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 import io
 
 from app.database import get_db
+from app.defaults import navigation_defaults
 from app.dependencies import current_user
 from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, Tag, User
 from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, StepOut, StepUpdate
@@ -33,7 +34,11 @@ def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User =
         category = db.get(Category, payload.category_id)
         if not category or category.owner_id != user.id:
             raise HTTPException(status_code=400, detail="category not found")
-    demo = Demo(owner_id=user.id, title=payload.title, description=payload.description, category_id=payload.category_id, manual_fields=manual_fields)
+    demo = Demo(
+        owner_id=user.id, title=payload.title, description=payload.description,
+        content_locale=payload.content_locale, navigation=navigation_defaults(payload.content_locale),
+        category_id=payload.category_id, manual_fields=manual_fields,
+    )
     db.add(demo)
     db.commit()
     db.refresh(demo)
@@ -50,6 +55,13 @@ def update_demo(payload: DemoUpdate, demo_id: str, db: Session = Depends(get_db)
     demo = owned_demo(db, demo_id, user)
     values = payload.model_dump(exclude_unset=True)
     tag_ids = values.pop("tag_ids", None)
+    if values.get("content_locale") and values["content_locale"] != demo.content_locale:
+        # Preserve all visible content when only the future AI language changes.
+        current_navigation = dict(demo.navigation or {})
+        old_defaults = navigation_defaults(demo.content_locale)
+        current_navigation.setdefault("previous_label", old_defaults["previous_label"])
+        current_navigation.setdefault("next_label", old_defaults["next_label"])
+        demo.navigation = current_navigation
     if "category_id" in values and values["category_id"]:
         category = db.get(Category, values["category_id"])
         if not category or category.owner_id != user.id:
@@ -77,8 +89,9 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
     source = owned_demo(db, demo_id, user)
     duplicate = Demo(
         owner_id=user.id,
-        title=f"{source.title}（副本）"[:200],
+        title=f"{source.title}{' (Copy)' if source.content_locale == 'en' else '（副本）'}"[:200],
         description=source.description,
+        content_locale=source.content_locale,
         theme=deepcopy(source.theme or {}),
         navigation=deepcopy(source.navigation or {}),
         playback=deepcopy(source.playback or {}),
@@ -170,7 +183,9 @@ def merge_demos(payload: MergeDemos, db: Session = Depends(get_db), user: User =
             raise HTTPException(status_code=400, detail="category not found")
     first = sources[0]
     merged = Demo(
-        owner_id=user.id, title=payload.title, description=f"由 {len(sources)} 个演示合并生成",
+        owner_id=user.id, title=payload.title,
+        description=(f"Merged from {len(sources)} demos" if first.content_locale == "en" else f"由 {len(sources)} 个演示合并生成"),
+        content_locale=first.content_locale,
         category_id=payload.category_id or first.category_id, theme=deepcopy(first.theme or {}),
         navigation=deepcopy(first.navigation or {}), playback=deepcopy(first.playback or {}), manual_fields=["title"],
     )
@@ -278,7 +293,8 @@ def publish_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depen
         number=next_revision_number(db, demo.id),
         snapshot={
             "title": demo.title, "description": demo.description, "steps": steps,
-            "theme": demo.theme, "navigation": demo.navigation, "playback": demo.playback,
+            "content_locale": demo.content_locale,
+            "theme": demo.theme, "navigation": {**navigation_defaults(demo.content_locale), **(demo.navigation or {})}, "playback": demo.playback,
         },
     )
     db.add(revision)

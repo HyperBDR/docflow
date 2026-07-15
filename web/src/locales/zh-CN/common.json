@@ -1,0 +1,27 @@
+{
+  "language": { "label": "语言", "zh-CN": "中文", "en": "English", "switchTo": "切换语言" },
+  "actions": { "close": "关闭", "cancel": "取消", "confirm": "确认", "save": "保存", "create": "创建", "edit": "编辑", "delete": "删除", "copy": "复制", "share": "共享", "open": "打开", "download": "下载", "back": "返回", "next": "下一步", "previous": "上一步", "retry": "重试", "more": "更多操作", "publish": "发布", "preview": "预览", "search": "搜索", "clear": "清除", "remove": "移除", "add": "添加", "apply": "应用", "logout": "退出" },
+  "status": { "draft": "草稿", "published": "已发布", "queued": "排队中", "running": "处理中", "complete": "已完成", "failed": "失败", "loading": "正在加载…", "creating": "创建中" },
+  "contentLanguage": { "label": "演示内容语言", "description": "决定后续 AI 和新录制步骤生成文案所使用的语言。已有内容不会被改写。", "zh-CN": "简体中文", "en": "English" },
+  "errors": {
+    "requestFailed": "请求失败，请稍后重试。",
+    "operationFailed": "操作失败",
+    "copyBlocked": "浏览器禁止访问剪贴板，请手动复制",
+    "codes": {
+      "auth": { "not_authenticated": "请先登录。", "session_expired": "登录已过期，请重新登录。", "account_disabled": "账号已停用。", "email_registered": "该邮箱已注册。", "invalid_credentials": "邮箱或密码不正确。" },
+      "demo": { "not_found": "演示不存在或已被删除。", "empty_publish": "请至少录制一个步骤后再发布。" },
+      "step": { "not_found": "步骤不存在。" },
+      "export": { "publish_first": "请先发布演示再导出。", "not_found": "导出任务不存在。", "render_failed": "导出渲染失败，请重试。" },
+      "ai": { "not_configured": "服务端尚未配置 AI。", "no_steps": "请至少录制一个步骤。", "job_not_found": "AI 任务不存在。", "generation_failed": "AI 生成失败，请重试。" },
+      "extension": { "invalid_pairing_code": "配对码无效或已过期。" },
+      "category": { "not_found": "分类不存在。" },
+      "tag": { "not_found": "标签不存在。" },
+      "public": { "not_found": "演示不存在或已取消共享。" },
+      "asset": { "not_found": "资源不存在。" },
+      "snapshot": { "not_found": "页面快照不存在。" },
+      "request": { "validation": "提交内容格式不正确。", "failed": "请求失败，请稍后重试。" }
+    }
+  },
+  "date": { "updatedAt": "更新于 {{date}}" },
+  "units": { "items": "{{count}} 项", "steps": "{{count}} 个步骤", "records": "{{count}} 条" }
+}

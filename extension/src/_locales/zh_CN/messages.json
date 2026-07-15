@@ -1,0 +1,4 @@
+{
+  "extensionName": { "message": "DocFlow 录制器" },
+  "extensionDescription": { "message": "将网页操作录制为 DocFlow 交互文档" }
+}

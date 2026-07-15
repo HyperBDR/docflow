@@ -13,6 +13,15 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # The original baseline migration builds the current SQLAlchemy metadata.
+    # On a brand-new database these objects therefore already exist by the
+    # time this historical migration runs; keep the migration replay-safe.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+    demo_columns = {item["name"] for item in inspector.get_columns("demos")}
+    if {"categories", "tags", "demo_tags", "analytics_events", "step_comments"}.issubset(tables) and "category_id" in demo_columns:
+        return
     op.create_table(
         "categories",
         sa.Column("id", sa.String(36), primary_key=True),

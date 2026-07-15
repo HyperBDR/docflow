@@ -34,6 +34,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    ui_locale: Mapped[str] = mapped_column(String(10), default="zh-CN")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -103,6 +104,7 @@ class Demo(Base):
     category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="未命名演示")
     description: Mapped[str] = mapped_column(Text, default="")
+    content_locale: Mapped[str] = mapped_column(String(10), default="zh-CN")
     theme: Mapped[dict] = mapped_column(JSON, default=dict)
     navigation: Mapped[dict] = mapped_column(JSON, default=dict)
     playback: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -226,6 +228,7 @@ class ExportJob(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     result_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
@@ -243,5 +246,6 @@ class AIJob(Base):
     applied_patch: Mapped[dict] = mapped_column(JSON, default=dict)
     inverse_patch: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

@@ -15,6 +15,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .primary { color: white; border-color: #635bff; background: #635bff; font-weight: 650; }
 .icon-button, .card-action, .card-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .icon-button svg, .card-action svg, .card-actions svg { flex: 0 0 auto; }
+.language-switcher { min-width: 112px; height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid #dfe3ea; border-radius: 9px; color: #596579; background: #fff; font-size: 11px; font-weight: 700; }
+.language-switcher > span { color: #635bff; font-size: 10px; white-space: nowrap; }
+.language-switcher select { min-width: 0; height: 30px; padding: 0 18px 0 0; border: 0; color: inherit; background-color: transparent; font: inherit; }
+.language-switcher.compact { min-width: 88px; height: 30px; border-color: #ffffff26; color: #fff; background: #111827a8; backdrop-filter: blur(10px); }
+.auth-shell { position: relative; }
+.auth-language { position: absolute; top: 20px; right: 20px; }
 .secondary { background: white; border: 1px solid #cbd2df; }
 .ghost, .link-button { background: transparent; border-color: transparent; }
 .danger { color: #c02b3a; }
@@ -345,6 +351,7 @@ label.check input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: #63
 .toast { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 100; padding: 11px 18px; border-radius: 9px; box-shadow: 0 10px 30px #1f293733; }
 .player-shell { position: relative; width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; color: white; background: #0c1018; }
 .player-shell header { position: absolute; z-index: 70; top: 16px; left: 16px; right: 16px; height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px 0 18px; border: 1px solid #ffffff1f; border-radius: 13px; background: #111722d9; box-shadow: 0 8px 30px #0005; backdrop-filter: blur(16px); }
+.player-header-actions { display: flex; align-items: center; gap: 8px; }
 .player-shell header div { display: flex; gap: 18px; align-items: center; }
 .player-shell header span { color: #8994a8; font-size: 13px; }
 .player-shell button { background: #202838; border-color: #39445a; color: white; }
@@ -563,9 +570,8 @@ label.check input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: #63
   .category-tree { max-height: 180px; overflow-y: auto; }
   .library-page.has-bulk-selection { padding-bottom: 128px; }
   .bulk-action-bar { bottom: max(10px, env(safe-area-inset-bottom)); width: calc(100vw - 20px); min-height: 60px; grid-template-columns: auto minmax(0, 1fr) 34px; gap: 8px; padding: 8px 8px 8px 13px; border-radius: 14px; }
-  .bulk-action-bar > span { padding-right: 9px; font-size: 0; }
+  .bulk-action-bar > span { max-width: 128px; overflow: hidden; padding-right: 9px; font-size: 12px; text-overflow: ellipsis; }
   .bulk-action-bar > span strong { font-size: 15px; }
-  .bulk-action-bar > span strong::after { content: ' 项'; }
   .bulk-action-bar button { min-height: 38px; padding: 8px 10px; font-size: 12px; }
   .bulk-action-bar button svg { width: 17px; height: 17px; }
   .demo-grid.list-view .demo-card { grid-template-columns: 110px minmax(0, 1fr); }

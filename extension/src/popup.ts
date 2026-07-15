@@ -1,19 +1,22 @@
 import { browserLocale, tr, type MessageKey } from './locale'
-import type { Credentials } from './types'
+import type { Credentials, Locale } from './types'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
-const locale = browserLocale()
+let locale: Locale = browserLocale()
 const connect = $('connect'), recorder = $('recorder'), setup = $('setup'), activePanel = $('active-recording'), message = $('message')
 const apiInput = $<HTMLInputElement>('api'), codeInput = $<HTMLInputElement>('code'), demoSelect = $<HTMLSelectElement>('demo')
 const startButton = $<HTMLButtonElement>('start'), pauseButton = $<HTMLButtonElement>('pause')
 const statusText = $('record-status'), modeText = $('record-mode'), countText = $('step-count')
 let timer: number | undefined
-let demos: { id: string; title: string; ai_enabled: boolean }[] = []
+let demos: { id: string; title: string; ai_enabled: boolean; content_locale: Locale }[] = []
 
-document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
-document.querySelectorAll<HTMLElement>('[data-i18n]').forEach(element => {
-  element.textContent = tr(locale, element.dataset.i18n as MessageKey)
-})
+function applyTranslations() {
+  document.documentElement.lang = locale
+  document.querySelectorAll<HTMLElement>('[data-i18n]').forEach(element => {
+    element.textContent = tr(locale, element.dataset.i18n as MessageKey)
+  })
+  $<HTMLSelectElement>('locale').value = locale
+}
 
 async function credentials(): Promise<Credentials | undefined> {
   return (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
@@ -27,7 +30,7 @@ function renderState(state: any) {
   activePanel.querySelector('.recording-summary')?.classList.toggle('capturing', Boolean(state.capturing))
   statusText.textContent = state.capturing ? tr(locale, 'capturing') : state.paused ? tr(locale, 'paused') : tr(locale, 'recording')
   modeText.textContent = state.capturing ? tr(locale, 'uploading') : `${state.mode === 'screenshot' ? tr(locale, 'screenshotMode') : tr(locale, 'htmlMode')}${state.aiEnabled ? ' · AI' : ''}`
-  countText.textContent = locale === 'zh' ? `${Number(state.steps || 0)} ${tr(locale, 'steps')}` : `${Number(state.steps || 0)} ${tr(locale, 'steps')}`
+  countText.textContent = `${Number(state.steps || 0)} ${tr(locale, 'steps')}`
   pauseButton.textContent = state.paused ? tr(locale, 'resume') : tr(locale, 'pause')
 }
 
@@ -60,7 +63,7 @@ $('pair').addEventListener('click', async () => {
 startButton.addEventListener('click', async () => {
   const selected = demos.find(item => item.id === demoSelect.value)
   if (!selected) return
-  const result = await chrome.runtime.sendMessage({ type: 'OPEN_SETUP', demoId: selected.id, aiAvailable: selected.ai_enabled })
+  const result = await chrome.runtime.sendMessage({ type: 'OPEN_SETUP', demoId: selected.id, aiAvailable: selected.ai_enabled, locale, contentLocale: selected.content_locale || locale })
   if (result?.error) { message.textContent = result.error; return }
   message.textContent = tr(locale, 'setupOpened')
   window.setTimeout(() => window.close(), 250)
@@ -69,9 +72,22 @@ startButton.addEventListener('click', async () => {
 pauseButton.addEventListener('click', async () => { renderState(await chrome.runtime.sendMessage({ type: 'PAUSE' })) })
 $('stop').addEventListener('click', async () => { statusText.textContent = tr(locale, 'finishing'); await chrome.runtime.sendMessage({ type: 'STOP' }); await refresh() })
 $('disconnect').addEventListener('click', async () => { await chrome.runtime.sendMessage({ type: 'STOP', open: false }); await chrome.storage.local.remove('credentials'); await refresh() })
+$<HTMLSelectElement>('locale').addEventListener('change', async event => {
+  locale = (event.currentTarget as HTMLSelectElement).value as Locale
+  await chrome.storage.local.set({ uiLocale: locale })
+  applyTranslations()
+  renderState(await chrome.runtime.sendMessage({ type: 'STATUS' }))
+})
 
-refresh()
-timer = window.setInterval(async () => {
-  const state = await chrome.runtime.sendMessage({ type: 'STATUS' }).catch(() => null)
-  if (state) renderState(state)
-}, 700)
+async function initialize() {
+  const saved = (await chrome.storage.local.get('uiLocale')).uiLocale as Locale | undefined
+  locale = saved || browserLocale()
+  applyTranslations()
+  await refresh()
+  timer = window.setInterval(async () => {
+    const state = await chrome.runtime.sendMessage({ type: 'STATUS' }).catch(() => null)
+    if (state) renderState(state)
+  }, 700)
+}
+
+void initialize()

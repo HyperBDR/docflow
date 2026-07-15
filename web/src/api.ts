@@ -1,12 +1,15 @@
-import type { AIJob, Analytics, Category, Demo, ExportJob, HotspotData, Step, Tag } from './types'
+import i18n, { type Locale } from './i18n'
+import type { AIJob, Analytics, Category, Demo, ExportJob, HotspotData, Step, Tag, User } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  code?: string
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -16,19 +19,22 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   const response = await fetch(`${API_URL}${path}`, { ...options, headers, credentials: 'include' })
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }))
-    throw new ApiError(response.status, error.detail || '请求失败')
+    const key = error.code ? `errors.codes.${error.code}` : ''
+    const message = key && i18n.exists(key, { ns: 'common' }) ? i18n.t(key, { ns: 'common' }) : i18n.t('errors.requestFailed', { ns: 'common' })
+    throw new ApiError(response.status, message, error.code)
   }
   if (response.status === 204) return undefined as T
   return response.json()
 }
 
 export const api = {
-  me: () => request<{ id: string; email: string }>('/api/auth/me'),
-  auth: (mode: 'login' | 'register', email: string, password: string) => request(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email, password }) }),
+  me: () => request<User>('/api/auth/me'),
+  auth: (mode: 'login' | 'register', email: string, password: string, uiLocale?: Locale) => request<User>(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email, password, ...(mode === 'register' ? { ui_locale: uiLocale } : {}) }) }),
+  updateLocale: (ui_locale: Locale) => request<User>('/api/auth/me', { method: 'PATCH', body: JSON.stringify({ ui_locale }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   demos: () => request<Demo[]>('/api/demos'),
   demo: (id: string) => request<Demo>(`/api/demos/${id}`),
-  createDemo: (title: string, categoryId?: string) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title, category_id: categoryId || null }) }),
+  createDemo: (title: string, categoryId?: string, contentLocale?: Locale) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title, category_id: categoryId || null, content_locale: contentLocale || 'zh-CN' }) }),
   updateDemo: (id: string, values: Partial<Demo> & { tag_ids?: string[] }) => request<Demo>(`/api/demos/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
   deleteDemo: (id: string) => request<void>(`/api/demos/${id}`, { method: 'DELETE' }),
   duplicateDemo: (id: string) => request<Demo>(`/api/demos/${id}/duplicate`, { method: 'POST' }),

@@ -2,16 +2,24 @@ from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl
 
+Locale = Literal["zh-CN", "en"]
+
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     email: str
+    ui_locale: Locale = "zh-CN"
 
 
 class AuthInput(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    ui_locale: Locale | None = None
+
+
+class UserPreferenceUpdate(BaseModel):
+    ui_locale: Locale
 
 
 class Hotspot(BaseModel):
@@ -141,6 +149,7 @@ class DemoCreate(BaseModel):
     title: str = Field(default="未命名演示", min_length=1, max_length=200)
     description: str = Field(default="", max_length=5000)
     category_id: str | None = None
+    content_locale: Locale = "zh-CN"
 
 
 class DemoUpdate(BaseModel):
@@ -151,6 +160,7 @@ class DemoUpdate(BaseModel):
     playback: PlaybackConfig | None = None
     category_id: str | None = None
     tag_ids: list[str] | None = Field(default=None, max_length=30)
+    content_locale: Locale | None = None
 
 
 class CategoryCreate(BaseModel):
@@ -239,6 +249,7 @@ class DemoOut(BaseModel):
     id: str
     title: str
     description: str
+    content_locale: Locale = "zh-CN"
     status: str
     created_at: datetime
     updated_at: datetime
@@ -294,6 +305,7 @@ class ExportOut(BaseModel):
     status: str
     progress: int
     error: str | None
+    error_code: str | None = None
     download_url: str | None = None
     created_at: datetime
 
@@ -308,4 +320,5 @@ class AIJobOut(BaseModel):
     model: str
     result: dict
     error: str | None
+    error_code: str | None = None
     can_revert: bool = False
