@@ -144,7 +144,7 @@ def render_mp4(snapshot: dict, token: str | None = None) -> bytes:
         source_path, trim_start, duration = source_video
         command = [
             "ffmpeg", "-y", "-i", str(source_path), "-ss", f"{trim_start:.3f}", "-t", f"{duration:.3f}",
-            "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "medium",
+            "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
             "-movflags", "+faststart", str(target_file),
         ]

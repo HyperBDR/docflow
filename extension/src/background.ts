@@ -24,10 +24,19 @@ async function capture(tabId: number): Promise<string> {
   return chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
 }
 
-async function captureClean(tabId: number): Promise<string> {
-  try { await chrome.tabs.sendMessage(tabId, { type: 'RECORDER_UI_VISIBILITY', hidden: true }) } catch { /* restricted page */ }
-  try { return await capture(tabId) }
+async function captureSynchronized(tabId: number, includeSnapshot = false): Promise<{ screenshot: string; snapshot?: Record<string, any> }> {
+  let pageState: { snapshot?: Record<string, any> } | undefined
+  try {
+    pageState = await chrome.tabs.sendMessage(tabId, {
+      type: 'RECORDER_UI_VISIBILITY', hidden: true, captureSnapshot: includeSnapshot,
+    })
+  } catch { /* restricted page */ }
+  try { return { screenshot: await capture(tabId), snapshot: pageState?.snapshot } }
   finally { try { await chrome.tabs.sendMessage(tabId, { type: 'RECORDER_UI_VISIBILITY', hidden: false }) } catch { /* page may navigate */ } }
+}
+
+async function captureClean(tabId: number): Promise<string> {
+  return (await captureSynchronized(tabId)).screenshot
 }
 
 async function notify(state: Recording | null) {
@@ -197,17 +206,38 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
 }
 
 async function recordStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording, screenshotOverride?: string) {
-  state.phase = 'uploading'; await persist(state); await notify(state)
   const pageUrl = String(data.page_context?.url || '')
   const enriched = state.mode === 'html' ? await enrichSnapshot(snapshot, pageUrl) : undefined
   await uploadStep(data, enriched, screenshotOverride, state)
-  if (recording === state && state.active) {
-    try { state.screenshot = await captureClean(state.tabId) } catch { /* page may be navigating */ }
-    state.steps += 1
-    state.capturing = false
-    state.phase = ''
+}
+
+async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording) {
+  state.capturing = true; state.phase = 'uploading'
+  await persist(state); await notify(state)
+  let captured: { screenshot: string; snapshot?: Record<string, any> }
+  try {
+    captured = await captureSynchronized(state.tabId, state.mode === 'html')
+  } catch (error) {
+    state.capturing = false; state.phase = ''
     await persist(state); await notify(state)
+    throw error
   }
+
+  // The page can be released as soon as its pixels are captured. DOM asset
+  // enrichment, upload and AI work continue serially in the background.
+  state.steps += 1
+  state.capturing = false; state.phase = ''
+  await persist(state); await notify(state)
+  const synchronizedSnapshot = state.mode === 'html' ? (captured.snapshot || snapshot) : undefined
+  const task = queue.then(() => recordStep(data, synchronizedSnapshot, state, captured.screenshot))
+  queue = task.catch(async error => {
+    console.warn('DocFlow step upload:', error)
+    try {
+      await chrome.action.setBadgeText({ tabId: state.tabId, text: '!' })
+      await chrome.action.setBadgeBackgroundColor({ tabId: state.tabId, color: '#dc2626' })
+    } catch { /* the tab may already be closed */ }
+  })
+  return { accepted: true, steps: state.steps }
 }
 
 async function pause() {
@@ -269,30 +299,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MANUAL_STEP' && sender.tab?.id) {
       const state = await restore()
       if (!state || state.tabId !== sender.tab.id || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
-      state.capturing = true; state.phase = 'uploading'
-      await persist(state); await notify(state)
-      const screenshot = await captureClean(state.tabId)
-      const task = queue.then(() => recordStep(message.data, message.snapshot, state, screenshot))
-      queue = task.catch(() => {})
-      try { await task; return { accepted: true, steps: state.steps } }
-      catch (error) {
-        state.capturing = false; state.phase = ''; await persist(state); await notify(state)
-        throw error
-      }
+      return captureAndQueueStep(message.data, message.snapshot, state)
     }
     if (message.type === 'STEP_EVENT' && sender.tab?.id) {
       const state = await restore()
       if (!state || state.tabId !== sender.tab.id || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
-      state.capturing = true
-      state.phase = 'uploading'
-      await persist(state); await notify(state)
-      const task = queue.then(() => recordStep(message.data, message.snapshot, state))
-      queue = task.catch(() => {})
-      try { await task; return { accepted: true, steps: state.steps } }
-      catch (error) {
-        state.capturing = false; state.phase = ''; await persist(state); await notify(state)
-        throw error
-      }
+      return captureAndQueueStep(message.data, message.snapshot, state)
     }
     return undefined
   })().then(sendResponse).catch(error => sendResponse({ error: error.message }))

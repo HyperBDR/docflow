@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
 import Player from './pages/Player'
 import SnapshotFrame from './pages/SnapshotFrame'
+import Brand from './components/Brand'
 
 type User = { id: string; email: string }
 
@@ -28,7 +29,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
 
   return <main className="auth-shell">
     <section className="auth-card">
-      <div className="brand brand-large"><span>◉</span> DocFlow</div>
+      <div className="brand brand-large"><Brand large /></div>
       <h1>{mode === 'login' ? '欢迎回来' : '创建内部账号'}</h1>
       <p className="muted">录制一次，生成交互演示与操作文档。</p>
       <form onSubmit={submit} className="stack">
@@ -46,7 +47,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
 
 function Shell({ user, logout }: { user: User; logout: () => void }) {
   return <div className="app-shell">
-    <header><Link className="brand" to="/"><span>◉</span> DocFlow</Link><div className="header-user"><span>{user.email}</span><button className="ghost" onClick={logout}>退出</button></div></header>
+    <header><Link className="brand" to="/"><Brand /></Link><div className="header-user"><span>{user.email}</span><button className="ghost" onClick={logout}>退出</button></div></header>
     <Routes><Route path="/" element={<Dashboard />} /><Route path="/demos/:id" element={<Editor />} /><Route path="*" element={<Navigate to="/" />} /></Routes>
   </div>
 }

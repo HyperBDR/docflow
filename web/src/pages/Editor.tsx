@@ -196,25 +196,32 @@ export default function Editor() {
     <div className="editor-layout">
       <aside className="step-list">
         <div className="panel-heading"><span>步骤资源</span><small>{demo.steps.length}</small></div><label className="upload-button icon-button"><Icon name="image" />添加截图<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => event.target.files?.[0] && upload(event.target.files[0])} /></label>
-        {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} /><div>{step.title || `步骤 ${index + 1}`}<small>{step.render_mode === 'dom' ? 'DOM' : '图片'}</small></div></button>)}
+        {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} title={step.title || `步骤 ${index + 1}`} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} /><div><strong>步骤 {index + 1}</strong><small>{step.render_mode === 'dom' ? 'HTML Clone' : '截图'}</small></div></button>)}
       </aside>
       <section className="editor-main">
         {selected ? <>
-          <div className="stage-toolbar"><span>{selected.render_mode === 'dom' ? 'HTML Clone · 可交互预览' : '图片 Slide'}</span><div className="stage-mode-switch"><button className={canvasMode === 'preview' ? 'active' : ''} onClick={() => setCanvasMode('preview')}><Icon name="play" />预览</button><button className={canvasMode === 'edit' ? 'active' : ''} onClick={() => setCanvasMode('edit')}><Icon name="target" />编辑热点</button></div>{selected.snapshot_url && <button className="icon-button" onClick={() => patchStep(selected.id, { render_mode: selected.render_mode === 'dom' ? 'image' : 'dom' })}><Icon name="image" />{selected.render_mode === 'dom' ? '图片模式' : 'DOM 模式'}</button>}<button className="icon-button" onClick={addHotspot}><Icon name="plus" />Hotspot</button></div>
+          <div className="stage-toolbar">
+            <span className="stage-preview-kind">{selected.render_mode === 'dom' ? 'HTML Clone · 可交互预览' : '图片 Slide'}</span>
+            <span className="stage-title-tag" title={selected.title || `步骤 ${selected.position + 1}`}><Icon name="text" size={12} />{selected.title || `步骤 ${selected.position + 1}`}</span>
+            <div className="stage-toolbar-actions"><div className="stage-mode-switch"><button className={canvasMode === 'preview' ? 'active' : ''} onClick={() => setCanvasMode('preview')}><Icon name="play" />预览</button><button className={canvasMode === 'edit' ? 'active' : ''} onClick={() => setCanvasMode('edit')}><Icon name="target" />编辑热点</button></div>{selected.snapshot_url && <button className="icon-button" onClick={() => patchStep(selected.id, { render_mode: selected.render_mode === 'dom' ? 'image' : 'dom' })}><Icon name="image" />{selected.render_mode === 'dom' ? '图片模式' : 'DOM 模式'}</button>}<button className="icon-button" onClick={addHotspot}><Icon name="plus" />Hotspot</button></div>
+          </div>
           {visibleCaptureWarnings(selected.capture_warnings).map((warning, index) => <div className="capture-warning" key={index}><Icon name="warning" />{warning}</div>)}
-          <SlideStage key={selected.id}
-            step={selected} mode={canvasMode === 'preview' ? 'player' : 'editor'} theme={demo.theme} navigation={demo.navigation}
-            stepIndex={demo.steps.findIndex(step => step.id === selected.id)} stepCount={demo.steps.length} activeHotspotId={selectedHotspot?.id}
-            onHotspot={canvasMode === 'preview' ? item => { setSelectedHotspotId(item.id); setTab('tooltip'); setCanvasMode('edit') } : undefined}
-            onGuidePrevious={canvasMode === 'preview' ? () => { const index = demo.steps.findIndex(step => step.id === selected.id); const target = demo.steps[Math.max(0, index - 1)]; if (target) { setSelectedId(target.id); setSelectedHotspotId(target.hotspots[0]?.id || null) } } : undefined}
-            onGuideNext={canvasMode === 'preview' ? () => { const index = demo.steps.findIndex(step => step.id === selected.id); const target = demo.steps[Math.min(demo.steps.length - 1, index + 1)]; if (target) { setSelectedId(target.id); setSelectedHotspotId(target.hotspots[0]?.id || null) } } : undefined}
-            onSelectHotspot={canvasMode === 'edit' ? item => { setSelectedHotspotId(item.id); setTab('hotspot') } : undefined}
-            onTarget={canvasMode === 'edit' ? chooseTarget : undefined}
-            onRectChange={canvasMode === 'edit' ? (item, rect) => { setSelectedHotspotId(item.id); patchHotspot({ fallback_rect: rect }, item) } : undefined}
-            showZoomEditor={tab === 'animation' && canvasMode === 'edit'}
-            onZoomRectChange={rect => setZoomRect(selected, rect)}
-            onZoomDelete={() => patchStep(selected.id, { animation: { ...(selected.animation || {}), zoom: undefined } })}
-          />
+          <div className="mac-preview-window">
+            <div className="mac-window-bar"><span className="mac-window-controls"><i /><i /><i /></span><span className="mac-window-caption">{selected.render_mode === 'dom' ? 'Interactive HTML' : 'Screenshot Preview'}</span><span /></div>
+            <div className="mac-preview-content"><SlideStage key={selected.id}
+              step={selected} mode={canvasMode === 'preview' ? 'player' : 'editor'} theme={demo.theme} navigation={demo.navigation}
+              stepIndex={demo.steps.findIndex(step => step.id === selected.id)} stepCount={demo.steps.length} activeHotspotId={selectedHotspot?.id}
+              onHotspot={canvasMode === 'preview' ? item => { setSelectedHotspotId(item.id); setTab('tooltip'); setCanvasMode('edit') } : undefined}
+              onGuidePrevious={canvasMode === 'preview' ? () => { const index = demo.steps.findIndex(step => step.id === selected.id); const target = demo.steps[Math.max(0, index - 1)]; if (target) { setSelectedId(target.id); setSelectedHotspotId(target.hotspots[0]?.id || null) } } : undefined}
+              onGuideNext={canvasMode === 'preview' ? () => { const index = demo.steps.findIndex(step => step.id === selected.id); const target = demo.steps[Math.min(demo.steps.length - 1, index + 1)]; if (target) { setSelectedId(target.id); setSelectedHotspotId(target.hotspots[0]?.id || null) } } : undefined}
+              onSelectHotspot={canvasMode === 'edit' ? item => { setSelectedHotspotId(item.id); setTab('hotspot') } : undefined}
+              onTarget={canvasMode === 'edit' ? chooseTarget : undefined}
+              onRectChange={canvasMode === 'edit' ? (item, rect) => { setSelectedHotspotId(item.id); patchHotspot({ fallback_rect: rect }, item) } : undefined}
+              showZoomEditor={tab === 'animation' && canvasMode === 'edit'}
+              onZoomRectChange={rect => setZoomRect(selected, rect)}
+              onZoomDelete={() => patchStep(selected.id, { animation: { ...(selected.animation || {}), zoom: undefined } })}
+            /></div>
+          </div>
           <div className="inline-actions step-order action-category"><span>步骤操作</span><button className="icon-button" onClick={() => move(selected.id, -1)}><Icon name="arrowUp" />上移</button><button className="icon-button" onClick={() => move(selected.id, 1)}><Icon name="arrowDown" />下移</button><button className="danger icon-button" onClick={async () => { await api.deleteStep(id, selected.id); const fresh = await api.demo(id); setDemo(fresh); setSelectedId(fresh.steps[0]?.id || null) }}><Icon name="delete" />删除步骤</button></div>
         </> : <div className="empty editor-empty"><h2>添加第一个步骤</h2><p>使用浏览器扩展录制 DOM 演示，或手动添加截图。</p></div>}
       </section>

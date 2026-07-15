@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "DocFlow Recorder",
   "description": "将网页操作录制为 DocFlow 交互文档",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
-  "action": { "default_popup": "popup.html", "default_title": "DocFlow Recorder" },
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": { "default_popup": "popup.html", "default_title": "DocFlow Recorder", "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" } },
   "background": { "service_worker": "background.js" },
   "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }]
 }

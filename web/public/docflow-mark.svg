@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DocFlow">
+  <defs>
+    <linearGradient id="docflow-gradient" x1="72" y1="56" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B7CFF"/>
+      <stop offset="0.52" stop-color="#635BFF"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="116" fill="url(#docflow-gradient)"/>
+  <path d="M142 104h154l78 78v226H142z" fill="#fff"/>
+  <path d="M296 104v78h78" fill="#D9D6FF"/>
+  <path d="M200 226h112M200 282h68" fill="none" stroke="#635BFF" stroke-width="28" stroke-linecap="round"/>
+  <path d="m226 299 78 45-78 45z" fill="#635BFF"/>
+</svg>

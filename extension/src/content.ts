@@ -32,7 +32,8 @@ let countText: HTMLSpanElement | null = null
 let pauseButton: HTMLButtonElement | null = null
 let lockLayer: HTMLDivElement | null = null
 let lastError = ''
-let awaitingOriginalClick = false
+let blockedClickTarget: HTMLElement | null = null
+let replayingClick = false
 let lockTimer: number | undefined
 
 const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'pause' | 'play' | 'camera' | 'steps' | 'drag') => {
@@ -194,7 +195,7 @@ function renderHud() {
   const hud = statusText?.closest('.hud')
   hud?.classList.toggle('paused', paused)
   hud?.classList.toggle('capturing', capturing)
-  lockLayer?.classList.toggle('active', capturing && !awaitingOriginalClick)
+  lockLayer?.classList.toggle('active', capturing)
   if (statusText) statusText.textContent = lastError || (capturing ? tr(locale, 'capturing') : paused ? tr(locale, 'paused') : tr(locale, 'recording'))
   if (modeText) modeText.textContent = capturing ? tr(locale, 'uploading') : `${mode === 'html' ? tr(locale, 'htmlMode') : tr(locale, 'screenshotMode')}${aiEnabled ? ' · AI' : ''}`
   if (countText) countText.textContent = String(steps)
@@ -221,19 +222,50 @@ function applyState(state: RecorderState) {
   phase = state.phase || ''; steps = Number(state.steps || 0); mode = state.mode || 'html'
   aiEnabled = Boolean(state.aiEnabled); locale = state.locale || locale
   if (!capturing) lastError = ''
-  if (capturing && !awaitingOriginalClick) clearInteractionDelay()
   renderHud()
   if (active && !paused && mode === 'html') window.setTimeout(refreshSnapshot, document.readyState === 'complete' ? 0 : 500)
   else currentSnapshot = null
 }
 
-function lockInteraction() { awaitingOriginalClick = false; window.clearTimeout(lockTimer); renderHud() }
-function clearInteractionDelay() { if (capturing) { window.clearTimeout(lockTimer); lockTimer = window.setTimeout(lockInteraction, 0) } }
 function refreshSnapshot() {
   if (!active || paused || mode !== 'html' || window.top !== window) return
   try { currentSnapshot = captureDom() } catch { currentSnapshot = null }
 }
 function scheduleRefresh() { window.clearTimeout(refreshTimer); refreshTimer = window.setTimeout(refreshSnapshot, 600) }
+
+function shouldFreezeClick(target: HTMLElement) {
+  if (target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return false
+  if (target instanceof HTMLInputElement) return ['button', 'submit', 'image', 'reset', 'checkbox', 'radio'].includes(target.type)
+  return true
+}
+
+function clearBlockedClick() {
+  blockedClickTarget = null
+  window.clearTimeout(lockTimer)
+}
+
+function suppressBlockedClick(event: MouseEvent) {
+  if (!blockedClickTarget || replayingClick || !event.isTrusted) return
+  const raw = event.target
+  if (!(raw instanceof Node) || !(raw === blockedClickTarget || blockedClickTarget.contains(raw) || (raw instanceof Element && raw.contains(blockedClickTarget)))) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  clearBlockedClick()
+}
+
+function replayClick(target: HTMLElement) {
+  if (!target.isConnected) { clearBlockedClick(); return }
+  capturing = false; phase = ''; renderHud()
+  replayingClick = true
+  try {
+    target.focus({ preventScroll: true })
+    target.click()
+  } finally {
+    replayingClick = false
+    window.clearTimeout(lockTimer)
+    lockTimer = window.setTimeout(clearBlockedClick, 900)
+  }
+}
 
 function onPointerMove(event: PointerEvent) {
   if (!active || paused || capturing || mode !== 'html' || window.top !== window || !highlight) return
@@ -251,7 +283,10 @@ async function onPointer(event: PointerEvent) {
   if (!active || paused || capturing || event.button !== 0 || window.top !== window) return
   const target = selectableTarget(event.target as Element | null)
   if (!target?.getBoundingClientRect) return
-  const snapshot = mode === 'html' ? (captureDom() || currentSnapshot) : undefined
+  // The authoritative DOM snapshot is requested by the background immediately
+  // before captureVisibleTab while this click remains blocked. Keep only the
+  // cached value as a fallback for restricted pages or extension messaging.
+  const snapshot = mode === 'html' ? (currentSnapshot || undefined) : undefined
   const info = targetInfo(target), isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
   const label = info.text || info.aria_label || info.tag || (locale === 'zh' ? '目标元素' : 'target element')
   const body = locale === 'zh'
@@ -262,25 +297,36 @@ async function onPointer(event: PointerEvent) {
     hotspot: normalized(target.getBoundingClientRect()), target: info, page_context: pageContext(target),
     scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: false,
   }
-  awaitingOriginalClick = true
-  window.addEventListener('click', () => queueMicrotask(lockInteraction), { once: true })
-  lockTimer = window.setTimeout(lockInteraction, 700)
+  const freezeClick = shouldFreezeClick(target)
+  if (freezeClick) {
+    blockedClickTarget = target
+    window.clearTimeout(lockTimer)
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }
   capturing = true; phase = 'uploading'; clearHighlight(); renderHud()
   try {
     const result = await chrome.runtime.sendMessage({ type: 'STEP_EVENT', data, snapshot })
     if (result?.error) throw new Error(result.error)
     if (typeof result?.steps === 'number') steps = result.steps
   } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
-  finally { capturing = false; phase = ''; awaitingOriginalClick = false; window.clearTimeout(lockTimer); renderHud(); scheduleRefresh() }
+  finally {
+    capturing = false; phase = ''; renderHud(); scheduleRefresh()
+    if (freezeClick) replayClick(target)
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SHOW_RECORDING_SETUP') { showRecordingSetup(message); sendResponse({ ok: true }); return }
   if (message.type === 'RECORDING_STATE') applyState(message)
   if (message.type === 'RECORDER_UI_VISIBILITY') {
+    let synchronizedSnapshot: CapturedSnapshot | undefined
+    if (message.hidden && message.captureSnapshot && mode === 'html') {
+      try { synchronizedSnapshot = captureDom() || undefined } catch { synchronizedSnapshot = currentSnapshot || undefined }
+    }
     if (hudHost) hudHost.style.display = message.hidden ? 'none' : ''
     if (setupHost) setupHost.style.display = message.hidden ? 'none' : ''
-    requestAnimationFrame(() => sendResponse({ ok: true })); return true
+    requestAnimationFrame(() => sendResponse({ ok: true, snapshot: synchronizedSnapshot })); return true
   }
   if (message.type === 'CAPTURE_FINAL') {
     if (mode === 'html') refreshSnapshot()
@@ -297,5 +343,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 })
 
 chrome.runtime.sendMessage({ type: 'IS_RECORDING' }).then(applyState).catch(() => {})
+window.addEventListener('click', suppressBlockedClick, true)
 document.addEventListener('pointermove', onPointerMove, true)
 document.addEventListener('pointerdown', onPointer, true)

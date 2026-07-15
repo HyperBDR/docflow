@@ -21,6 +21,7 @@ type Props = {
   onGuideNext?: (hotspot: HotspotData) => void
   onRectChange?: (hotspot: HotspotData, rect: Rect) => void
   showZoomEditor?: boolean
+  persistZoom?: boolean
   onZoomRectChange?: (rect: Rect) => void
   onZoomDelete?: () => void
 }
@@ -205,7 +206,7 @@ function zoomedRect(rect: Rect, scale: number, offsetX: number, offsetY: number)
   return { x: rect.x * scale + offsetX, y: rect.y * scale + offsetY, w: rect.w * scale, h: rect.h * scale }
 }
 
-export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, onZoomRectChange, onZoomDelete }: Props) {
+export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, persistZoom = false, onZoomRectChange, onZoomDelete }: Props) {
   const shellRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -225,8 +226,8 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     if (!zoomRect) return
     window.clearTimeout(zoomTimer.current)
     setZoomActive(true)
-    zoomTimer.current = window.setTimeout(() => setZoomActive(false), zoom.duration_ms || 3000)
-  }, [zoom?.duration_ms, zoomRect])
+    if (!persistZoom) zoomTimer.current = window.setTimeout(() => setZoomActive(false), zoom.duration_ms || 3000)
+  }, [persistZoom, zoom?.duration_ms, zoomRect])
 
   useEffect(() => {
     setSnapshot(null); setError(''); setDynamicRects({}); setContentReady(false); setZoomActive(false)

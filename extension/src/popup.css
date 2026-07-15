@@ -3,7 +3,8 @@
 body { margin: 0; width: 360px; background: #f7f8fb; }
 main { padding: 17px; }
 header { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
-.logo { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; color: white; background: #635bff; box-shadow: 0 6px 16px #635bff3d; }
+.logo { width: 34px; height: 34px; display: grid; place-items: center; }
+.logo img { width: 34px; height: 34px; display: block; border-radius: 10px; box-shadow: 0 6px 16px #635bff3d; }
 h1 { margin: 0; font-size: 17px; line-height: 1.1; } header small { color: #8a94a6; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
 section, label, #setup, #active-recording { display: grid; gap: 8px; } section, #setup, #active-recording { gap: 13px; }
 input, select, button { width: 100%; padding: 9px 10px; border: 1px solid #d6dbe5; border-radius: 9px; background: white; font: inherit; }

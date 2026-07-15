@@ -24,7 +24,11 @@ export default function Player() {
     value.steps = value.steps.map((step: Step) => ({
       ...step,
       image_url: `${publicApi}/public/${token}/assets/${step.id}.webp`,
-      snapshot_url: step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot` : undefined,
+      // Exported documents and videos need pixel fidelity, not DOM editing.
+      // The recorded screenshot is the visual source of truth and avoids
+      // missing external CSS, webfonts and runtime-only application styles.
+      render_mode: exportMode ? 'image' : step.render_mode,
+      snapshot_url: !exportMode && step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot` : undefined,
     }))
     setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1)))
   }).catch(value => setError(value.message)) }, [token, publicApi, requestedStep])
@@ -84,7 +88,7 @@ export default function Player() {
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
     <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><button onClick={() => document.documentElement.requestFullscreen()}>全屏</button></header>
     <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage key={step.id}
-      step={step} mode="player" fit="viewport" theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
+      step={step} mode="player" fit="viewport" persistZoom theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
       onHotspot={activate} onGuidePrevious={() => goTo(index - 1)} onGuideNext={activate} onReady={() => setReady(true)}
     /></section>
     <footer>
