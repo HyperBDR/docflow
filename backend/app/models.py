@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,6 +34,37 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+demo_tags = Table(
+    "demo_tags",
+    Base.metadata,
+    Column("demo_id", ForeignKey("demos.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Category(Base):
+    __tablename__ = "categories"
+    __table_args__ = (UniqueConstraint("owner_id", "parent_id", "name", name="uq_category_owner_parent_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    color: Mapped[str] = mapped_column(String(32), default="#635bff")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_tag_owner_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(60))
+    color: Mapped[str] = mapped_column(String(32), default="#635bff")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -69,6 +100,7 @@ class Demo(Base):
     __tablename__ = "demos"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="未命名演示")
     description: Mapped[str] = mapped_column(Text, default="")
     theme: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -80,6 +112,7 @@ class Demo(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     steps: Mapped[list["Step"]] = relationship(back_populates="demo", cascade="all, delete-orphan", order_by="Step.position")
+    tags: Mapped[list[Tag]] = relationship(secondary=demo_tags, lazy="selectin")
 
 
 class Step(Base):
@@ -144,6 +177,41 @@ class ShareToken(Base):
     revision_id: Mapped[str] = mapped_column(ForeignKey("published_revisions.id", ondelete="CASCADE"), index=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AnalyticsEvent(Base):
+    __tablename__ = "analytics_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    share_id: Mapped[str] = mapped_column(ForeignKey("share_tokens.id", ondelete="CASCADE"), index=True)
+    demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("published_revisions.id", ondelete="CASCADE"), index=True)
+    step_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    visitor_id: Mapped[str] = mapped_column(String(80), index=True)
+    session_id: Mapped[str] = mapped_column(String(80), index=True)
+    event_type: Mapped[str] = mapped_column(String(24), index=True)
+    operating_system: Mapped[str] = mapped_column(String(80), default="")
+    browser: Mapped[str] = mapped_column(String(80), default="")
+    device: Mapped[str] = mapped_column(String(40), default="")
+    country: Mapped[str] = mapped_column(String(100), default="")
+    region: Mapped[str] = mapped_column(String(100), default="")
+    city: Mapped[str] = mapped_column(String(100), default="")
+    user_agent: Mapped[str] = mapped_column(String(1000), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class StepComment(Base):
+    __tablename__ = "step_comments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    share_id: Mapped[str] = mapped_column(ForeignKey("share_tokens.id", ondelete="CASCADE"), index=True)
+    demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("published_revisions.id", ondelete="CASCADE"), index=True)
+    step_id: Mapped[str] = mapped_column(String(36), index=True)
+    visitor_id: Mapped[str] = mapped_column(String(80), default="")
+    author_name: Mapped[str] = mapped_column(String(100), default="访客")
+    author_email: Mapped[str] = mapped_column(String(320), default="")
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="published", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

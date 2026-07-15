@@ -8,8 +8,8 @@ import io
 
 from app.database import get_db
 from app.dependencies import current_user
-from app.models import Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, User
-from app.schemas import DemoCreate, DemoOut, DemoUpdate, StepOut, StepUpdate
+from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, Tag, User
+from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, StepOut, StepUpdate
 from app.services import active_share, demo_out, next_revision_number, owned_demo, step_out
 from app.storage import storage
 from app.snapshots import SnapshotError, load_snapshot
@@ -30,7 +30,11 @@ def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User =
         manual_fields.append("title")
     if payload.description:
         manual_fields.append("description")
-    demo = Demo(owner_id=user.id, title=payload.title, description=payload.description, manual_fields=manual_fields)
+    if payload.category_id:
+        category = db.get(Category, payload.category_id)
+        if not category or category.owner_id != user.id:
+            raise HTTPException(status_code=400, detail="category not found")
+    demo = Demo(owner_id=user.id, title=payload.title, description=payload.description, category_id=payload.category_id, manual_fields=manual_fields)
     db.add(demo)
     db.commit()
     db.refresh(demo)
@@ -46,6 +50,16 @@ def get_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(c
 def update_demo(payload: DemoUpdate, demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
     values = payload.model_dump(exclude_unset=True)
+    tag_ids = values.pop("tag_ids", None)
+    if "category_id" in values and values["category_id"]:
+        category = db.get(Category, values["category_id"])
+        if not category or category.owner_id != user.id:
+            raise HTTPException(status_code=400, detail="category not found")
+    if tag_ids is not None:
+        tags = db.scalars(select(Tag).where(Tag.owner_id == user.id, Tag.id.in_(tag_ids))).all() if tag_ids else []
+        if len(tags) != len(set(tag_ids)):
+            raise HTTPException(status_code=400, detail="one or more tags were not found")
+        demo.tags = list(tags)
     for key, value in values.items():
         setattr(demo, key, value)
     demo.manual_fields = sorted(set(demo.manual_fields or []) | set(values))
@@ -69,9 +83,11 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
         theme=deepcopy(source.theme or {}),
         navigation=deepcopy(source.navigation or {}),
         playback=deepcopy(source.playback or {}),
+        category_id=source.category_id,
         manual_fields=sorted(set(source.manual_fields or []) | {"title"}),
     )
     db.add(duplicate)
+    duplicate.tags = list(source.tags)
     db.flush()
     for source_step in sorted(source.steps, key=lambda item: item.position):
         step = Step(
@@ -112,6 +128,60 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
     db.commit()
     db.refresh(duplicate)
     return demo_out(db, duplicate)
+
+
+def copy_steps(db: Session, source: Demo, target: Demo, start: int) -> int:
+    position = start
+    for source_step in sorted(source.steps, key=lambda item: item.position):
+        step = Step(
+            demo_id=target.id, event_id=f"merge-{source.id[:8]}-{source_step.event_id}"[:64], position=position,
+            title=source_step.title, body=source_step.body, asset_key=source_step.asset_key,
+            render_mode=source_step.render_mode, dom_snapshot_key=source_step.dom_snapshot_key,
+            viewport_width=source_step.viewport_width, viewport_height=source_step.viewport_height,
+            hotspot=deepcopy(source_step.hotspot or {}), redactions=deepcopy(source_step.redactions or []),
+            page_context=deepcopy(source_step.page_context or {}), scroll_state=deepcopy(source_step.scroll_state or {}),
+            capture_warnings=deepcopy(source_step.capture_warnings or []), manual_fields=deepcopy(source_step.manual_fields or []),
+            ai_metadata=deepcopy(source_step.ai_metadata or {}), animation=deepcopy(source_step.animation or {}), duration=source_step.duration,
+        )
+        db.add(step); db.flush()
+        for source_hotspot in source_step.hotspots:
+            action = deepcopy(source_hotspot.action or {})
+            # A cross-demo target/end cannot be preserved safely; merged steps continue linearly.
+            if action.get("type") in {"goto", "end"}: action = {"type": "next"}
+            db.add(Hotspot(
+                step_id=step.id, position=source_hotspot.position, selector=deepcopy(source_hotspot.selector or {}),
+                fallback_rect=deepcopy(source_hotspot.fallback_rect or {}), trigger=source_hotspot.trigger,
+                action=action, tooltip=deepcopy(source_hotspot.tooltip or {}), style=deepcopy(source_hotspot.style or {}),
+                manual_fields=deepcopy(source_hotspot.manual_fields or []),
+            ))
+        position += 1
+    return position
+
+
+@router.post("/merge", response_model=DemoOut, status_code=201)
+def merge_demos(payload: MergeDemos, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if len(set(payload.demo_ids)) != len(payload.demo_ids):
+        raise HTTPException(status_code=400, detail="demo_ids must be unique")
+    sources = [owned_demo(db, demo_id, user) for demo_id in payload.demo_ids]
+    if not all(source.steps for source in sources):
+        raise HTTPException(status_code=400, detail="empty demos cannot be merged")
+    if payload.category_id:
+        category = db.get(Category, payload.category_id)
+        if not category or category.owner_id != user.id:
+            raise HTTPException(status_code=400, detail="category not found")
+    first = sources[0]
+    merged = Demo(
+        owner_id=user.id, title=payload.title, description=f"由 {len(sources)} 个演示合并生成",
+        category_id=payload.category_id or first.category_id, theme=deepcopy(first.theme or {}),
+        navigation=deepcopy(first.navigation or {}), playback=deepcopy(first.playback or {}), manual_fields=["title"],
+    )
+    db.add(merged); db.flush()
+    merged.tags = list({tag.id: tag for source in sources for tag in source.tags}.values())
+    position = 0
+    for source in sources:
+        position = copy_steps(db, source, merged, position)
+    db.commit(); db.refresh(merged)
+    return demo_out(db, merged)
 
 
 @router.patch("/{demo_id}/steps/{step_id}", response_model=StepOut)

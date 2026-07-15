@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
 import Player from './pages/Player'
 import SnapshotFrame from './pages/SnapshotFrame'
+import Analytics from './pages/Analytics'
 import Brand from './components/Brand'
 
 type User = { id: string; email: string }
@@ -50,7 +51,7 @@ function Shell({ user, logout }: { user: User; logout: () => void }) {
   const isDemoDetail = location.pathname.startsWith('/demos/')
   return <div className={`app-shell ${isDemoDetail ? 'demo-detail-shell' : ''}`}>
     {!isDemoDetail && <header><Link className="brand" to="/"><Brand /></Link><div className="header-user"><span>{user.email}</span><button className="ghost" onClick={logout}>退出</button></div></header>}
-    <Routes><Route path="/" element={<Dashboard />} /><Route path="/demos/:id" element={<Editor />} /><Route path="*" element={<Navigate to="/" />} /></Routes>
+    <Routes><Route path="/" element={<Dashboard />} /><Route path="/demos/:id/analytics" element={<Analytics />} /><Route path="/demos/:id" element={<Editor />} /><Route path="*" element={<Navigate to="/" />} /></Routes>
   </div>
 }
 

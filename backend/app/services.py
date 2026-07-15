@@ -61,6 +61,8 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         playback={**DEFAULT_PLAYBACK, **(demo.playback or {})},
         manual_fields=demo.manual_fields or [],
         ai_enabled=settings.ai_enabled and bool(settings.ai_api_key),
+        category_id=demo.category_id,
+        tags=demo.tags,
     )
 
 

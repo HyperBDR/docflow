@@ -5,8 +5,8 @@ ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 COPY pyproject.toml alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
-COPY tests ./tests
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST" \
     --timeout 600 --retries 10 '.[dev]'
+COPY tests ./tests
 CMD ["pytest"]

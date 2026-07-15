@@ -140,6 +140,7 @@ class StepOut(BaseModel):
 class DemoCreate(BaseModel):
     title: str = Field(default="未命名演示", min_length=1, max_length=200)
     description: str = Field(default="", max_length=5000)
+    category_id: str | None = None
 
 
 class DemoUpdate(BaseModel):
@@ -148,6 +149,79 @@ class DemoUpdate(BaseModel):
     theme: dict | None = None
     navigation: dict | None = None
     playback: PlaybackConfig | None = None
+    category_id: str | None = None
+    tag_ids: list[str] | None = Field(default=None, max_length=30)
+
+
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    parent_id: str | None = None
+    color: str = Field(default="#635bff", max_length=32)
+
+
+class CategoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    parent_id: str | None = None
+    color: str | None = Field(default=None, max_length=32)
+    position: int | None = Field(default=None, ge=0)
+
+
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    parent_id: str | None
+    color: str
+    position: int
+
+
+class TagCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    color: str = Field(default="#635bff", max_length=32)
+
+
+class TagUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    color: str | None = Field(default=None, max_length=32)
+
+
+class TagOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    color: str
+
+
+class MergeDemos(BaseModel):
+    demo_ids: list[str] = Field(min_length=2, max_length=5)
+    title: str = Field(default="合并演示", min_length=1, max_length=200)
+    category_id: str | None = None
+
+
+class AnalyticsEventCreate(BaseModel):
+    event_type: Literal["view", "step_view", "interaction", "complete"]
+    visitor_id: str = Field(min_length=1, max_length=80)
+    session_id: str = Field(min_length=1, max_length=80)
+    step_id: str | None = None
+
+
+class CommentCreate(BaseModel):
+    step_id: str
+    visitor_id: str = Field(default="", max_length=80)
+    author_name: str = Field(default="访客", max_length=100)
+    author_email: str = Field(default="", max_length=320)
+    content: str = Field(min_length=1, max_length=5000)
+
+
+class CommentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    step_id: str
+    author_name: str
+    author_email: str
+    content: str
+    status: str
+    created_at: datetime
 
 
 class StepUpdate(BaseModel):
@@ -176,6 +250,8 @@ class DemoOut(BaseModel):
     playback: dict = Field(default_factory=dict)
     manual_fields: list = Field(default_factory=list)
     ai_enabled: bool = False
+    category_id: str | None = None
+    tags: list[TagOut] = Field(default_factory=list)
 
 
 class RecordingStepMeta(BaseModel):

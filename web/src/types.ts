@@ -53,6 +53,21 @@ export type Demo = {
   playback: { autoplay?: boolean; step_duration_ms?: number; transition_delay_ms?: number; loop?: boolean }
   manual_fields: string[]
   ai_enabled: boolean
+  category_id?: string | null
+  tags: Tag[]
+}
+
+export type Category = { id: string; name: string; parent_id?: string; color: string; position: number }
+export type Tag = { id: string; name: string; color: string }
+export type StepComment = { id: string; step_id: string; author_name: string; author_email?: string; content: string; status?: string; created_at: string }
+export type Analytics = {
+  filtered_out: boolean
+  range?: { from: string; to: string }
+  summary: { total_views: number; unique_viewers: number; engagement: number; completion: number }
+  steps: { id: string; position: number; title: string; viewers: number; conversion: number }[]
+  devices: { operating_systems?: { name: string; value: number }[]; browsers?: { name: string; value: number }[]; device_types?: { name: string; value: number }[]; locations?: { name: string; value: number }[] }
+  leads: { name: string; email: string; comment: string; step_id: string; created_at: string }[]
+  comments: StepComment[]
 }
 
 export type ExportJob = {

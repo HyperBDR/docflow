@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import ai, auth, demos, exports, extension, interactions, public, recordings, reorder
+from app.routers import ai, auth, demos, exports, extension, interactions, library, public, recordings, reorder
 
 
 @asynccontextmanager
@@ -29,6 +29,7 @@ app.include_router(ai.router)
 app.include_router(reorder.router)
 app.include_router(recordings.router)
 app.include_router(exports.router)
+app.include_router(library.router)
 app.include_router(public.router)
 
 

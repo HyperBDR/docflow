@@ -1,14 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { API_URL } from '../api'
 import SlideStage from '../components/SlideStage'
-import type { Demo, HotspotData, Step } from '../types'
+import Icon from '../components/Icon'
+import type { Demo, HotspotData, Step, StepComment } from '../types'
 
 type Published = Pick<Demo, 'title' | 'description' | 'theme' | 'navigation' | 'playback'> & { steps: Step[] }
 
 const defaultTheme = { primary_color: '#635bff', tooltip: { background: '#fff', text_color: '#172033', border_color: '#e2e6ed', radius: 12 } }
 const defaultNavigation = { previous_label: '上一步', next_label: '下一步', previous_color: '#fff', next_color: '#635bff', text_color: '#172033', next_text_color: '#fff', radius: 9, show_previous: true, show_next: true, show_progress: true }
 const defaultPlayback = { autoplay: false, step_duration_ms: 2000, transition_delay_ms: 1000, loop: false }
+
+function stableId(storage: Storage, key: string) {
+  let value = storage.getItem(key)
+  if (!value) { value = crypto.randomUUID(); storage.setItem(key, value) }
+  return value
+}
 
 export default function Player() {
   const { token } = useParams()
@@ -21,6 +28,18 @@ export default function Player() {
   const [ready, setReady] = useState(false)
   const [exportZoomProgress, setExportZoomProgress] = useState<number | undefined>(exportMode ? 0 : undefined)
   const [error, setError] = useState('')
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [comments, setComments] = useState<StepComment[]>([])
+  const [commentName, setCommentName] = useState(() => localStorage.getItem('docflow-comment-name') || '')
+  const [commentEmail, setCommentEmail] = useState(() => localStorage.getItem('docflow-comment-email') || '')
+  const [commentText, setCommentText] = useState('')
+  const [commentBusy, setCommentBusy] = useState(false)
+  const visitorId = useMemo(() => stableId(localStorage, 'docflow-visitor-id'), [])
+  const sessionId = useMemo(() => stableId(sessionStorage, `docflow-session-${token}`), [token])
+  function track(event_type: 'view' | 'step_view' | 'interaction' | 'complete', step_id?: string) {
+    if (exportMode) return
+    fetch(`${publicApi}/public/${token}/events`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type, visitor_id: visitorId, session_id: sessionId, step_id }), keepalive: true }).catch(() => undefined)
+  }
   useEffect(() => { fetch(`${publicApi}/public/${token}`).then(response => { if (!response.ok) throw new Error('演示不存在或已撤销'); return response.json() }).then(value => {
     value.steps = value.steps.map((step: Step) => ({
       ...step,
@@ -31,9 +50,20 @@ export default function Player() {
       render_mode: exportMode ? 'image' : step.render_mode,
       snapshot_url: !exportMode && step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot` : undefined,
     }))
-    setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1)))
+    setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1))); track('view')
   }).catch(value => setError(value.message)) }, [token, publicApi, requestedStep])
   useEffect(() => setReady(false), [index])
+  useEffect(() => {
+    if (!demo || exportMode || !ready || !demo.steps[index]) return
+    const stepId = demo.steps[index].id
+    track('step_view', stepId)
+    if (index === demo.steps.length - 1) track('complete', stepId)
+  }, [demo, exportMode, index, ready])
+  useEffect(() => {
+    if (!demo || exportMode || !demo.steps[index]) return
+    setComments([]); setCommentText('')
+    fetch(`${publicApi}/public/${token}/comments?step_id=${encodeURIComponent(demo.steps[index].id)}`).then(response => response.ok ? response.json() : []).then(setComments).catch(() => undefined)
+  }, [demo, exportMode, index, publicApi, token])
   useEffect(() => {
     if (!exportMode) return
     const target = window as typeof window & { __DOCFLOW_SET_ZOOM_PROGRESS__?: (progress: number) => Promise<void> }
@@ -79,6 +109,7 @@ export default function Player() {
   }
 
   function activate(hotspot: HotspotData) {
+    track('interaction', step.id)
     if (hotspot.action.type === 'goto' && hotspot.action.target_step_id) {
       const target = demo!.steps.findIndex(item => item.id === hotspot.action.target_step_id)
       if (target >= 0) goTo(target)
@@ -93,6 +124,16 @@ export default function Player() {
       return
     }
     goTo(index + 1)
+  }
+
+  async function submitComment(event: React.FormEvent) {
+    event.preventDefault(); if (!commentText.trim()) return
+    setCommentBusy(true)
+    try {
+      const response = await fetch(`${publicApi}/public/${token}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step_id: step.id, visitor_id: visitorId, author_name: commentName || '访客', author_email: commentEmail, content: commentText }) })
+      if (!response.ok) throw new Error('评论发布失败')
+      const comment = await response.json(); setComments(current => [comment, ...current]); setCommentText(''); localStorage.setItem('docflow-comment-name', commentName); localStorage.setItem('docflow-comment-email', commentEmail)
+    } catch (value) { setError(value instanceof Error ? value.message : '评论发布失败') } finally { setCommentBusy(false) }
   }
 
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
@@ -112,5 +153,6 @@ export default function Player() {
         style={{ background: navigation.next_color, color: navigation.next_text_color, borderRadius: navigation.radius }}
       >{navigation.next_label} →</button>
     </footer>
+    {!exportMode && <><button className="player-comment-toggle" onClick={() => setCommentsOpen(value => !value)}><Icon name="message" /><span>评论</span>{comments.length > 0 && <b>{comments.length}</b>}</button>{commentsOpen && <aside className="player-comments"><header><div><strong>步骤评论</strong><small>针对步骤 {index + 1} 提出建议</small></div><button onClick={() => setCommentsOpen(false)}>×</button></header><div className="player-comment-list">{comments.map(comment => <article key={comment.id}><div><strong>{comment.author_name}</strong><time>{new Date(comment.created_at).toLocaleString()}</time></div><p>{comment.content}</p></article>)}{!comments.length && <div className="player-comment-empty"><Icon name="message" size={28} /><p>还没有评论，欢迎留下第一条建议。</p></div>}</div><form onSubmit={submitComment}><div><input value={commentName} onChange={event => setCommentName(event.target.value)} placeholder="姓名（可选）" maxLength={100} /><input type="email" value={commentEmail} onChange={event => setCommentEmail(event.target.value)} placeholder="邮箱（可选）" maxLength={320} /></div><textarea required value={commentText} onChange={event => setCommentText(event.target.value)} placeholder="输入对当前步骤的建议…" maxLength={5000} /><button className="primary" disabled={commentBusy || !commentText.trim()}>{commentBusy ? '发布中…' : '发布评论'}</button></form></aside>}</>}
   </main>
 }

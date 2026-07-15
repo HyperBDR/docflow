@@ -1,4 +1,4 @@
-import type { AIJob, Demo, ExportJob, HotspotData, Step } from './types'
+import type { AIJob, Analytics, Category, Demo, ExportJob, HotspotData, Step, Tag } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -28,10 +28,21 @@ export const api = {
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   demos: () => request<Demo[]>('/api/demos'),
   demo: (id: string) => request<Demo>(`/api/demos/${id}`),
-  createDemo: (title: string) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title }) }),
-  updateDemo: (id: string, values: Partial<Demo>) => request<Demo>(`/api/demos/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  createDemo: (title: string, categoryId?: string) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title, category_id: categoryId || null }) }),
+  updateDemo: (id: string, values: Partial<Demo> & { tag_ids?: string[] }) => request<Demo>(`/api/demos/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
   deleteDemo: (id: string) => request<void>(`/api/demos/${id}`, { method: 'DELETE' }),
   duplicateDemo: (id: string) => request<Demo>(`/api/demos/${id}/duplicate`, { method: 'POST' }),
+  mergeDemos: (demoIds: string[], title: string, categoryId?: string) => request<Demo>('/api/demos/merge', { method: 'POST', body: JSON.stringify({ demo_ids: demoIds, title, category_id: categoryId || null }) }),
+  categories: () => request<Category[]>('/api/categories'),
+  createCategory: (name: string, parentId?: string, color = '#635bff') => request<Category>('/api/categories', { method: 'POST', body: JSON.stringify({ name, parent_id: parentId || null, color }) }),
+  updateCategory: (id: string, values: Partial<Category>) => request<Category>(`/api/categories/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  deleteCategory: (id: string) => request<void>(`/api/categories/${id}`, { method: 'DELETE' }),
+  tags: () => request<Tag[]>('/api/tags'),
+  createTag: (name: string, color = '#635bff') => request<Tag>('/api/tags', { method: 'POST', body: JSON.stringify({ name, color }) }),
+  updateTag: (id: string, values: Partial<Tag>) => request<Tag>(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  deleteTag: (id: string) => request<void>(`/api/tags/${id}`, { method: 'DELETE' }),
+  analytics: (demoId: string, from?: string, to?: string, tagIds: string[] = []) => request<Analytics>(`/api/demos/${demoId}/analytics?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}), ...Object.fromEntries(tagIds.map((id, index) => [`tag${index}`, id])) }).toString().replace(/tag\d+=/g, 'tag=')}`),
+  moderateComment: (demoId: string, commentId: string, status: 'published' | 'hidden') => request(`/api/demos/${demoId}/comments/${commentId}?status=${status}`, { method: 'PATCH' }),
   updateStep: (demoId: string, stepId: string, values: Partial<Step>) => request<Step>(`/api/demos/${demoId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(values) }),
   createHotspot: (demoId: string, stepId: string, values: Omit<HotspotData, 'id' | 'position'>) => request<HotspotData>(`/api/demos/${demoId}/steps/${stepId}/hotspots`, { method: 'POST', body: JSON.stringify(values) }),
   updateHotspot: (demoId: string, stepId: string, hotspotId: string, values: Partial<HotspotData>) => request<HotspotData>(`/api/demos/${demoId}/steps/${stepId}/hotspots/${hotspotId}`, { method: 'PATCH', body: JSON.stringify(values) }),

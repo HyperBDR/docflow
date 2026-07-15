@@ -1,12 +1,13 @@
 import io
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import PublishedRevision, ShareToken
+from app.models import AnalyticsEvent, PublishedRevision, ShareToken, StepComment
+from app.schemas import AnalyticsEventCreate, CommentCreate
 from app.storage import storage
 from app.snapshots import SnapshotError, load_snapshot
 
@@ -21,6 +22,75 @@ def published(db: Session, token: str) -> tuple[ShareToken, PublishedRevision]:
     if not revision:
         raise HTTPException(status_code=404, detail="published demo not found")
     return share, revision
+
+
+def user_agent_info(value: str) -> tuple[str, str, str]:
+    lower = value.lower()
+    if "edg/" in lower: browser = "Microsoft Edge"
+    elif "chrome/" in lower and "chromium" not in lower: browser = "Chrome"
+    elif "firefox/" in lower: browser = "Firefox"
+    elif "safari/" in lower: browser = "Safari"
+    else: browser = "其他"
+    if "windows" in lower: operating_system = "Windows"
+    elif "android" in lower: operating_system = "Android"
+    elif "iphone" in lower or "ipad" in lower: operating_system = "iOS"
+    elif "mac os" in lower or "macintosh" in lower: operating_system = "macOS"
+    elif "linux" in lower: operating_system = "Linux"
+    else: operating_system = "其他"
+    device = "移动设备" if any(item in lower for item in ("mobile", "iphone", "android")) else "桌面设备"
+    return operating_system, browser, device
+
+
+@router.post("/{token}/events", status_code=204)
+def collect_event(token: str, payload: AnalyticsEventCreate, request: Request, db: Session = Depends(get_db)):
+    share, revision = published(db, token)
+    step_ids = {item["id"] for item in revision.snapshot.get("steps", [])}
+    if payload.step_id and payload.step_id not in step_ids:
+        raise HTTPException(status_code=400, detail="step not found")
+    duplicate = db.scalar(select(AnalyticsEvent.id).where(
+        AnalyticsEvent.share_id == share.id, AnalyticsEvent.session_id == payload.session_id,
+        AnalyticsEvent.event_type == payload.event_type, AnalyticsEvent.step_id == payload.step_id,
+    ))
+    if duplicate:
+        return
+    ua = request.headers.get("user-agent", "")[:1000]
+    operating_system, browser, device = user_agent_info(ua)
+    event = AnalyticsEvent(
+        share_id=share.id, demo_id=share.demo_id, revision_id=revision.id, step_id=payload.step_id,
+        visitor_id=payload.visitor_id, session_id=payload.session_id, event_type=payload.event_type,
+        operating_system=operating_system, browser=browser, device=device, user_agent=ua,
+        country=(request.headers.get("cf-ipcountry") or request.headers.get("x-country") or "")[:100],
+        region=(request.headers.get("x-region") or "")[:100], city=(request.headers.get("x-city") or "")[:100],
+    )
+    db.add(event); db.commit()
+
+
+@router.get("/{token}/comments")
+def public_comments(token: str, step_id: str, db: Session = Depends(get_db)):
+    share, revision = published(db, token)
+    if step_id not in {item["id"] for item in revision.snapshot.get("steps", [])}:
+        raise HTTPException(status_code=404, detail="step not found")
+    comments = db.scalars(select(StepComment).where(
+        StepComment.share_id == share.id, StepComment.step_id == step_id, StepComment.status == "published"
+    ).order_by(StepComment.created_at.desc()).limit(100)).all()
+    return [{
+        "id": item.id, "step_id": item.step_id, "author_name": item.author_name,
+        "content": item.content, "created_at": item.created_at,
+    } for item in comments]
+
+
+@router.post("/{token}/comments", status_code=201)
+def create_comment(token: str, payload: CommentCreate, db: Session = Depends(get_db)):
+    share, revision = published(db, token)
+    if payload.step_id not in {item["id"] for item in revision.snapshot.get("steps", [])}:
+        raise HTTPException(status_code=400, detail="step not found")
+    comment = StepComment(
+        share_id=share.id, demo_id=share.demo_id, revision_id=revision.id, step_id=payload.step_id,
+        visitor_id=payload.visitor_id, author_name=payload.author_name.strip() or "访客",
+        author_email=payload.author_email.strip(), content=payload.content.strip(),
+    )
+    db.add(comment); db.commit(); db.refresh(comment)
+    return {"id": comment.id, "step_id": comment.step_id, "author_name": comment.author_name, "content": comment.content, "created_at": comment.created_at}
 
 
 @router.get("/{token}")
