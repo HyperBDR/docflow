@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import Icon from '../components/Icon'
+import AdminPagination from '../components/AdminPagination'
 import UserAvatar from '../components/UserAvatar'
 import { formatDate, formatNumber, normalizeLocale } from '../i18n'
 import type { AdminOrganization, AdminUser, Locale, OrganizationRole, User, UserRole } from '../types'
@@ -24,6 +25,7 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   const [role, setRole] = useState<UserRole | ''>('')
   const [active, setActive] = useState<'' | 'true' | 'false'>('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -41,7 +43,7 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   const load = useCallback(async (keepSelection = true) => {
     setLoading(true); setError('')
     try {
-      const result = await api.adminUsers({ query, role, active, page, page_size: 20 })
+      const result = await api.adminUsers({ query, role, active, page, page_size: pageSize })
       setUsers(result.items); setTotal(result.total)
       setSelected(previous => {
         if (!keepSelection) return null
@@ -49,7 +51,7 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
       })
     } catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setLoading(false) }
-  }, [active, page, query, role, t])
+  }, [active, page, pageSize, query, role, t])
 
   useEffect(() => { const timer = window.setTimeout(() => { void load() }, 220); return () => window.clearTimeout(timer) }, [load])
   useEffect(() => { api.adminOrganizations().then(setOrganizations).catch(() => undefined) }, [])
@@ -135,7 +137,6 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
     finally { setMembershipBusy('') }
   }
 
-  const pages = Math.max(1, Math.ceil(total / 20))
   return <main className="admin-content-page admin-users-page">
     <div className="admin-page-intro"><div><h1>{t('users.title')}</h1><p>{t('users.subtitle')}</p></div><span>{t('users.total', { count: total })}</span></div>
     {error && !selected && <div className="error admin-global-error">{error}</div>}
@@ -159,7 +160,7 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
           {loading && <div className="admin-table-state"><span className="action-spinner" />{t('loading')}</div>}
           {!loading && !users.length && <div className="admin-table-state"><Icon name="users" size={26} />{t('table.empty')}</div>}
         </div>
-        <div className="admin-pagination"><span>{t('pagination.range', { from: total ? (page - 1) * 20 + 1 : 0, to: Math.min(page * 20, total), total })}</span><div><button disabled={page <= 1} onClick={() => setPage(value => value - 1)}><Icon name="chevronLeft" /></button><b>{page} / {pages}</b><button disabled={page >= pages} onClick={() => setPage(value => value + 1)}><Icon name="chevronRight" /></button></div></div>
+        <AdminPagination page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={size => { setPageSize(size); setPage(1) }} />
       </div>
     </section>
     {selected && <>

@@ -9,6 +9,8 @@ requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13,<2",
   "argon2-cffi>=23.1,<24",
+  "boto3>=1.35,<2",
+  "cryptography>=43,<47",
   "celery[redis]>=5.4,<6",
   "email-validator>=2.2,<3",
   "fastapi>=0.115,<1",

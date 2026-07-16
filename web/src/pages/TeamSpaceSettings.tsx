@@ -5,6 +5,8 @@ import { api } from '../api'
 import AccountMenu from '../components/AccountMenu'
 import Brand from '../components/Brand'
 import Icon from '../components/Icon'
+import LanguageSwitcher from '../components/LanguageSwitcher'
+import WorkspaceSwitcher from '../components/WorkspaceSwitcher'
 import UserAvatar from '../components/UserAvatar'
 import type { Organization, OrganizationMember, OrganizationRole, User } from '../types'
 
@@ -76,7 +78,7 @@ export default function TeamSpaceSettings({ user, onUserChange, logout }: { user
 
   const isOwner = space?.access_source === 'platform_admin' || space?.role === 'owner'
   return <div className="settings-shell team-space-user-settings">
-    <header className="settings-topbar"><Link to="/"><Brand /></Link><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></header>
+    <header className="settings-topbar"><Link to="/"><Brand /></Link><div className="topbar-account-actions"><WorkspaceSwitcher user={user} onUserChange={onUserChange} /><LanguageSwitcher account /><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></div></header>
     <main className="settings-center">
       <Link className="settings-back" to="/"><Icon name="chevronLeft" />{t('backToWorkspace')}</Link>
       <div className="settings-heading"><span className="settings-heading-icon"><Icon name="users" size={22} /></span><div><h1>{space?.name || t('space.title')}</h1><p>{t('space.subtitle')}</p></div></div>

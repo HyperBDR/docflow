@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.ai_models import active_model
 from app.models import AIJob, Demo, JobStatus, User
 from app.worker import celery
 
@@ -15,7 +15,10 @@ def enqueue_ai_job(db: Session, demo: Demo, user: User, step_id: str | None = No
     ))
     if running:
         return running
-    job = AIJob(owner_id=user.id, demo_id=demo.id, step_id=step_id, model=settings.ai_model)
+    model = active_model(db)
+    if not model:
+        raise RuntimeError("AI is not configured")
+    job = AIJob(owner_id=user.id, demo_id=demo.id, step_id=step_id, model_config_id=model.id, model=model.model)
     db.add(job)
     db.commit()
     db.refresh(job)

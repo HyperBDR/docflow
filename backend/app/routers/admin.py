@@ -1,8 +1,12 @@
 import io
-from datetime import timedelta
+import json
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import case, delete, distinct, func, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -12,6 +16,9 @@ from app.dependencies import admin_user
 from app.models import (
     AnalyticsEvent,
     AIJob,
+    AIModelConfig,
+    AIPlatformSettings,
+    AIUsageRecord,
     AuditLog,
     Category,
     Demo,
@@ -27,12 +34,28 @@ from app.models import (
     ShareToken,
     Step,
     StepComment,
+    StorageConfig,
     Tag,
     User,
     demo_tags,
 )
 from app.schemas import (
     AdminOverview,
+    OverviewTrendPoint,
+    MetricPoint,
+    AIModelConfigInput,
+    AIModelConfigOut,
+    AIModelConfigUpdate,
+    AIUsagePoint,
+    AIUsageRecordOut,
+    AIUsageRecordPage,
+    AIUsageSummary,
+    AIPlatformSettingsOut,
+    AIPlatformSettingsUpdate,
+    StorageConfigInput,
+    StorageConfigOut,
+    StorageConfigUpdate,
+    StorageObjectOut,
     AdminMembershipCreate,
     AdminMembershipOut,
     AdminMembershipUpdate,
@@ -53,7 +76,9 @@ from app.schemas import (
 from app.security import hash_password
 from app.services import demo_out, write_audit
 from app.security import utcnow
-from app.storage import storage
+from app.ai_models import platform_settings, set_default
+from app.secrets import encrypt_secret
+from app.storage import storage, target_from_model
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -178,14 +203,476 @@ def user_out(
 def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     users = db.scalars(select(User).where(User.deleted_at.is_(None))).all()
     stats = list(user_stats_map(db, [user.id for user in users]).values())
+    demos = db.scalars(select(Demo).where(Demo.deleted_at.is_(None))).all()
+    organizations = db.scalars(select(Organization).where(Organization.status == "active")).all()
+    analytics = db.scalars(select(AnalyticsEvent)).all()
+    usage = db.scalars(select(AIUsageRecord)).all()
+    exports = db.scalars(select(ExportJob)).all()
+    start = utcnow().date() - timedelta(days=29)
+    trend = []
+    for offset in range(30):
+        day = start + timedelta(days=offset)
+        day_analytics = [item for item in analytics if item.created_at.date() == day]
+        trend.append(OverviewTrendPoint(
+            date=day.isoformat(),
+            users=sum(1 for item in users if item.created_at.date() == day),
+            demos=sum(1 for item in demos if item.created_at.date() == day),
+            views=len({item.session_id for item in day_analytics}),
+            ai_tokens=sum(item.total_tokens for item in usage if item.created_at.date() == day),
+        ))
+    organization_points = []
+    for organization in organizations:
+        organization_demos = [item for item in demos if item.organization_id == organization.id]
+        demo_ids = {item.id for item in organization_demos}
+        organization_points.append(MetricPoint(
+            key=organization.id, label=organization.name, value=len(organization_demos),
+            secondary=len({item.session_id for item in analytics if item.demo_id in demo_ids}),
+        ))
     return AdminOverview(
         users=len(users),
         active_users=sum(1 for user in users if user.is_active),
         admins=sum(1 for user in users if user.role == "admin"),
-        demos=sum(item.demos for item in stats),
+        organizations=len(organizations), demos=len(demos),
+        draft_demos=sum(1 for item in demos if item.status == DemoStatus.draft),
+        published_demos=sum(1 for item in demos if item.status == DemoStatus.published),
+        steps=db.scalar(select(func.count(Step.id)).join(Demo, Demo.id == Step.demo_id).where(Demo.deleted_at.is_(None))) or 0,
         views=sum(item.views for item in stats),
+        unique_viewers=len({item.visitor_id for item in analytics}), exports=len(exports),
+        ai_requests=len(usage), ai_tokens=sum(item.total_tokens for item in usage),
+        failed_jobs=sum(1 for item in exports if item.status.value == "failed") +
+                    (db.scalar(select(func.count(AIJob.id)).where(AIJob.status == "failed")) or 0),
         storage_bytes=sum(item.storage_bytes for item in stats),
+        trend=trend,
+        demo_status=[
+            MetricPoint(key="draft", label="Draft", value=sum(1 for item in demos if item.status == DemoStatus.draft)),
+            MetricPoint(key="published", label="Published", value=sum(1 for item in demos if item.status == DemoStatus.published)),
+        ],
+        content_locales=[MetricPoint(key=locale, label=locale, value=sum(1 for item in demos if item.content_locale == locale)) for locale in sorted({item.content_locale for item in demos})],
+        top_organizations=sorted(organization_points, key=lambda item: (item.value, item.secondary), reverse=True)[:8],
     )
+
+
+def ensure_legacy_storage(db: Session, actor: User) -> None:
+    if db.scalar(select(StorageConfig.id).limit(1)):
+        return
+    db.add(StorageConfig(
+        name="Server local storage", kind="local", local_path=str(storage.root), prefix="",
+        enabled=True, is_default=True, direct_download=False, created_by_id=actor.id,
+    ))
+    db.commit()
+
+
+def validate_storage_values(kind: str, values: dict) -> None:
+    prefix = str(values.get("prefix") or "").strip("/")
+    if any(part == ".." for part in prefix.split("/")):
+        raise HTTPException(status_code=400, detail="storage prefix cannot contain '..'")
+    values["prefix"] = prefix
+    if kind == "local":
+        if not str(values.get("local_path") or "").strip():
+            raise HTTPException(status_code=400, detail="local path is required")
+        try:
+            path = storage.validate_local_root(str(values["local_path"]))
+            path.mkdir(parents=True, exist_ok=True)
+            values["local_path"] = str(path)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif not str(values.get("bucket") or "").strip():
+        raise HTTPException(status_code=400, detail="bucket is required")
+
+
+def set_default_storage(db: Session, target: StorageConfig) -> None:
+    db.execute(update(StorageConfig).where(StorageConfig.id != target.id).values(is_default=False))
+    target.is_default = True
+    target.enabled = True
+
+
+def storage_out(target: StorageConfig, include_stats: bool = True) -> StorageConfigOut:
+    count = total = 0
+    if include_stats and target.kind == "local":
+        try: count, total = storage.stats(target_from_model(target))
+        except Exception: pass
+    return StorageConfigOut(
+        id=target.id, name=target.name, kind=target.kind, enabled=target.enabled, is_default=target.is_default,
+        local_path=target.local_path or "", endpoint_url=target.endpoint_url or "", region=target.region or "",
+        bucket=target.bucket or "", prefix=target.prefix or "", force_path_style=target.force_path_style,
+        direct_download=target.direct_download, public_base_url=target.public_base_url or "",
+        credentials_configured=bool(target.access_key_encrypted or target.secret_key_encrypted),
+        object_count=count, total_bytes=total, created_at=target.created_at, updated_at=target.updated_at,
+    )
+
+
+@router.get("/storage/configs", response_model=list[StorageConfigOut])
+def list_storage_configs(db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    ensure_legacy_storage(db, actor)
+    return [storage_out(item) for item in db.scalars(select(StorageConfig).order_by(
+        StorageConfig.is_default.desc(), StorageConfig.created_at
+    )).all()]
+
+
+@router.post("/storage/configs", response_model=StorageConfigOut, status_code=201)
+def create_storage_config(payload: StorageConfigInput, request: Request,
+                          db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    values = payload.model_dump(); values["name"] = values["name"].strip()
+    if db.scalar(select(StorageConfig.id).where(func.lower(StorageConfig.name) == values["name"].lower())):
+        raise HTTPException(status_code=409, detail="storage configuration name already exists")
+    validate_storage_values(values["kind"], values)
+    access_key = values.pop("access_key", None) or ""; secret_key = values.pop("secret_key", None) or ""
+    target = StorageConfig(**values, access_key_encrypted=encrypt_secret(access_key),
+                           secret_key_encrypted=encrypt_secret(secret_key), created_by_id=actor.id)
+    db.add(target); db.flush()
+    if target.is_default or not db.scalar(select(StorageConfig.id).where(StorageConfig.id != target.id, StorageConfig.is_default.is_(True))):
+        set_default_storage(db, target)
+    write_audit(db, actor, "storage.created", "storage", target.id, target.name,
+                after={key: value for key, value in values.items() if key not in {"access_key", "secret_key"}}, request=request)
+    db.commit(); db.refresh(target)
+    return storage_out(target)
+
+
+@router.patch("/storage/configs/{storage_id}", response_model=StorageConfigOut)
+def update_storage_config(storage_id: str, payload: StorageConfigUpdate, request: Request,
+                          db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    target = db.get(StorageConfig, storage_id)
+    if not target: raise HTTPException(status_code=404, detail="storage configuration not found")
+    values = payload.model_dump(exclude_unset=True)
+    if values.get("name"):
+        values["name"] = values["name"].strip()
+        duplicate = db.scalar(select(StorageConfig.id).where(func.lower(StorageConfig.name) == values["name"].lower(), StorageConfig.id != target.id))
+        if duplicate: raise HTTPException(status_code=409, detail="storage configuration name already exists")
+    if target.is_default and values.get("is_default") is False:
+        raise HTTPException(status_code=400, detail="set another storage target as default first")
+    if target.is_default and values.get("enabled") is False:
+        raise HTTPException(status_code=400, detail="the default storage target cannot be disabled")
+    access_key = values.pop("access_key", None); secret_key = values.pop("secret_key", None)
+    merged = {
+        "local_path": values.get("local_path", target.local_path), "bucket": values.get("bucket", target.bucket),
+        "prefix": values.get("prefix", target.prefix),
+    }
+    validate_storage_values(target.kind, merged)
+    values.update(merged)
+    before = {"name": target.name, "enabled": target.enabled, "is_default": target.is_default}
+    for key, value in values.items(): setattr(target, key, value)
+    if access_key: target.access_key_encrypted = encrypt_secret(access_key)
+    if secret_key: target.secret_key_encrypted = encrypt_secret(secret_key)
+    if values.get("is_default"): set_default_storage(db, target)
+    write_audit(db, actor, "storage.updated", "storage", target.id, target.name, before=before,
+                after=values, request=request)
+    db.commit(); db.refresh(target)
+    return storage_out(target)
+
+
+def storage_reference_exists(db: Session, storage_id: str, logical_key: str | None = None) -> bool:
+    prefix = storage.managed_key(storage_id, logical_key) if logical_key else f"storage://{storage_id}/%"
+    comparator = (lambda column: column == prefix) if logical_key else (lambda column: column.like(prefix))
+    step_conditions = [comparator(Step.asset_key), comparator(Step.dom_snapshot_key)]
+    export_conditions = [comparator(ExportJob.result_key)]
+    target = db.get(StorageConfig, storage_id)
+    if target and target.kind == "local" and Path(target.local_path).resolve() == storage.root:
+        if logical_key:
+            step_conditions.extend([Step.asset_key == logical_key, Step.dom_snapshot_key == logical_key])
+            export_conditions.append(ExportJob.result_key == logical_key)
+        else:
+            step_conditions.extend([Step.asset_key.not_like("storage://%"), Step.dom_snapshot_key.not_like("storage://%")])
+            export_conditions.append(ExportJob.result_key.not_like("storage://%"))
+    return bool(db.scalar(select(Step.id).where(or_(*step_conditions)).limit(1))
+                or db.scalar(select(ExportJob.id).where(or_(*export_conditions)).limit(1)))
+
+
+@router.delete("/storage/configs/{storage_id}", status_code=204)
+def delete_storage_config(storage_id: str, request: Request,
+                          db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    target = db.get(StorageConfig, storage_id)
+    if not target: raise HTTPException(status_code=404, detail="storage configuration not found")
+    if storage_reference_exists(db, target.id):
+        raise HTTPException(status_code=409, detail="storage target is still referenced by platform data")
+    try:
+        count, _total = storage.stats(target_from_model(target))
+        if count: raise HTTPException(status_code=409, detail="storage target is not empty")
+    except HTTPException: raise
+    except Exception: pass
+    label, was_default = target.name, target.is_default
+    db.delete(target); db.flush()
+    if was_default:
+        replacement = db.scalar(select(StorageConfig).where(StorageConfig.enabled.is_(True)).order_by(StorageConfig.created_at))
+        if replacement: set_default_storage(db, replacement)
+    write_audit(db, actor, "storage.deleted", "storage", storage_id, label, request=request)
+    db.commit()
+
+
+@router.post("/storage/configs/{storage_id}/test")
+def test_storage_config(storage_id: str, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    target = db.get(StorageConfig, storage_id)
+    if not target: raise HTTPException(status_code=404, detail="storage configuration not found")
+    try: latency = storage.test_target(target_from_model(target))
+    except Exception as exc: raise HTTPException(status_code=502, detail=f"storage connection failed: {str(exc)[:300]}") from exc
+    return {"ok": True, "latency_ms": latency}
+
+
+@router.get("/storage/configs/{storage_id}/stats")
+def storage_config_stats(storage_id: str, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    target = db.get(StorageConfig, storage_id)
+    if not target: raise HTTPException(status_code=404, detail="storage configuration not found")
+    try: count, total = storage.stats(target_from_model(target))
+    except Exception as exc: raise HTTPException(status_code=502, detail=f"could not calculate storage usage: {str(exc)[:300]}") from exc
+    return {"object_count": count, "total_bytes": total}
+
+
+@router.get("/storage/configs/{storage_id}/objects", response_model=list[StorageObjectOut])
+def browse_storage_objects(storage_id: str, prefix: str = Query(default="", max_length=1000),
+                           db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    target = db.get(StorageConfig, storage_id)
+    if not target: raise HTTPException(status_code=404, detail="storage configuration not found")
+    if any(part == ".." for part in prefix.split("/")): raise HTTPException(status_code=400, detail="invalid prefix")
+    try: return storage.browse(target_from_model(target), prefix)
+    except Exception as exc: raise HTTPException(status_code=502, detail=f"could not browse storage: {str(exc)[:300]}") from exc
+
+
+@router.get("/storage/configs/{storage_id}/objects/download")
+def download_storage_object(storage_id: str, key: str = Query(max_length=1500),
+                            db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    target = db.get(StorageConfig, storage_id)
+    if not target: raise HTTPException(status_code=404, detail="storage configuration not found")
+    managed = storage.managed_key(storage_id, key)
+    if not storage.exists(managed): raise HTTPException(status_code=404, detail="object not found")
+    direct = storage.direct_url(managed, key.rsplit("/", 1)[-1])
+    if direct: return RedirectResponse(direct, status_code=307)
+    return StreamingResponse(io.BytesIO(storage.read(managed)), media_type="application/octet-stream",
+                             headers={"Content-Disposition": f'attachment; filename="{key.rsplit("/", 1)[-1]}"'})
+
+
+@router.delete("/storage/configs/{storage_id}/objects", status_code=204)
+def delete_storage_object(storage_id: str, key: str = Query(max_length=1500),
+                          db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    if not db.get(StorageConfig, storage_id): raise HTTPException(status_code=404, detail="storage configuration not found")
+    if storage_reference_exists(db, storage_id, key):
+        raise HTTPException(status_code=409, detail="object is referenced by platform data")
+    storage.delete(storage.managed_key(storage_id, key))
+
+
+def ai_model_out(model: AIModelConfig) -> AIModelConfigOut:
+    return AIModelConfigOut(
+        id=model.id, name=model.name, provider=model.provider, base_url=model.base_url, model=model.model,
+        enabled=model.enabled, is_default=model.is_default, vision_enabled=model.vision_enabled,
+        timeout_seconds=model.timeout_seconds, temperature=model.temperature,
+        extra_options=model.extra_options or {}, api_key_configured=bool(model.api_key_encrypted),
+        created_at=model.created_at, updated_at=model.updated_at,
+    )
+
+
+def ai_settings_out(db: Session, value: AIPlatformSettings) -> AIPlatformSettingsOut:
+    configured = db.scalar(select(func.count(AIModelConfig.id))) or 0
+    enabled = db.scalar(select(func.count(AIModelConfig.id)).where(AIModelConfig.enabled.is_(True))) or 0
+    return AIPlatformSettingsOut(
+        enabled=value.enabled, chunk_size=value.chunk_size, configured_models=configured,
+        enabled_models=enabled, effective=value.enabled and enabled > 0, updated_at=value.updated_at,
+    )
+
+
+@router.get("/ai/settings", response_model=AIPlatformSettingsOut)
+def get_ai_settings(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return ai_settings_out(db, platform_settings(db))
+
+
+@router.patch("/ai/settings", response_model=AIPlatformSettingsOut)
+def update_ai_settings(payload: AIPlatformSettingsUpdate, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    value = platform_settings(db)
+    before = {"enabled": value.enabled, "chunk_size": value.chunk_size}
+    value.enabled = payload.enabled
+    value.chunk_size = payload.chunk_size
+    value.updated_by_id = actor.id
+    write_audit(db, actor, "ai_settings.updated", "ai_settings", value.id, "Global AI settings",
+                before=before, after=payload.model_dump(), request=request, source="admin")
+    db.commit(); db.refresh(value)
+    return ai_settings_out(db, value)
+
+
+@router.get("/ai/models", response_model=list[AIModelConfigOut])
+def list_ai_models(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return [ai_model_out(item) for item in db.scalars(select(AIModelConfig).order_by(
+        AIModelConfig.is_default.desc(), AIModelConfig.created_at.desc()
+    )).all()]
+
+
+@router.post("/ai/models", response_model=AIModelConfigOut, status_code=201)
+def create_ai_model(payload: AIModelConfigInput, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    if db.scalar(select(AIModelConfig.id).where(func.lower(AIModelConfig.name) == payload.name.strip().lower())):
+        raise HTTPException(status_code=409, detail="model configuration name already exists")
+    values = payload.model_dump()
+    values["name"] = values["name"].strip(); values["base_url"] = values["base_url"].rstrip("/")
+    values["api_key"] = values.get("api_key") or ""
+    model = AIModelConfig(**values, created_by_id=actor.id)
+    db.add(model); db.flush()
+    if model.is_default or not db.scalar(select(AIModelConfig.id).where(AIModelConfig.id != model.id, AIModelConfig.is_default.is_(True))):
+        set_default(db, model)
+    write_audit(db, actor, "ai_model.created", "ai_model", model.id, model.name,
+                after={key: value for key, value in values.items() if key != "api_key"}, request=request)
+    db.commit(); db.refresh(model)
+    return ai_model_out(model)
+
+
+@router.patch("/ai/models/{model_id}", response_model=AIModelConfigOut)
+def update_ai_model(model_id: str, payload: AIModelConfigUpdate, request: Request,
+                    db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    model = db.get(AIModelConfig, model_id)
+    if not model: raise HTTPException(status_code=404, detail="model configuration not found")
+    values = payload.model_dump(exclude_unset=True)
+    if values.get("name"):
+        values["name"] = values["name"].strip()
+        duplicate = db.scalar(select(AIModelConfig.id).where(func.lower(AIModelConfig.name) == values["name"].lower(), AIModelConfig.id != model.id))
+        if duplicate: raise HTTPException(status_code=409, detail="model configuration name already exists")
+    if values.get("base_url"): values["base_url"] = values["base_url"].rstrip("/")
+    if values.get("api_key") == "": values.pop("api_key")  # Empty means retain the stored credential.
+    before = {"name": model.name, "model": model.model, "enabled": model.enabled, "is_default": model.is_default}
+    if model.is_default and values.get("is_default") is False:
+        raise HTTPException(status_code=400, detail="set another model as default first")
+    if model.is_default and values.get("enabled") is False:
+        raise HTTPException(status_code=400, detail="the default model cannot be disabled")
+    for key, value in values.items(): setattr(model, key, value)
+    if values.get("is_default"): set_default(db, model)
+    write_audit(db, actor, "ai_model.updated", "ai_model", model.id, model.name, before=before,
+                after={key: value for key, value in values.items() if key != "api_key"}, request=request)
+    db.commit(); db.refresh(model)
+    return ai_model_out(model)
+
+
+@router.delete("/ai/models/{model_id}", status_code=204)
+def delete_ai_model(model_id: str, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    model = db.get(AIModelConfig, model_id)
+    if not model: raise HTTPException(status_code=404, detail="model configuration not found")
+    label, was_default = model.name, model.is_default
+    db.delete(model); db.flush()
+    if was_default:
+        replacement = db.scalar(select(AIModelConfig).where(AIModelConfig.enabled.is_(True)).order_by(AIModelConfig.created_at))
+        if replacement: set_default(db, replacement)
+    write_audit(db, actor, "ai_model.deleted", "ai_model", model_id, label, request=request)
+    db.commit()
+
+
+@router.post("/ai/models/{model_id}/test")
+def test_ai_model(model_id: str, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    model = db.get(AIModelConfig, model_id)
+    if not model: raise HTTPException(status_code=404, detail="model configuration not found")
+    try:
+        headers = {"Authorization": f"Bearer {model.api_key}"} if model.api_key else {}
+        with httpx.Client(timeout=min(model.timeout_seconds, 45)) as client:
+            models_started = time.perf_counter()
+            response = client.get(f"{model.base_url.rstrip('/')}/models", headers=headers)
+            models_latency = round((time.perf_counter() - models_started) * 1000)
+            if response.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"provider /models returned {response.status_code}")
+            body = response.json()
+            available = [str(item.get("id", "")) for item in body.get("data", []) if isinstance(item, dict)] if isinstance(body, dict) else []
+            model_available = not available or model.model in available
+            if not model_available:
+                raise HTTPException(status_code=502, detail="configured model was not returned by /models")
+
+            completion_started = time.perf_counter()
+            completion = client.post(f"{model.base_url.rstrip('/')}/chat/completions", headers={**headers, "Content-Type": "application/json"}, json={
+                "model": model.model, "temperature": 0,
+                "messages": [
+                    {"role": "system", "content": "Return valid JSON only."},
+                    {"role": "user", "content": 'Return exactly {"ok":true}.'},
+                ],
+                "response_format": {"type": "json_object"},
+            })
+            completion_latency = round((time.perf_counter() - completion_started) * 1000)
+            if completion.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"provider /chat/completions returned {completion.status_code}: {completion.text[:200]}")
+            completion_body = completion.json()
+            content = completion_body["choices"][0]["message"]["content"]
+            if isinstance(content, list):
+                content = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+            parsed = json.loads(str(content).strip().removeprefix("```json").removesuffix("```").strip())
+            if not isinstance(parsed, dict) or parsed.get("ok") is not True:
+                raise HTTPException(status_code=502, detail="provider did not return the expected JSON object")
+        return {"ok": True, "latency_ms": models_latency + completion_latency,
+                "models_latency_ms": models_latency, "completion_latency_ms": completion_latency,
+                "model_available": True, "json_supported": True}
+    except HTTPException: raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"provider connection failed: {str(exc)[:200]}") from exc
+
+
+def _usage_point(key: str, label: str, rows: list[AIUsageRecord]) -> AIUsagePoint:
+    first = [row.first_token_ms for row in rows if row.first_token_ms is not None]
+    return AIUsagePoint(
+        key=key, label=label, requests=len(rows), input_tokens=sum(row.input_tokens for row in rows),
+        output_tokens=sum(row.output_tokens for row in rows), total_tokens=sum(row.total_tokens for row in rows),
+        avg_first_token_ms=round(sum(first) / len(first)) if first else None,
+        avg_latency_ms=round(sum(row.latency_ms for row in rows) / len(rows)) if rows else 0,
+    )
+
+
+@router.get("/ai/usage/summary", response_model=AIUsageSummary)
+def ai_usage_summary(
+    days: int = Query(default=30, ge=1, le=365), model_id: str = "", user_id: str = "", organization_id: str = "",
+    db: Session = Depends(get_db), _: User = Depends(admin_user),
+):
+    start = utcnow() - timedelta(days=days - 1)
+    filters = [AIUsageRecord.created_at >= start]
+    if model_id: filters.append(AIUsageRecord.model_config_id == model_id)
+    if user_id: filters.append(AIUsageRecord.user_id == user_id)
+    if organization_id: filters.append(AIUsageRecord.organization_id == organization_id)
+    rows = list(db.scalars(select(AIUsageRecord).where(*filters).order_by(AIUsageRecord.created_at)).all())
+    users = {item.id: item for item in db.scalars(select(User).where(User.id.in_({r.user_id for r in rows if r.user_id}))).all()}
+    organizations = {item.id: item for item in db.scalars(select(Organization).where(Organization.id.in_({r.organization_id for r in rows if r.organization_id}))).all()}
+    models = {item.id: item for item in db.scalars(select(AIModelConfig).where(AIModelConfig.id.in_({r.model_config_id for r in rows if r.model_config_id}))).all()}
+    demos = {item.id: item for item in db.scalars(select(Demo).where(Demo.id.in_({r.demo_id for r in rows if r.demo_id}))).all()}
+
+    def grouped(field: str, labels: dict, fallback) -> list[AIUsagePoint]:
+        groups: dict[str, list[AIUsageRecord]] = {}
+        for row in rows:
+            key = str(getattr(row, field) or "unknown"); groups.setdefault(key, []).append(row)
+        return sorted((_usage_point(key, labels[key] if key in labels else fallback(group[0]), group) for key, group in groups.items()), key=lambda x: x.total_tokens, reverse=True)
+
+    by_day: dict[str, list[AIUsageRecord]] = {}
+    for row in rows: by_day.setdefault(row.created_at.date().isoformat(), []).append(row)
+    trend = []
+    for offset in range(days):
+        key = (start.date() + timedelta(days=offset)).isoformat()
+        trend.append(_usage_point(key, key, by_day.get(key, [])))
+    return AIUsageSummary(
+        totals=_usage_point("total", "Total", rows), trend=trend,
+        by_user=grouped("user_id", {key: value.name or value.email for key, value in users.items()}, lambda _row: "Unknown user"),
+        by_organization=grouped("organization_id", {key: value.name for key, value in organizations.items()}, lambda _row: "No team"),
+        by_model=grouped("model_config_id", {key: value.name for key, value in models.items()}, lambda row: row.model_name or "Deleted model"),
+        by_resource=grouped("demo_id", {key: value.title for key, value in demos.items()}, lambda _row: "Deleted resource"),
+        by_status=grouped("status", {"success": "Success", "failed": "Failed"}, lambda row: row.status),
+        by_operation=grouped("operation", {}, lambda row: row.operation),
+    )
+
+
+@router.get("/ai/usage/requests", response_model=AIUsageRecordPage)
+def ai_usage_requests(
+    query: str = Query(default="", max_length=200), model_id: str = "", user_id: str = "", organization_id: str = "",
+    request_status: str = Query(default="", alias="status", pattern="^(|success|failed)$"),
+    page: int = Query(default=1, ge=1), page_size: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db), _: User = Depends(admin_user),
+):
+    filters = []
+    if query.strip():
+        value = f"%{query.strip().lower()}%"
+        filters.append(or_(func.lower(AIUsageRecord.request_id).like(value), func.lower(AIUsageRecord.model_name).like(value), func.lower(AIUsageRecord.operation).like(value)))
+    if model_id: filters.append(AIUsageRecord.model_config_id == model_id)
+    if user_id: filters.append(AIUsageRecord.user_id == user_id)
+    if organization_id: filters.append(AIUsageRecord.organization_id == organization_id)
+    if request_status: filters.append(AIUsageRecord.status == request_status)
+    total = db.scalar(select(func.count(AIUsageRecord.id)).where(*filters)) or 0
+    rows = db.scalars(select(AIUsageRecord).where(*filters).order_by(AIUsageRecord.created_at.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    result = []
+    for row in rows:
+        user = db.get(User, row.user_id) if row.user_id else None
+        organization = db.get(Organization, row.organization_id) if row.organization_id else None
+        demo = db.get(Demo, row.demo_id) if row.demo_id else None
+        result.append(AIUsageRecordOut(
+            id=row.id, request_id=row.request_id, model_config_id=row.model_config_id, model_name=row.model_name,
+            user_id=row.user_id, user_name=user.name if user else "", user_email=user.email if user else "",
+            organization_id=row.organization_id, organization_name=organization.name if organization else "",
+            demo_id=row.demo_id, demo_title=demo.title if demo else "", operation=row.operation, status=row.status,
+            input_tokens=row.input_tokens, output_tokens=row.output_tokens, total_tokens=row.total_tokens,
+            first_token_ms=row.first_token_ms, latency_ms=row.latency_ms, request_detail=row.request_detail or {},
+            response_detail=row.response_detail or {}, error=row.error, created_at=row.created_at,
+        ))
+    return AIUsageRecordPage(items=result, total=total, page=page, page_size=page_size)
 
 
 @router.get("/users", response_model=AdminUserPage)
@@ -194,7 +681,7 @@ def list_users(
     role: str | None = Query(default=None, pattern="^(user|admin)$"),
     active: bool | None = None,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=25, ge=1, le=100),
+    page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     _: User = Depends(admin_user),
 ):
@@ -462,7 +949,7 @@ def list_resources(
     resource_status: str | None = Query(default=None, alias="status", pattern="^(draft|published)$"),
     content_locale: str | None = Query(default=None, pattern="^(zh-CN|en)$"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=25, ge=1, le=100),
+    page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     _: User = Depends(admin_user),
 ):
@@ -517,6 +1004,8 @@ def resource_image(
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not storage.exists(step.asset_key):
         raise HTTPException(status_code=404, detail="asset not found")
+    direct = storage.direct_url(step.asset_key)
+    if direct: return RedirectResponse(direct, status_code=307, headers={"Cache-Control": "private, no-store"})
     return StreamingResponse(io.BytesIO(storage.read(step.asset_key)), media_type="image/webp")
 
 
@@ -586,7 +1075,8 @@ def admin_organizations(
 def audit_logs(
     query: str = Query(default="", max_length=200), action: str = Query(default="", max_length=80),
     target_type: str = Query(default="", max_length=40), organization_id: str = Query(default="", max_length=36),
-    page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
+    source: str = Query(default="", max_length=30), outcome: str = Query(default="", max_length=20),
+    page: int = Query(default=1, ge=1), page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db), _: User = Depends(admin_user),
 ):
     filters = []
@@ -594,6 +1084,8 @@ def audit_logs(
     if action: filters.append(AuditLog.action == action)
     if target_type: filters.append(AuditLog.target_type == target_type)
     if organization_id: filters.append(AuditLog.organization_id == organization_id)
+    if source: filters.append(AuditLog.source == source)
+    if outcome: filters.append(AuditLog.outcome == outcome)
     total = db.scalar(select(func.count(AuditLog.id)).where(*filters)) or 0
     logs = db.scalars(select(AuditLog).where(*filters).order_by(AuditLog.created_at.desc()).offset(
         (page - 1) * page_size
@@ -607,7 +1099,9 @@ def audit_logs(
             actor_email=actor.email if actor else "", organization_id=log.organization_id,
             organization_name=organization.name if organization else "", action=log.action,
             target_type=log.target_type, target_id=log.target_id, target_label=log.target_label,
-            before=log.before or {}, after=log.after or {}, ip_address=log.ip_address, created_at=log.created_at,
+            before=log.before or {}, after=log.after or {}, ip_address=log.ip_address,
+            user_agent=log.user_agent or "", source=log.source or "web", outcome=log.outcome or "success",
+            created_at=log.created_at,
         ))
     return AuditLogPage(items=items, total=total, page=page, page_size=page_size)
 

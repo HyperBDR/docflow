@@ -18,7 +18,7 @@ export type OrganizationMember = { id: string; user_id: string; name: string; em
 export type AdminMembership = { id: string; organization_id: string; organization_name: string; organization_slug: string; organization_kind: 'personal' | 'team'; role: OrganizationRole; is_current: boolean; created_at: string }
 export type Invitation = { id: string; email: string; role: OrganizationRole; organization_id: string; organization_name: string; invite_url?: string; expires_at: string; accepted_at?: string; created_at: string }
 export type AdminOrganization = { id: string; name: string; slug: string; kind: 'personal' | 'team'; status: 'active' | 'archived'; owner_name: string; owner_email: string; member_count: number; demo_count: number; storage_bytes: number; created_by_email: string; created_at: string; archived_at?: string }
-export type AuditLog = { id: string; actor_id?: string; actor_name: string; actor_email: string; organization_id?: string; organization_name: string; action: string; target_type: string; target_id: string; target_label: string; before: Record<string, unknown>; after: Record<string, unknown>; ip_address: string; created_at: string }
+export type AuditLog = { id: string; actor_id?: string; actor_name: string; actor_email: string; organization_id?: string; organization_name: string; action: string; target_type: string; target_id: string; target_label: string; before: Record<string, unknown>; after: Record<string, unknown>; ip_address: string; user_agent: string; source: string; outcome: string; created_at: string }
 export type RecycleItem = { id: string; item_type: 'user' | 'resource' | 'team_space'; title: string; owner_email: string; deleted_at: string; deleted_by_name: string; expires_at: string }
 
 export type UserStats = {
@@ -33,13 +33,49 @@ export type UserStats = {
 
 export type AdminUser = User & { stats: UserStats; memberships: AdminMembership[] }
 export type PageResult<T> = { items: T[]; total: number; page: number; page_size: number }
+export type AIModelConfig = {
+  id: string; name: string; provider: string; base_url: string; model: string; enabled: boolean; is_default: boolean
+  vision_enabled: boolean; timeout_seconds: number; temperature: number; extra_options: Record<string, unknown>
+  api_key_configured: boolean; created_at: string; updated_at: string
+}
+export type AIModelInput = Omit<AIModelConfig, 'id' | 'provider' | 'api_key_configured' | 'created_at' | 'updated_at'> & { api_key?: string }
+export type AIPlatformSettings = { enabled: boolean; chunk_size: number; configured_models: number; enabled_models: number; effective: boolean; updated_at: string }
+export type AIUsagePoint = { key: string; label: string; requests: number; input_tokens: number; output_tokens: number; total_tokens: number; avg_first_token_ms?: number | null; avg_latency_ms: number }
+export type AIUsageSummary = { totals: AIUsagePoint; trend: AIUsagePoint[]; by_user: AIUsagePoint[]; by_organization: AIUsagePoint[]; by_model: AIUsagePoint[]; by_resource: AIUsagePoint[]; by_status: AIUsagePoint[]; by_operation: AIUsagePoint[] }
+export type AIUsageRecord = {
+  id: string; request_id: string; model_config_id?: string | null; model_name: string; user_id?: string | null; user_name: string; user_email: string
+  organization_id?: string | null; organization_name: string; demo_id?: string | null; demo_title: string; operation: string; status: 'success' | 'failed'
+  input_tokens: number; output_tokens: number; total_tokens: number; first_token_ms?: number | null; latency_ms: number
+  request_detail: Record<string, unknown>; response_detail: Record<string, unknown>; error: string; created_at: string
+}
+export type StorageConfig = {
+  id: string; name: string; kind: 'local' | 's3'; enabled: boolean; is_default: boolean
+  local_path: string; endpoint_url: string; region: string; bucket: string; prefix: string
+  force_path_style: boolean; direct_download: boolean; public_base_url: string
+  credentials_configured: boolean; object_count: number; total_bytes: number; created_at: string; updated_at: string
+}
+export type StorageConfigInput = Omit<StorageConfig, 'id' | 'credentials_configured' | 'object_count' | 'total_bytes' | 'created_at' | 'updated_at'> & { access_key?: string; secret_key?: string }
+export type StorageObject = { key: string; name: string; is_directory: boolean; size: number; updated_at?: string | null }
 export type AdminOverview = {
   users: number
   active_users: number
   admins: number
+  organizations: number
   demos: number
+  draft_demos: number
+  published_demos: number
+  steps: number
   views: number
+  unique_viewers: number
+  exports: number
+  ai_requests: number
+  ai_tokens: number
+  failed_jobs: number
   storage_bytes: number
+  trend: { date: string; users: number; demos: number; views: number; ai_tokens: number }[]
+  demo_status: { key: string; label: string; value: number; secondary: number }[]
+  content_locales: { key: string; label: string; value: number; secondary: number }[]
+  top_organizations: { key: string; label: string; value: number; secondary: number }[]
 }
 
 export type AdminResourceOwner = { id: string; name: string; email: string }
@@ -108,6 +144,7 @@ export type Demo = {
   status: 'draft' | 'published'
   created_at: string
   updated_at: string
+  created_by: { id: string; name: string; email: string }
   steps: Step[]
   thumbnail_url?: string
   share_url?: string

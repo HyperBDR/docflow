@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import AccountMenu, { LAST_WORKSPACE_KEY } from '../components/AccountMenu'
 import Brand from '../components/Brand'
 import Icon from '../components/Icon'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 import type { User } from '../types'
 import AdminUsers from './Admin'
 import AdminOverview from './AdminOverview'
@@ -12,6 +13,10 @@ import AdminResourceDetail from './AdminResourceDetail'
 import AdminOrganizations from './AdminOrganizations'
 import AdminAudit from './AdminAudit'
 import AdminRecycle from './AdminRecycle'
+import AdminAIModels from './AdminAIModels'
+import AdminAIUsage from './AdminAIUsage'
+import AdminAISettings from './AdminAISettings'
+import AdminStorage from './AdminStorage'
 
 export default function AdminShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
   const { t } = useTranslation('admin')
@@ -20,6 +25,10 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
   const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => { localStorage.setItem(LAST_WORKSPACE_KEY, 'admin'); setMobileOpen(false) }, [location.pathname])
   const title = location.pathname.startsWith('/admin/resources/') ? t('resource.detailTitle')
+    : location.pathname.startsWith('/admin/storage') ? t('nav.storage')
+    : location.pathname.startsWith('/admin/ai/settings') ? t('nav.aiSettings')
+      : location.pathname.startsWith('/admin/ai/usage') ? t('nav.aiUsage')
+      : location.pathname.startsWith('/admin/ai/models') ? t('nav.aiModels')
     : location.pathname.startsWith('/admin/resources') ? t('nav.resources')
       : location.pathname.startsWith('/admin/users') ? t('nav.users')
         : location.pathname.startsWith('/admin/organizations') ? t('nav.organizations')
@@ -38,6 +47,11 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
         <div className="admin-nav-separator"><span>{t('nav.content')}</span></div>
         <NavLink to="/admin/resources" title={t('nav.resources')}><Icon name="folder" /><span>{t('nav.resources')}</span></NavLink>
         <NavLink to="/admin/recycle" title={t('nav.recycle')}><Icon name="delete" /><span>{t('nav.recycle')}</span></NavLink>
+        <NavLink to="/admin/storage" title={t('nav.storage')}><Icon name="database" /><span>{t('nav.storage')}</span></NavLink>
+        <div className="admin-nav-separator"><span>{t('nav.ai')}</span></div>
+        <NavLink to="/admin/ai/settings" title={t('nav.aiSettings')}><Icon name="settings" /><span>{t('nav.aiSettings')}</span></NavLink>
+        <NavLink to="/admin/ai/models" title={t('nav.aiModels')}><Icon name="ai" /><span>{t('nav.aiModels')}</span></NavLink>
+        <NavLink to="/admin/ai/usage" title={t('nav.aiUsage')}><Icon name="analytics" /><span>{t('nav.aiUsage')}</span></NavLink>
         <div className="admin-nav-separator"><span>{t('nav.security')}</span></div>
         <NavLink to="/admin/audit" title={t('nav.audit')}><Icon name="clock" /><span>{t('nav.audit')}</span></NavLink>
       </nav>
@@ -45,7 +59,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
     </aside>
     <button className="admin-sidebar-scrim" aria-label={t('common:actions.close')} onClick={() => setMobileOpen(false)} />
     <div className="admin-shell-main">
-      <header className="admin-topbar"><div><button className="admin-mobile-menu" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button><span><small>DocFlow Admin</small><strong>{title}</strong></span></div><AccountMenu user={user} view="admin" onUserChange={onUserChange} logout={logout} /></header>
+      <header className="admin-topbar"><div><button className="admin-mobile-menu" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button><span><small>DocFlow Admin</small><strong>{title}</strong></span></div><div className="topbar-account-actions"><LanguageSwitcher account /><AccountMenu user={user} view="admin" onUserChange={onUserChange} logout={logout} /></div></header>
       <div className="admin-route-content"><Routes>
         <Route index element={<AdminOverview />} />
         <Route path="users" element={<AdminUsers currentUser={user} onCurrentUserChange={onUserChange} />} />
@@ -54,6 +68,10 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
         <Route path="organizations" element={<AdminOrganizations user={user} onUserChange={onUserChange} />} />
         <Route path="audit" element={<AdminAudit />} />
         <Route path="recycle" element={<AdminRecycle />} />
+        <Route path="ai/models" element={<AdminAIModels />} />
+        <Route path="ai/settings" element={<AdminAISettings />} />
+        <Route path="ai/usage" element={<AdminAIUsage />} />
+        <Route path="storage" element={<AdminStorage />} />
         <Route path="*" element={<Navigate to="/admin" />} />
       </Routes></div>
     </div>

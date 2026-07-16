@@ -102,6 +102,8 @@ class AuditLog(Base):
     after: Mapped[dict] = mapped_column(JSON, default=dict)
     ip_address: Mapped[str] = mapped_column(String(80), default="")
     user_agent: Mapped[str] = mapped_column(String(500), default="")
+    source: Mapped[str] = mapped_column(String(30), default="web", index=True)
+    outcome: Mapped[str] = mapped_column(String(20), default="success", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
@@ -315,11 +317,101 @@ class AIJob(Base):
     step_id: Mapped[str | None] = mapped_column(ForeignKey("steps.id", ondelete="CASCADE"), nullable=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.queued)
     progress: Mapped[int] = mapped_column(Integer, default=0)
+    model_config_id: Mapped[str | None] = mapped_column(ForeignKey("ai_model_configs.id", ondelete="SET NULL"), nullable=True, index=True)
     model: Mapped[str] = mapped_column(String(200), default="")
     result: Mapped[dict] = mapped_column(JSON, default=dict)
     applied_patch: Mapped[dict] = mapped_column(JSON, default=dict)
     inverse_patch: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class AIModelConfig(Base):
+    """Administrator-managed OpenAI-compatible model endpoint."""
+    __tablename__ = "ai_model_configs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="openai_compatible")
+    base_url: Mapped[str] = mapped_column(String(500), default="https://api.openai.com/v1")
+    api_key_encrypted: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    vision_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=120)
+    temperature: Mapped[float] = mapped_column(Float, default=.2)
+    extra_options: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+    @property
+    def api_key(self) -> str:
+        from app.secrets import decrypt_secret
+        return decrypt_secret(self.api_key_encrypted)
+
+    @api_key.setter
+    def api_key(self, value: str) -> None:
+        from app.secrets import encrypt_secret
+        self.api_key_encrypted = encrypt_secret(value or "")
+
+
+class AIPlatformSettings(Base):
+    """Singleton runtime policy shared by every configured AI model."""
+    __tablename__ = "ai_platform_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="global")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    chunk_size: Mapped[int] = mapped_column(Integer, default=8)
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class AIUsageRecord(Base):
+    """One row per upstream model request, including failed requests."""
+    __tablename__ = "ai_usage_records"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    request_id: Mapped[str] = mapped_column(String(120), default="", index=True)
+    model_config_id: Mapped[str | None] = mapped_column(ForeignKey("ai_model_configs.id", ondelete="SET NULL"), nullable=True, index=True)
+    model_name: Mapped[str] = mapped_column(String(200), default="", index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="openai_compatible")
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("ai_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    demo_id: Mapped[str | None] = mapped_column(ForeignKey("demos.id", ondelete="SET NULL"), nullable=True, index=True)
+    operation: Mapped[str] = mapped_column(String(80), default="generation", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="success", index=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    first_token_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    request_detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    response_detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class StorageConfig(Base):
+    """A server-local directory or S3-compatible object-storage target."""
+    __tablename__ = "storage_configs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)  # local | s3
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    local_path: Mapped[str] = mapped_column(String(1000), default="")
+    endpoint_url: Mapped[str] = mapped_column(String(1000), default="")
+    region: Mapped[str] = mapped_column(String(120), default="")
+    bucket: Mapped[str] = mapped_column(String(255), default="")
+    access_key_encrypted: Mapped[str] = mapped_column(Text, default="")
+    secret_key_encrypted: Mapped[str] = mapped_column(Text, default="")
+    prefix: Mapped[str] = mapped_column(String(500), default="docflow")
+    force_path_style: Mapped[bool] = mapped_column(Boolean, default=False)
+    direct_download: Mapped[bool] = mapped_column(Boolean, default=True)
+    public_base_url: Mapped[str] = mapped_column(String(1000), default="")
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

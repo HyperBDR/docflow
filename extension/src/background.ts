@@ -83,6 +83,15 @@ async function deleteAutomaticDemo(state: Pick<Recording, 'api' | 'token' | 'dem
   } catch { /* best-effort cleanup; the server recycle bin remains the fallback */ }
 }
 
+async function auditRecording(state: Recording, action: 'started' | 'paused' | 'resumed' | 'completed') {
+  try {
+    await fetch(`${state.api}/api/recordings/${state.demoId}/events`, {
+      method: 'POST', headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, mode: state.mode, ai_enabled: state.aiEnabled, step_count: state.steps }),
+    })
+  } catch { /* audit delivery must not interrupt recording */ }
+}
+
 async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false) {
   const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
@@ -95,6 +104,7 @@ async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = f
   }
   await persist(recording)
   await notify(recording)
+  await auditRecording(recording, 'started')
 }
 
 async function restore(): Promise<Recording | null> {
@@ -294,6 +304,7 @@ async function pause() {
   state.capturing = false
   state.phase = ''
   await persist(state); await notify(state)
+  await auditRecording(state, state.paused ? 'paused' : 'resumed')
   return state
 }
 
@@ -315,6 +326,7 @@ async function stop(open = true) {
       await fetch(`${state.api}/api/demos/${state.demoId}/ai/generate`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } })
     } catch { /* AI is optional */ }
   }
+  await auditRecording(state, 'completed')
   state.active = false; state.capturing = false; state.phase = ''
   await notify(state)
   recording = null

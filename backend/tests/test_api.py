@@ -136,8 +136,7 @@ def test_recording_enqueues_ai_without_waiting_for_generation(authenticated, mon
     from app.routers import recordings
 
     queued: list[str] = []
-    monkeypatch.setattr(recordings.settings, "ai_enabled", True)
-    monkeypatch.setattr(recordings.settings, "ai_api_key", "test-key")
+    monkeypatch.setattr(recordings, "active_model", lambda _db: object())
     monkeypatch.setattr(recordings, "enqueue_ai_job", lambda db, demo, user, step_id: queued.append(step_id))
     demo = authenticated.post("/api/demos", json={"title": "异步 AI"}).json()
     response = create_step(authenticated, demo["id"], "async-ai")
@@ -149,8 +148,7 @@ def test_recording_ai_can_be_disabled_per_capture(authenticated, monkeypatch):
     from app.routers import recordings
 
     queued: list[str] = []
-    monkeypatch.setattr(recordings.settings, "ai_enabled", True)
-    monkeypatch.setattr(recordings.settings, "ai_api_key", "test-key")
+    monkeypatch.setattr(recordings, "active_model", lambda _db: object())
     monkeypatch.setattr(recordings, "enqueue_ai_job", lambda db, demo, user, step_id: queued.append(step_id))
     demo = authenticated.post("/api/demos", json={"title": "关闭 AI"}).json()
     response = create_step(authenticated, demo["id"], "no-ai", ai_enabled=False)

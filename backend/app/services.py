@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.ai_models import active_model
 from app.defaults import DEFAULT_PLAYBACK, DEFAULT_THEME, DEFAULT_TOOLTIP, DEFAULT_HOTSPOT_STYLE, navigation_defaults
 from app.models import AuditLog, Demo, Organization, OrganizationMember, PublishedRevision, ShareToken, Step, User
 from app.schemas import DemoOut, HotspotOut, StepOut
@@ -75,13 +76,17 @@ def write_audit(
     db: Session, actor: User | None, action: str, target_type: str, target_id: str,
     target_label: str = "", organization_id: str | None = None,
     before: dict | None = None, after: dict | None = None, request: Request | None = None,
+    source: str = "web", outcome: str = "success",
 ) -> AuditLog:
+    if source == "web" and request and request.url.path.startswith("/api/admin/"):
+        source = "admin"
     log = AuditLog(
         actor_id=actor.id if actor else None, organization_id=organization_id,
         action=action, target_type=target_type, target_id=target_id, target_label=target_label,
         before=before or {}, after=after or {},
         ip_address=(request.client.host if request and request.client else "")[:80],
         user_agent=(request.headers.get("user-agent", "") if request else "")[:500],
+        source=source[:30], outcome=outcome[:20],
     )
     db.add(log)
     return log
@@ -129,6 +134,7 @@ def step_out(step: Step, demo_id: str) -> StepOut:
 def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
     share = active_share(db, demo.id)
     first_step = min(demo.steps, key=lambda item: item.position, default=None)
+    creator = db.get(User, demo.owner_id)
     return DemoOut(
         id=demo.id,
         organization_id=demo.organization_id,
@@ -138,6 +144,7 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         status=demo.status.value,
         created_at=demo.created_at,
         updated_at=demo.updated_at,
+        created_by={"id": creator.id, "name": creator.name or "", "email": creator.email} if creator else {"id": demo.owner_id, "name": "", "email": ""},
         steps=[step_out(step, demo.id) for step in demo.steps] if include_steps else [],
         thumbnail_url=(
             f"{settings.public_base_url}/api/demos/{demo.id}/steps/{first_step.id}/image"
@@ -148,7 +155,7 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         navigation={**navigation_defaults(demo.content_locale), **(demo.navigation or {})},
         playback={**DEFAULT_PLAYBACK, **(demo.playback or {})},
         manual_fields=demo.manual_fields or [],
-        ai_enabled=settings.ai_enabled and bool(settings.ai_api_key),
+        ai_enabled=bool(active_model(db)),
         category_id=demo.category_id,
         tags=demo.tags,
     )

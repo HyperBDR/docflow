@@ -1,18 +1,19 @@
 import json
 import uuid
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.ai_jobs import enqueue_ai_job
+from app.ai_models import active_model
 from app.database import get_db
 from app.dependencies import current_user
 from app.defaults import DEFAULT_HOTSPOT_STYLE, DEFAULT_TOOLTIP
 from app.models import Hotspot as HotspotModel, Step, User
-from app.schemas import RecordingDomMeta, RecordingStepMeta, StepOut
-from app.services import owned_demo, step_out
+from app.schemas import RecordingAuditInput, RecordingDomMeta, RecordingStepMeta, StepOut
+from app.services import owned_demo, step_out, write_audit
 from app.snapshots import SnapshotError, decode_snapshot, sanitize_page_context, sanitize_snapshot, store_snapshot
 from app.storage import storage
 
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 @router.post("/{demo_id}/steps", response_model=StepOut, status_code=201)
 async def upload_step(
     demo_id: str,
+    request: Request,
     meta: str = Form(...),
     screenshot: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -65,7 +67,11 @@ async def upload_step(
     except IntegrityError:
         db.rollback()
         step = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.event_id == parsed.event_id))
-    if parsed.ai_enabled and settings.ai_enabled and settings.ai_api_key and step:
+    write_audit(db, user, "recording.step_captured", "recording", demo.id, demo.title, demo.organization_id,
+                after={"step_id": step.id, "position": step.position, "mode": "screenshot", "ai_enabled": parsed.ai_enabled},
+                request=request, source="extension")
+    db.commit()
+    if parsed.ai_enabled and active_model(db) and step:
         try:
             enqueue_ai_job(db, demo, user, step.id)
         except Exception:
@@ -78,6 +84,7 @@ async def upload_step(
 @router.post("/{demo_id}/slides", response_model=StepOut, status_code=201)
 async def upload_dom_slide(
     demo_id: str,
+    request: Request,
     meta: str = Form(...),
     screenshot: UploadFile = File(...),
     snapshot: UploadFile | None = File(default=None),
@@ -158,9 +165,25 @@ async def upload_dom_slide(
     except IntegrityError:
         db.rollback()
         step = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.event_id == parsed.event_id))
-    if parsed.ai_enabled and settings.ai_enabled and settings.ai_api_key and step:
+    write_audit(db, user, "recording.step_captured", "recording", demo.id, demo.title, demo.organization_id,
+                after={"step_id": step.id, "position": step.position, "mode": "html", "terminal": parsed.terminal, "ai_enabled": parsed.ai_enabled},
+                request=request, source="extension")
+    db.commit()
+    if parsed.ai_enabled and active_model(db) and step:
         try:
             enqueue_ai_job(db, demo, user, step.id)
         except Exception:
             db.rollback()
     return step_out(step, demo.id)
+
+
+@router.post("/{demo_id}/events", status_code=204)
+def record_lifecycle_event(
+    demo_id: str, payload: RecordingAuditInput, request: Request,
+    db: Session = Depends(get_db), user: User = Depends(current_user),
+):
+    demo = owned_demo(db, demo_id, user)
+    write_audit(db, user, f"recording.{payload.action}", "recording", demo.id, demo.title, demo.organization_id,
+                after={"mode": payload.mode, "ai_enabled": payload.ai_enabled, "step_count": payload.step_count},
+                request=request, source="extension")
+    db.commit()

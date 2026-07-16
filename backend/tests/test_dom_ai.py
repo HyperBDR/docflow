@@ -153,18 +153,23 @@ def test_ai_application_respects_manual_fields(authenticated):
             hotspot={"x": .5, "y": .5, "w": .1, "h": .1}, manual_fields=["body"],
         )
         db.add(step); db.flush()
-        hotspot = Hotspot(step_id=step.id, fallback_rect=step.hotspot, selector={}, action={"type": "next"}, tooltip={"content": "旧提示", "placement": "auto"}, style={})
-        db.add(hotspot); db.flush()
+        hotspot = Hotspot(step_id=step.id, position=0, fallback_rect=step.hotspot, selector={}, action={"type": "next"}, tooltip={"content": "旧提示", "placement": "auto"}, style={})
+        second = Hotspot(step_id=step.id, position=1, fallback_rect=step.hotspot, selector={"css": "#second"}, action={"type": "next"}, tooltip={"content": "第二个旧提示", "placement": "auto"}, style={})
+        db.add_all([hotspot, second]); db.flush()
         job = AIJob(owner_id=user.id, demo_id=demo.id, model="test")
         db.add(job); db.flush()
         apply_results(db, job, demo, {"title": "AI 标题", "description": "AI 摘要"}, [{
-            "id": step.id, "title": "AI 步骤", "body": "AI 正文", "tooltip": "AI 提示", "placement": "bottom", "warnings": [], "redundant": False,
+            "id": step.id, "title": "AI 步骤", "body": "AI 正文", "hotspots": [
+                {"id": hotspot.id, "tooltip": "AI 提示", "placement": "bottom"},
+                {"id": second.id, "tooltip": "第二个 AI 提示", "placement": "right"},
+            ], "warnings": [], "redundant": False,
         }])
         assert demo.title == "人工标题"
         assert demo.description == "AI 摘要"
         assert step.title == "AI 步骤"
         assert step.body == "规则正文"
         assert hotspot.tooltip["content"] == "AI 提示"
+        assert second.tooltip["content"] == "第二个 AI 提示"
         assert job.inverse_patch["demo"]["description"] == ""
     finally:
         db.rollback(); db.close()

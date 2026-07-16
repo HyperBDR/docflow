@@ -110,6 +110,9 @@ class AuditLogOut(BaseModel):
     before: dict
     after: dict
     ip_address: str
+    user_agent: str
+    source: str
+    outcome: str
     created_at: datetime
 
 
@@ -200,13 +203,213 @@ class AdminUserPage(BaseModel):
     page_size: int
 
 
+class MetricPoint(BaseModel):
+    key: str
+    label: str
+    value: int = 0
+    secondary: int = 0
+
+
+class OverviewTrendPoint(BaseModel):
+    date: str
+    users: int = 0
+    demos: int = 0
+    views: int = 0
+    ai_tokens: int = 0
+
+
 class AdminOverview(BaseModel):
     users: int = 0
     active_users: int = 0
     admins: int = 0
+    organizations: int = 0
     demos: int = 0
+    draft_demos: int = 0
+    published_demos: int = 0
+    steps: int = 0
     views: int = 0
+    unique_viewers: int = 0
+    exports: int = 0
+    ai_requests: int = 0
+    ai_tokens: int = 0
+    failed_jobs: int = 0
     storage_bytes: int = 0
+    trend: list[OverviewTrendPoint] = Field(default_factory=list)
+    demo_status: list[MetricPoint] = Field(default_factory=list)
+    content_locales: list[MetricPoint] = Field(default_factory=list)
+    top_organizations: list[MetricPoint] = Field(default_factory=list)
+
+
+class AIModelConfigInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider: Literal["openai_compatible"] = "openai_compatible"
+    base_url: str = Field(min_length=1, max_length=500)
+    api_key: str | None = Field(default=None, max_length=2000)
+    model: str = Field(min_length=1, max_length=200)
+    enabled: bool = True
+    is_default: bool = False
+    vision_enabled: bool = True
+    timeout_seconds: int = Field(default=120, ge=5, le=600)
+    temperature: float = Field(default=.2, ge=0, le=2)
+    extra_options: dict = Field(default_factory=dict)
+
+
+class AIModelConfigUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, min_length=1, max_length=500)
+    api_key: str | None = Field(default=None, max_length=2000)
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    enabled: bool | None = None
+    is_default: bool | None = None
+    vision_enabled: bool | None = None
+    timeout_seconds: int | None = Field(default=None, ge=5, le=600)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    extra_options: dict | None = None
+
+
+class AIModelConfigOut(BaseModel):
+    id: str
+    name: str
+    provider: str
+    base_url: str
+    model: str
+    enabled: bool
+    is_default: bool
+    vision_enabled: bool
+    timeout_seconds: int
+    temperature: float
+    extra_options: dict
+    api_key_configured: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AIPlatformSettingsUpdate(BaseModel):
+    enabled: bool
+    chunk_size: int = Field(default=8, ge=1, le=12)
+
+
+class AIPlatformSettingsOut(AIPlatformSettingsUpdate):
+    enabled_models: int = 0
+    configured_models: int = 0
+    effective: bool = False
+    updated_at: datetime
+
+
+class AIUsagePoint(BaseModel):
+    key: str
+    label: str
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    avg_first_token_ms: int | None = None
+    avg_latency_ms: int = 0
+
+
+class AIUsageSummary(BaseModel):
+    totals: AIUsagePoint
+    trend: list[AIUsagePoint]
+    by_user: list[AIUsagePoint]
+    by_organization: list[AIUsagePoint]
+    by_model: list[AIUsagePoint]
+    by_resource: list[AIUsagePoint]
+    by_status: list[AIUsagePoint]
+    by_operation: list[AIUsagePoint]
+
+
+class AIUsageRecordOut(BaseModel):
+    id: str
+    request_id: str
+    model_config_id: str | None
+    model_name: str
+    user_id: str | None
+    user_name: str
+    user_email: str
+    organization_id: str | None
+    organization_name: str
+    demo_id: str | None
+    demo_title: str
+    operation: str
+    status: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    first_token_ms: int | None
+    latency_ms: int
+    request_detail: dict
+    response_detail: dict
+    error: str
+    created_at: datetime
+
+
+class AIUsageRecordPage(BaseModel):
+    items: list[AIUsageRecordOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class StorageConfigInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    kind: Literal["local", "s3"]
+    enabled: bool = True
+    is_default: bool = False
+    local_path: str = Field(default="", max_length=1000)
+    endpoint_url: str = Field(default="", max_length=1000)
+    region: str = Field(default="", max_length=120)
+    bucket: str = Field(default="", max_length=255)
+    access_key: str | None = Field(default=None, max_length=1000)
+    secret_key: str | None = Field(default=None, max_length=2000)
+    prefix: str = Field(default="docflow", max_length=500)
+    force_path_style: bool = False
+    direct_download: bool = True
+    public_base_url: str = Field(default="", max_length=1000)
+
+
+class StorageConfigUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    is_default: bool | None = None
+    local_path: str | None = Field(default=None, max_length=1000)
+    endpoint_url: str | None = Field(default=None, max_length=1000)
+    region: str | None = Field(default=None, max_length=120)
+    bucket: str | None = Field(default=None, max_length=255)
+    access_key: str | None = Field(default=None, max_length=1000)
+    secret_key: str | None = Field(default=None, max_length=2000)
+    prefix: str | None = Field(default=None, max_length=500)
+    force_path_style: bool | None = None
+    direct_download: bool | None = None
+    public_base_url: str | None = Field(default=None, max_length=1000)
+
+
+class StorageConfigOut(BaseModel):
+    id: str
+    name: str
+    kind: Literal["local", "s3"]
+    enabled: bool
+    is_default: bool
+    local_path: str
+    endpoint_url: str
+    region: str
+    bucket: str
+    prefix: str
+    force_path_style: bool
+    direct_download: bool
+    public_base_url: str
+    credentials_configured: bool
+    object_count: int = 0
+    total_bytes: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class StorageObjectOut(BaseModel):
+    key: str
+    name: str
+    is_directory: bool
+    size: int
+    updated_at: datetime | None = None
 
 
 class AdminResourceOwner(BaseModel):
@@ -462,6 +665,12 @@ class StepUpdate(BaseModel):
     animation: StepAnimation | None = None
 
 
+class DemoAuthorOut(BaseModel):
+    id: str
+    name: str = ""
+    email: str
+
+
 class DemoOut(BaseModel):
     id: str
     organization_id: str
@@ -471,6 +680,7 @@ class DemoOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    created_by: DemoAuthorOut
     steps: list[StepOut] = []
     thumbnail_url: str | None = None
     share_url: str | None = None
@@ -514,6 +724,13 @@ class RecordingDomMeta(BaseModel):
     scroll_state: dict = Field(default_factory=dict)
     password_rects: list[Redaction] = Field(default_factory=list)
     capture_warnings: list[str] = Field(default_factory=list)
+
+
+class RecordingAuditInput(BaseModel):
+    action: Literal["started", "paused", "resumed", "completed"]
+    mode: Literal["html", "screenshot"] = "html"
+    ai_enabled: bool = False
+    step_count: int = Field(default=0, ge=0, le=100)
 
 
 class ExportCreate(BaseModel):

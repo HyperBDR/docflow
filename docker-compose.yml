@@ -29,6 +29,8 @@ services:
     env_file: .env
     volumes:
       - asset-data:/data
+      # Admin-managed local paths must be visible to both API and worker.
+      - ${DOCFLOW_HOST_STORAGE_DIR:-./storage-data}:/storage-data
     ports:
       - "8001:8000"
     depends_on:
@@ -45,6 +47,7 @@ services:
     env_file: .env
     volumes:
       - asset-data:/data
+      - ${DOCFLOW_HOST_STORAGE_DIR:-./storage-data}:/storage-data
     depends_on:
       postgres:
         condition: service_healthy

@@ -9,6 +9,8 @@ npm run build
 
 在 Chrome 或 Edge 打开扩展管理页，启用开发者模式，选择“加载已解压的扩展”，加载 `extension/dist`。
 
+生成正式 ZIP、准备隐私与权限说明，以及发布到 Chrome Web Store / Microsoft Edge Add-ons 的完整流程见 [PUBLISHING.md](PUBLISHING.md)。
+
 ## 使用
 
 1. 在插件中点击连接账号，插件会打开 DocFlow 专用连接页。未登录时先完成登录，随后页面会自动检测扩展并通过一次性授权完成连接，不需要点击额外按钮，也不需要填写 API 地址或配对码。

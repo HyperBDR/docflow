@@ -1,5 +1,5 @@
 import i18n from './i18n'
-import type { AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, Analytics, AuditLog, Category, Demo, ExportJob, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, Tag, User, UserRole } from './types'
+import type { AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -35,6 +35,23 @@ export const api = {
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/api/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  aiSettings: () => request<AIPlatformSettings>('/api/admin/ai/settings'),
+  updateAISettings: (values: Pick<AIPlatformSettings, 'enabled' | 'chunk_size'>) => request<AIPlatformSettings>('/api/admin/ai/settings', { method: 'PATCH', body: JSON.stringify(values) }),
+  aiModels: () => request<AIModelConfig[]>('/api/admin/ai/models'),
+  createAIModel: (values: AIModelInput) => request<AIModelConfig>('/api/admin/ai/models', { method: 'POST', body: JSON.stringify({ ...values, provider: 'openai_compatible' }) }),
+  updateAIModel: (id: string, values: Partial<AIModelInput>) => request<AIModelConfig>(`/api/admin/ai/models/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  deleteAIModel: (id: string) => request<void>(`/api/admin/ai/models/${id}`, { method: 'DELETE' }),
+  testAIModel: (id: string) => request<{ ok: boolean; latency_ms: number; models_latency_ms: number; completion_latency_ms: number; model_available: boolean; json_supported: boolean }>(`/api/admin/ai/models/${id}/test`, { method: 'POST' }),
+  aiUsageSummary: (filters: { days?: number; model_id?: string; user_id?: string; organization_id?: string } = {}) => request<AIUsageSummary>(`/api/admin/ai/usage/summary?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),
+  aiUsageRequests: (filters: { query?: string; model_id?: string; user_id?: string; organization_id?: string; status?: string; page?: number; page_size?: number } = {}) => request<PageResult<AIUsageRecord>>(`/api/admin/ai/usage/requests?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),
+  storageConfigs: () => request<StorageConfig[]>('/api/admin/storage/configs'),
+  createStorageConfig: (values: StorageConfigInput) => request<StorageConfig>('/api/admin/storage/configs', { method: 'POST', body: JSON.stringify(values) }),
+  updateStorageConfig: (id: string, values: Partial<StorageConfigInput>) => request<StorageConfig>(`/api/admin/storage/configs/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  deleteStorageConfig: (id: string) => request<void>(`/api/admin/storage/configs/${id}`, { method: 'DELETE' }),
+  testStorageConfig: (id: string) => request<{ ok: boolean; latency_ms: number }>(`/api/admin/storage/configs/${id}/test`, { method: 'POST' }),
+  storageStats: (id: string) => request<{ object_count: number; total_bytes: number }>(`/api/admin/storage/configs/${id}/stats`),
+  storageObjects: (id: string, prefix = '') => request<StorageObject[]>(`/api/admin/storage/configs/${id}/objects?${new URLSearchParams({ prefix }).toString()}`),
+  deleteStorageObject: (id: string, key: string) => request<void>(`/api/admin/storage/configs/${id}/objects?${new URLSearchParams({ key }).toString()}`, { method: 'DELETE' }),
   adminUsers: (filters: { query?: string; role?: UserRole | ''; active?: '' | 'true' | 'false'; page?: number; page_size?: number } = {}) => {
     const params = new URLSearchParams()
     if (filters.query) params.set('query', filters.query)
@@ -74,7 +91,7 @@ export const api = {
   acceptInvitation: (token: string) => request<User>(`/api/invitations/${token}/accept`, { method: 'POST' }),
   registerInvitation: (token: string, name: string, password: string, ui_locale: Locale) => request<User>(`/api/invitations/${token}/register`, { method: 'POST', body: JSON.stringify({ name, password, ui_locale }) }),
   adminOrganizations: () => request<AdminOrganization[]>('/api/admin/organizations'),
-  auditLogs: (filters: { query?: string; action?: string; target_type?: string; organization_id?: string; page?: number; page_size?: number } = {}) => request<PageResult<AuditLog>>(`/api/admin/audit-logs?${new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))).toString()}`),
+  auditLogs: (filters: { query?: string; action?: string; target_type?: string; organization_id?: string; source?: string; outcome?: string; page?: number; page_size?: number } = {}) => request<PageResult<AuditLog>>(`/api/admin/audit-logs?${new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))).toString()}`),
   recycleBin: () => request<RecycleItem[]>('/api/admin/recycle-bin'),
   restoreRecycleItem: (item: RecycleItem) => request(item.item_type === 'user' ? `/api/admin/recycle-bin/users/${item.id}/restore` : item.item_type === 'team_space' ? `/api/admin/recycle-bin/team-spaces/${item.id}/restore` : `/api/admin/recycle-bin/resources/${item.id}/restore`, { method: 'POST' }),
   purgeResource: (id: string) => request<void>(`/api/admin/recycle-bin/resources/${id}`, { method: 'DELETE' }),

@@ -2,7 +2,7 @@ import secrets
 from copy import deepcopy
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 import io
@@ -251,6 +251,8 @@ def step_image(demo_id: str, step_id: str, db: Session = Depends(get_db), user: 
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not storage.exists(step.asset_key):
         raise HTTPException(status_code=404, detail="image not found")
+    direct = storage.direct_url(step.asset_key)
+    if direct: return RedirectResponse(direct, status_code=307, headers={"Cache-Control": "private, no-store"})
     return StreamingResponse(io.BytesIO(storage.read(step.asset_key)), media_type="image/webp")
 
 

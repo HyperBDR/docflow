@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import Icon from '../components/Icon'
+import AdminPagination from '../components/AdminPagination'
 import UserAvatar from '../components/UserAvatar'
 import { formatDate, normalizeLocale } from '../i18n'
 import type { AdminOrganization, AdminUser, OrganizationMember, OrganizationRole, User } from '../types'
@@ -31,12 +32,15 @@ export default function AdminOrganizations({ user, onUserChange }: { user: User;
   const [ownerId, setOwnerId] = useState('')
   const [renameValue, setRenameValue] = useState('')
   const [busy, setBusy] = useState('')
+  const [page, setPage] = useState(1), [pageSize, setPageSize] = useState(10)
 
   const current = items.find(item => item.id === activeId)
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return needle ? items.filter(item => `${item.name} ${item.slug} ${item.owner_name} ${item.owner_email}`.toLowerCase().includes(needle)) : items
   }, [items, query])
+  const visibleItems = filtered.slice((page - 1) * pageSize, page * pageSize)
+  useEffect(() => { if (page > Math.max(1, Math.ceil(filtered.length / pageSize))) setPage(1) }, [filtered.length, page, pageSize])
 
   async function loadItems() {
     try { setItems(await api.adminOrganizations()) }
@@ -123,8 +127,9 @@ export default function AdminOrganizations({ user, onUserChange }: { user: User;
     <div className="admin-page-intro"><div><h1>{t('spaces.title')}</h1><p>{t('spaces.subtitle')}</p></div><button className="primary icon-button" onClick={() => setCreateOpen(true)}><Icon name="plus" />{t('spaces.create')}</button></div>
     {error && <div className="error">{error}</div>}{message && <div className="success settings-message">{message}</div>}
     <section className="admin-list-card team-space-list-card">
-      <div className="team-space-list-toolbar"><label className="admin-search"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('spaces.search')} /></label><span>{t('spaces.total', { count: filtered.length })}</span></div>
-      <div className="team-space-table-wrap"><table className="team-space-table"><thead><tr><th>{t('spaces.table.space')}</th><th>{t('spaces.table.owner')}</th><th>{t('spaces.table.members')}</th><th>{t('spaces.table.resources')}</th><th>{t('spaces.table.storage')}</th><th>{t('spaces.table.created')}</th><th /></tr></thead><tbody>{filtered.map(item => <tr key={item.id} className={item.id === activeId ? 'current' : ''}><td><div className="team-space-name"><span><Icon name="users" /></span><div><strong>{item.name}</strong><small>{item.slug}</small></div>{item.id === activeId && <em>{t('spaces.managing')}</em>}</div></td><td><div className="resource-owner-cell"><strong>{item.owner_name || item.owner_email.split('@')[0]}</strong><small>{item.owner_email}</small></div></td><td>{item.member_count}</td><td>{item.demo_count}</td><td>{bytes(item.storage_bytes, locale)}</td><td><small>{formatDate(item.created_at, locale)}</small></td><td><button className={item.id === activeId ? 'current' : ''} disabled={item.id === activeId || busy === `enter:${item.id}`} onClick={() => enterOrganization(item.id)}>{busy === `enter:${item.id}` ? <span className="action-spinner" /> : <Icon name={item.id === activeId ? 'check' : 'chevronRight'} />}{t(item.id === activeId ? 'spaces.managing' : 'spaces.enter')}</button></td></tr>)}</tbody></table>{!filtered.length && <div className="admin-table-state"><Icon name="users" size={28} />{t('spaces.empty')}</div>}</div>
+      <div className="team-space-list-toolbar"><label className="admin-search"><Icon name="search" /><input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }} placeholder={t('spaces.search')} /></label><span>{t('spaces.total', { count: filtered.length })}</span></div>
+      <div className="team-space-table-wrap"><table className="team-space-table"><thead><tr><th>{t('spaces.table.space')}</th><th>{t('spaces.table.owner')}</th><th>{t('spaces.table.members')}</th><th>{t('spaces.table.resources')}</th><th>{t('spaces.table.storage')}</th><th>{t('spaces.table.created')}</th><th /></tr></thead><tbody>{visibleItems.map(item => <tr key={item.id} className={item.id === activeId ? 'current' : ''}><td><div className="team-space-name"><span><Icon name="users" /></span><div><strong>{item.name}</strong><small>{item.slug}</small></div>{item.id === activeId && <em>{t('spaces.managing')}</em>}</div></td><td><div className="resource-owner-cell"><strong>{item.owner_name || item.owner_email.split('@')[0]}</strong><small>{item.owner_email}</small></div></td><td>{item.member_count}</td><td>{item.demo_count}</td><td>{bytes(item.storage_bytes, locale)}</td><td><small>{formatDate(item.created_at, locale)}</small></td><td><button className={item.id === activeId ? 'current' : ''} disabled={item.id === activeId || busy === `enter:${item.id}`} onClick={() => enterOrganization(item.id)}>{busy === `enter:${item.id}` ? <span className="action-spinner" /> : <Icon name={item.id === activeId ? 'check' : 'chevronRight'} />}{t(item.id === activeId ? 'spaces.managing' : 'spaces.enter')}</button></td></tr>)}</tbody></table>{!filtered.length && <div className="admin-table-state"><Icon name="users" size={28} />{t('spaces.empty')}</div>}</div>
+      <AdminPagination page={page} pageSize={pageSize} total={filtered.length} onPage={setPage} onPageSize={size => { setPageSize(size); setPage(1) }} />
     </section>
 
     {current ? <section className="team-space-detail-card"><header><div><span><Icon name="shield" /></span><div><small>{t('spaces.platformAccess')}</small><h2>{current.name}</h2><p>{current.owner_email}</p></div></div><b>{t('spaces.active')}</b></header><nav>{(['overview', 'members', 'settings'] as const).map(value => <button key={value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}><Icon name={value === 'overview' ? 'grid' : value === 'members' ? 'users' : 'settings'} />{t(`spaces.tabs.${value}`)}</button>)}</nav>

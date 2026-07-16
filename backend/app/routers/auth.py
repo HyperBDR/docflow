@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -8,7 +8,7 @@ from app.dependencies import current_user
 from app.models import ExtensionPair, ExtensionToken, Session as UserSession, User
 from app.schemas import AuthInput, PasswordChange, UserOut, UserPreferenceUpdate
 from app.security import expires_in, hash_password, hash_token, random_token, verify_password
-from app.services import create_personal_organization
+from app.services import create_personal_organization, write_audit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -29,7 +29,7 @@ def create_session(db: Session, user: User, response: Response) -> None:
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
-def register(payload: AuthInput, response: Response, db: Session = Depends(get_db)):
+def register(payload: AuthInput, response: Response, request: Request, db: Session = Depends(get_db)):
     email = payload.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=409, detail="email already registered")
@@ -45,22 +45,33 @@ def register(payload: AuthInput, response: Response, db: Session = Depends(get_d
     db.flush()
     create_personal_organization(db, user)
     create_session(db, user, response)
+    write_audit(db, user, "user.registered", "user", user.id, user.email, user.current_organization_id,
+                after={"role": user.role, "ui_locale": user.ui_locale}, request=request, source="web")
+    db.commit()
     return user
 
 
 @router.post("/login", response_model=UserOut)
-def login(payload: AuthInput, response: Response, db: Session = Depends(get_db)):
+def login(payload: AuthInput, response: Response, request: Request, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if not user or user.deleted_at or not verify_password(user.password_hash, payload.password):
+        write_audit(db, user if user and not user.deleted_at else None, "user.login", "user", user.id if user else "unknown",
+                    payload.email.lower(), outcome="failed", request=request, source="web")
+        db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
     if not user.is_active:
+        write_audit(db, user, "user.login", "user", user.id, user.email, outcome="blocked", request=request, source="web")
+        db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="account disabled")
     create_session(db, user, response)
+    write_audit(db, user, "user.login", "user", user.id, user.email, user.current_organization_id, request=request, source="web")
+    db.commit()
     return user
 
 
 @router.post("/logout", status_code=204)
 def logout(
+    request: Request,
     response: Response,
     token: str | None = Cookie(default=None, alias="docflow_session"),
     db: Session = Depends(get_db),
@@ -68,7 +79,11 @@ def logout(
     if token:
         session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_token(token)))
         if session:
+            user = db.get(User, session.user_id)
             db.delete(session)
+            if user:
+                write_audit(db, user, "user.logout", "user", user.id, user.email, session.active_organization_id,
+                            request=request, source="web")
             db.commit()
     response.delete_cookie("docflow_session", path="/")
 
@@ -79,19 +94,22 @@ def me(user: User = Depends(current_user)):
 
 
 @router.patch("/me", response_model=UserOut)
-def update_preferences(payload: UserPreferenceUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def update_preferences(payload: UserPreferenceUpdate, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     values = payload.model_dump(exclude_unset=True)
+    before = {key: getattr(user, key) for key in values}
     if "name" in values:
         values["name"] = (values["name"] or "").strip()
     for key, value in values.items():
         setattr(user, key, value)
+    write_audit(db, user, "user.preferences_updated", "user", user.id, user.email, user.current_organization_id,
+                before=before, after=values, request=request, source="web")
     db.commit()
     db.refresh(user)
     return user
 
 
 @router.post("/me/password", status_code=204)
-def change_password(payload: PasswordChange, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def change_password(payload: PasswordChange, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if not verify_password(user.password_hash, payload.current_password):
         raise HTTPException(status_code=400, detail="current password is incorrect")
     if verify_password(user.password_hash, payload.new_password):
@@ -102,4 +120,6 @@ def change_password(payload: PasswordChange, db: Session = Depends(get_db), user
     db.execute(delete(UserSession).where(UserSession.user_id == user.id))
     db.execute(delete(ExtensionPair).where(ExtensionPair.user_id == user.id))
     db.execute(delete(ExtensionToken).where(ExtensionToken.user_id == user.id))
+    write_audit(db, user, "user.password_changed", "user", user.id, user.email, user.current_organization_id,
+                request=request, source="web")
     db.commit()

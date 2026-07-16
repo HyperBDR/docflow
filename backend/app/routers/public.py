@@ -1,6 +1,6 @@
 import io
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -123,6 +123,8 @@ def public_asset(token: str, step_id: str, db: Session = Depends(get_db)):
     step = next((item for item in revision.snapshot["steps"] if item["id"] == step_id), None)
     if not step or not storage.exists(step["asset_key"]):
         raise HTTPException(status_code=404, detail="asset not found")
+    direct = storage.direct_url(step["asset_key"])
+    if direct: return RedirectResponse(direct, status_code=307, headers={"Cache-Control": "public, max-age=60"})
     return StreamingResponse(io.BytesIO(storage.read(step["asset_key"])), media_type="image/webp", headers={"Cache-Control": "public, max-age=300"})
 
 

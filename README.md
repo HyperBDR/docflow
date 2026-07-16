@@ -29,7 +29,19 @@ docker compose up -d --build
 
 API 启动时会自动运行数据库迁移。首次构建 Worker 需要下载 Chromium、FFmpeg 和中文字体，镜像较大；这些依赖使用阿里云镜像并放在独立缓存层，之后修改应用代码不会重复下载。
 
-首次打开 Web 后注册账号。扩展构建和安装方式见 [extension/README.md](extension/README.md)。升级扩展源码后，需要在浏览器扩展管理页点击“重新加载”。
+### 存储挂载
+
+内置 `/data` Volume 会继续作为兼容旧数据的默认存储。后台新增的本地存储目录必须同时挂载到 API 与 Worker 容器；Compose 默认将宿主机 `./storage-data` 挂载为容器内的 `/storage-data`。后台可填写 `/storage-data/archive` 等子目录。
+
+生产环境建议把宿主机目录放到独立数据盘：
+
+```bash
+DOCFLOW_HOST_STORAGE_DIR=/srv/docflow-data docker compose up -d --build
+```
+
+S3 兼容对象存储会按后台配置的 Bucket Prefix 管理数据。开启直接下载后，DocFlow 只负责鉴权并将浏览器重定向到短期签名 URL，文件内容不经过 API 容器。
+
+首次打开 Web 后注册账号。扩展构建和安装方式见 [extension/README.md](extension/README.md)，正式打包与商店上线流程见 [extension/PUBLISHING.md](extension/PUBLISHING.md)。升级扩展源码后，需要在浏览器扩展管理页点击“重新加载”。
 
 ## 局域网部署
 
@@ -49,17 +61,17 @@ docker compose up -d --build --force-recreate api web worker
 
 ## AI 配置
 
-AI 默认关闭，不影响录制、编辑、播放和导出。要接入 OpenAI 或兼容服务，在 `.env` 中设置：
+AI 默认关闭，不影响录制、编辑、播放和导出。平台管理员在后台管理的“全局 AI 配置”中开启总开关和设置全局生成批量大小，再到“模型管理”添加 OpenAI Chat Completions 兼容服务。模型地址、API Key、视觉能力、超时和 Temperature 均保存在数据库中，API Key 使用 `DOCFLOW_SECRET_KEY` 派生密钥加密；部署环境不再需要单独的 AI 环境变量。
 
-```dotenv
-DOCFLOW_AI_ENABLED=true
-DOCFLOW_AI_BASE_URL=https://api.openai.com/v1
-DOCFLOW_AI_API_KEY=your-api-key
-DOCFLOW_AI_MODEL=gpt-4.1-mini
-DOCFLOW_AI_VISION_ENABLED=true
-```
+模型连接测试会同时验证 `GET /models`、`POST /chat/completions` 和 JSON 对象输出。HTML Cloning 录制中，每次选择元素只在上传阶段短暂锁定页面；入库后由后台 Worker 异步生成 AI 文案，用户可以立即继续录制下一步。模型接收清洗后的可见文本，以及开启视觉能力时的脱敏缩略图。AI 只自动填写未被人工修改的字段，并为步骤中的每个热点分别生成提示文案。
 
-接口需兼容 `POST /v1/chat/completions`。HTML Cloning 录制中，每次选择元素只在上传阶段短暂锁定页面；入库后由后台 Worker 异步生成 AI 文案，用户可以立即继续录制下一步。模型接收清洗后的可见文本，以及开启视觉能力时的脱敏缩略图。AI 只自动填写未被人工修改的字段。
+`DOCFLOW_SECRET_KEY` 同时用于加密数据库中的 AI 与存储服务凭据。生产环境必须使用稳定的强随机值并安全备份；部署后随意更换会导致已有密钥无法解密。
+
+## 管理与审计
+
+管理总览提供用户、空间、资源、录制步骤、访问、独立访客、导出、AI Token、失败任务和存储占用等全局指标，并支持查看最近 30 天增长/访问/AI 消耗趋势、资源状态、内容语言和空间排名。
+
+统一审计日志记录管理变更、用户注册与登录结果、退出、个人设置与密码变更、扩展授权，以及录制开始、暂停、恢复、步骤入库和完成事件。日志包含操作者、团队空间、来源、结果、IP、User-Agent 和变更前后数据，可在后台按对象、来源和结果筛选。
 
 ## DOM 快照的安全边界
 

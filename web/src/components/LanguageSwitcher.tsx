@@ -37,7 +37,7 @@ export default function LanguageSwitcher({ account = false, publicMode = false, 
 
   return <div ref={root} className={`language-menu ${compact ? 'compact' : ''}`}>
     <button type="button" className="header-icon-button" title={t('language.switchTo')} aria-label={t('language.label')} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      <Icon name="globe" size={18} />
+      <span className={`language-current-mark ${locale === 'zh-CN' ? 'zh' : 'en'}`} aria-hidden>{locale === 'zh-CN' ? '中' : 'EN'}</span>
     </button>
     {open && <div className="language-menu-popover" role="menu">
       {(['zh-CN', 'en'] as Locale[]).map(item => <button type="button" role="menuitemradio" aria-checked={item === locale} className={item === locale ? 'active' : ''} key={item} onClick={() => change(item)}>

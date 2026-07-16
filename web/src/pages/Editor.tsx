@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { API_URL, api } from '../api'
@@ -14,6 +14,18 @@ type InspectorTab = 'content' | 'hotspot' | 'tooltip' | 'theme' | 'animation' | 
 type CanvasMode = 'preview' | 'edit'
 type DetailMode = 'present' | 'edit'
 type ExportCenterAction = 'publish' | 'copy-share' | 'copy-markdown' | ExportJob['kind'] | null
+type InspectorLayoutMode = 'expanded' | 'accordion' | 'detail'
+type AIFieldChange = { before: unknown; after: unknown; applied: boolean }
+type AIChangeReport = {
+  demo?: { fields?: Record<string, AIFieldChange> }
+  steps?: { id: string; position: number; fields: Record<string, AIFieldChange>; hotspots?: { id: string; tooltip: AIFieldChange }[]; warnings?: string[]; redundant?: boolean }[]
+}
+
+const InspectorLayoutContext = createContext<{
+  mode: InspectorLayoutMode
+  activeSection: string | null
+  toggleSection: (section: string) => void
+}>({ mode: 'expanded', activeSection: null, toggleSection: () => undefined })
 
 const defaultTooltip = (locale = 'zh-CN') => ({ content: locale === 'en' ? 'Click here to continue' : '点击此处继续', placement: 'auto', alignment: 'center' as const, offset: 12, max_width: 320, show_arrow: true })
 const defaultStyle = { shape: 'rectangle' as const, pulse: true, spotlight: false, padding: 6, color: '#635bff', overlay_opacity: .45 }
@@ -24,9 +36,17 @@ const inspectorTabs: { value: InspectorTab; icon: IconName }[] = [
 ]
 
 function InspectorSection({ icon, title, description, children, tone = '' }: { icon: IconName; title: string; description?: string; children: ReactNode; tone?: 'danger' | '' }) {
-  return <section className={`inspector-section ${tone}`}>
-    <header><span className="section-icon"><Icon name={icon} /></span><div><strong>{title}</strong>{description && <small>{description}</small>}</div></header>
-    <div className="inspector-items">{children}</div>
+  const { mode, activeSection, toggleSection } = useContext(InspectorLayoutContext)
+  const collapsible = mode !== 'expanded'
+  const expanded = !collapsible || activeSection === title
+  const detailHidden = mode === 'detail' && activeSection !== null && !expanded
+  const indicator = mode === 'detail' && expanded ? 'chevronLeft' : expanded ? 'arrowDown' : 'chevronRight'
+  return <section className={`inspector-section ${tone} ${expanded ? 'expanded' : 'collapsed'} ${detailHidden ? 'detail-hidden' : ''}`}>
+    <header><button type="button" className="inspector-section-heading" aria-expanded={expanded} onClick={() => collapsible && toggleSection(title)} tabIndex={collapsible ? 0 : -1}>
+      <span className="section-icon"><Icon name={icon} /></span><span className="inspector-section-title"><strong>{title}</strong>{description && <small>{description}</small>}</span>
+      {collapsible && <span className="inspector-section-indicator"><Icon name={indicator} size={14} /></span>}
+    </button></header>
+    {expanded && <div className="inspector-items">{children}</div>}
   </section>
 }
 
@@ -55,6 +75,15 @@ function RangeField({ label, value, min, max, step = 1, suffix = '', onChange }:
   return <label className="range-field"><span>{label}<output>{value}{suffix}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={event => onChange(Number(event.target.value))} /></label>
 }
 
+function AIFieldComparison({ label, change, originalLabel, generatedLabel, appliedLabel, retainedLabel, emptyLabel }: { label: string; change: AIFieldChange; originalLabel: string; generatedLabel: string; appliedLabel: string; retainedLabel: string; emptyLabel: string }) {
+  const before = String(change.before ?? '').trim()
+  const after = String(change.after ?? '').trim()
+  return <article className="ai-change-field">
+    <header><strong>{label}</strong><span className={change.applied ? 'applied' : 'retained'}>{change.applied ? appliedLabel : retainedLabel}</span></header>
+    <div><section><small>{originalLabel}</small><p>{before || emptyLabel}</p></section><section><small>{generatedLabel}</small><p>{after || emptyLabel}</p></section></div>
+  </article>
+}
+
 function visibleCaptureWarnings(warnings: string[] = []) {
   const legacyAudit = /^(removed unsafe|removed external|removed recorder or browser-extension|removed injected|Video playback is not included|Cross-origin iframe content may use a raster fallback)/i
   return warnings.filter(warning => !legacyAudit.test(warning))
@@ -77,6 +106,17 @@ export default function Editor() {
   const [titleEditing, setTitleEditing] = useState(false)
   const [presentationReady, setPresentationReady] = useState(false)
   const [tab, setTab] = useState<InspectorTab>('content')
+  const [focusMode, setFocusMode] = useState(false)
+  const [mobilePanel, setMobilePanel] = useState<'steps' | 'inspector' | null>(null)
+  const [dockPosition, setDockPosition] = useState({ x: 16, y: 78 })
+  const [panelPositions, setPanelPositions] = useState({
+    steps: { x: 18, y: 82 },
+    inspector: { x: Math.max(18, window.innerWidth - 378), y: 82 },
+  })
+  const [panelHeights, setPanelHeights] = useState<{ steps: number | null; inspector: number | null }>({ steps: null, inspector: null })
+  const inspectorPanelRef = useRef<HTMLElement>(null)
+  const [inspectorPanelHeight, setInspectorPanelHeight] = useState(window.innerHeight)
+  const [activeInspectorSection, setActiveInspectorSection] = useState<string | null>(null)
   const [jobs, setJobs] = useState<ExportJob[]>([])
   const [aiJob, setAIJob] = useState<AIJob | null>(null)
   const [exportCenterOpen, setExportCenterOpen] = useState(false)
@@ -86,12 +126,35 @@ export default function Editor() {
   const [recorderBusy, setRecorderBusy] = useState(false)
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
   const selectedHotspot = useMemo(() => selected?.hotspots.find(item => item.id === selectedHotspotId) || selected?.hotspots[0], [selected, selectedHotspotId])
+  const aiChangeReport = aiJob?.result?.changes as AIChangeReport | undefined
+  const inspectorLayoutMode: InspectorLayoutMode = inspectorPanelHeight < 520 ? 'detail' : inspectorPanelHeight < 720 ? 'accordion' : 'expanded'
+  const defaultInspectorSection = useMemo(() => ({
+    content: t('content.copyTitle'),
+    hotspot: t('hotspot.objects'),
+    tooltip: t('tooltip.copy'),
+    theme: t('theme.brand'),
+    animation: 'Zoom and Pan',
+    ai: t('ai.generate'),
+  })[tab], [tab, t])
 
   useEffect(() => {
     Promise.all([api.demo(id), api.latestAI(id), api.exports(id).catch(() => [])]).then(([value, latest, exportJobs]) => {
       setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null); setAIJob(latest); setJobs(exportJobs)
     }).catch(value => setError(value.message))
   }, [id])
+  useEffect(() => {
+    const panel = inspectorPanelRef.current
+    if (!panel) return
+    const measure = () => setInspectorPanelHeight(panel.getBoundingClientRect().height)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(panel)
+    window.addEventListener('resize', measure)
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
+  }, [demo?.id])
+  useEffect(() => {
+    setActiveInspectorSection(inspectorLayoutMode === 'expanded' ? null : defaultInspectorSection)
+  }, [tab, inspectorLayoutMode, defaultInspectorSection])
   useEffect(() => {
     const active = jobs.some(job => job.status === 'queued' || job.status === 'running')
     if (!active) return
@@ -298,11 +361,76 @@ export default function Editor() {
     })
   }
 
+  function dragDock(event: React.PointerEvent<HTMLSpanElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const start = { clientX: event.clientX, clientY: event.clientY, dockX: dockPosition.x, dockY: dockPosition.y }
+    const move = (next: PointerEvent) => setDockPosition({
+      x: Math.max(8, Math.min(window.innerWidth - 260, start.dockX + next.clientX - start.clientX)),
+      y: Math.max(66, Math.min(window.innerHeight - 58, start.dockY + next.clientY - start.clientY)),
+    })
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop)
+  }
+
+  function dragFloatingPanel(kind: 'steps' | 'inspector', event: React.PointerEvent<HTMLSpanElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const panel = event.currentTarget.closest('aside')
+    const width = panel?.getBoundingClientRect().width || (kind === 'steps' ? 240 : 360)
+    const start = { clientX: event.clientX, clientY: event.clientY, ...panelPositions[kind] }
+    const move = (next: PointerEvent) => setPanelPositions(current => ({ ...current, [kind]: {
+      x: Math.max(8, Math.min(window.innerWidth - width - 8, start.x + next.clientX - start.clientX)),
+      y: Math.max(66, Math.min(window.innerHeight - 180, start.y + next.clientY - start.clientY)),
+    } }))
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop)
+  }
+
+  function resizeFloatingPanel(kind: 'steps' | 'inspector', event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const panel = event.currentTarget.closest('aside')
+    const startY = event.clientY
+    const startHeight = panel?.getBoundingClientRect().height || (kind === 'steps' ? 500 : 560)
+    const move = (next: PointerEvent) => {
+      const availableHeight = Math.max(140, window.innerHeight - panelPositions[kind].y - 12)
+      const minHeight = Math.min(240, availableHeight)
+      const height = Math.max(minHeight, Math.min(availableHeight, startHeight + next.clientY - startY))
+      setPanelHeights(current => ({ ...current, [kind]: height }))
+    }
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop)
+  }
+
+  function floatingPanelStyle(kind: 'steps' | 'inspector'): CSSProperties | undefined {
+    if (!focusMode || mobilePanel !== kind) return undefined
+    const position = panelPositions[kind]
+    const defaultHeight = kind === 'steps' ? 500 : 560
+    const availableHeight = `calc(100dvh - ${position.y + 12}px)`
+    const resizedHeight = panelHeights[kind]
+    return {
+      left: position.x,
+      right: 'auto',
+      top: position.y,
+      bottom: 'auto',
+      height: resizedHeight === null
+        ? `min(${defaultHeight}px, 68dvh, ${availableHeight})`
+        : `min(${resizedHeight}px, ${availableHeight})`,
+      minHeight: `min(240px, ${availableHeight})`,
+      maxHeight: availableHeight,
+    }
+  }
+
   if (!demo) return <main className="page"><Link to="/">{t('common:actions.back')}</Link><div className="center-page">{error || t('common:status.loading')}</div></main>
   const presentationIndex = Math.max(0, demo.steps.findIndex(step => step.id === selected?.id))
   const actionBusy = exportAction !== null
   const pendingExportKind = exportAction === 'pdf' || exportAction === 'mp4' || exportAction === 'markdown' ? exportAction : null
-  return <main className={`editor-page ${detailMode === 'present' ? 'presentation-mode' : 'editing-mode'}`}>
+  const displayAIWarning = (warning: string) => {
+    if (/\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(warning)) return t('ai.internalAddressRisk')
+    if (/\b(?:admin|administrator|root)\b/i.test(warning)) return t('ai.accountRisk')
+    if (/(?:password|passwd|token|secret|密码|口令|密钥)/i.test(warning)) return t('ai.credentialRisk')
+    return warning
+  }
+  return <main className={`editor-page ${detailMode === 'present' ? 'presentation-mode' : 'editing-mode'} ${focusMode ? 'focus-editing' : ''} ${mobilePanel ? `mobile-panel-${mobilePanel}` : ''}`}>
     <div className="editor-topbar">
       <div className="editor-context"><Link to="/" className="back">{t('top.back')}</Link><span className={`status ${demo.status}`}><i />{t(`common:status.${demo.status}`)}</span></div>
       <div className={`editor-title ${titleEditing ? 'editing' : ''}`}>
@@ -314,7 +442,7 @@ export default function Editor() {
         {detailMode === 'present' ? <>
           <button className="topbar-action icon-button" onClick={() => { setDetailMode('edit'); setCanvasMode('preview'); window.history.replaceState(null, '', `${window.location.pathname}?mode=edit`) }}><Icon name="edit" />{t('common:actions.edit')}</button>
           <button className="topbar-action icon-button compact-action" title={t('top.fullscreen')} onClick={() => document.documentElement.requestFullscreen()}><Icon name="layout" /></button>
-        </> : <button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />{t('top.present')}</button>}
+        </> : <><button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />{t('top.present')}</button><button className={`topbar-action icon-button ${focusMode ? 'active' : ''}`} onClick={() => { setFocusMode(value => !value); setMobilePanel(null) }} title={t(focusMode ? 'mobileDock.exitFocus' : 'mobileDock.focus')}><Icon name="layout" />{t(focusMode ? 'mobileDock.exitFocus' : 'mobileDock.focus')}</button></>}
         {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title={t('top.publicLink')}><Icon name="share" /></a>}
         {detailMode === 'edit' && <button className="topbar-action icon-button" disabled={recorderBusy} onClick={prepareRecorder}>{recorderBusy ? <span className="action-spinner" /> : <Icon name="record" />}{t(recorderBusy ? 'top.preparingRecorder' : 'top.continueRecording')}</button>}
         {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />{t('top.aiOptimize')}</button>}
@@ -372,6 +500,13 @@ export default function Editor() {
         </div>
       </aside>
     </div>}
+    {detailMode === 'edit' && <nav className="editor-floating-dock" style={{ left: dockPosition.x, top: dockPosition.y }} aria-label={t('mobileDock.label')}>
+      <span className="dock-drag-handle" onPointerDown={dragDock} title={t('mobileDock.move')}><Icon name="move" /></span>
+      <button className={mobilePanel === 'steps' ? 'active' : ''} onClick={() => setMobilePanel(value => value === 'steps' ? null : 'steps')} title={t('mobileDock.steps')}><Icon name="list" /></button>
+      <button className={canvasMode === 'edit' ? 'active' : ''} onClick={() => setCanvasMode(value => value === 'edit' ? 'preview' : 'edit')} title={t('mobileDock.hotspot')}><Icon name="target" /></button>
+      <button className={mobilePanel === 'inspector' ? 'active' : ''} onClick={() => setMobilePanel(value => value === 'inspector' ? null : 'inspector')} title={t('mobileDock.inspector')}><Icon name="settings" /></button>
+      <button className={focusMode ? 'active' : ''} onClick={() => { setFocusMode(value => !value); setMobilePanel(null) }} title={t(focusMode ? 'mobileDock.exitFocus' : 'mobileDock.focus')}><Icon name="layout" /></button>
+    </nav>}
     {detailMode === 'present' ? <section className="immersive-demo">
       {selected ? <>
         <div className="immersive-stage"><SlideStage key={selected.id}
@@ -387,9 +522,13 @@ export default function Editor() {
         </nav>
       </> : <div className="immersive-empty"><Icon name="image" size={42} /><h2>{t('presentation.empty')}</h2><p>{t('presentation.emptyHint')}</p><button className="primary icon-button" onClick={() => setDetailMode('edit')}><Icon name="edit" />{t('presentation.startEditing')}</button></div>}
     </section> : <div className="editor-layout">
-      <aside className="step-list">
-        <div className="panel-heading"><span>{t('steps.resources')}</span><small>{demo.steps.length}</small></div><label className="upload-button icon-button"><Icon name="image" />{t('steps.addScreenshot')}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => event.target.files?.[0] && upload(event.target.files[0])} /></label>
-        {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} title={step.title || t('steps.step', { index: index + 1 })} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} alt="" /><div><strong>{t('steps.step', { index: index + 1 })}</strong><small>{step.render_mode === 'dom' ? 'HTML Clone' : t('steps.screenshot')}</small></div></button>)}
+      <aside className="step-list" style={floatingPanelStyle('steps')}>
+        <div className="floating-panel-header"><span onPointerDown={event => dragFloatingPanel('steps', event)}><Icon name="move" />{t('mobileDock.steps')}</span><button aria-label={t('common:actions.close')} onClick={() => setMobilePanel(null)}>×</button></div>
+        <div className="step-list-scroll">
+          <div className="panel-heading"><span>{t('steps.resources')}</span><small>{demo.steps.length}</small></div><label className="upload-button icon-button"><Icon name="image" />{t('steps.addScreenshot')}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => event.target.files?.[0] && upload(event.target.files[0])} /></label>
+          {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} title={step.title || t('steps.step', { index: index + 1 })} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} alt="" /><div><strong>{t('steps.step', { index: index + 1 })}</strong><small>{step.render_mode === 'dom' ? 'HTML Clone' : t('steps.screenshot')}</small></div></button>)}
+        </div>
+        <div className="floating-panel-resize-handle" role="separator" aria-label={t('mobileDock.resize')} title={t('mobileDock.resize')} onPointerDown={event => resizeFloatingPanel('steps', event)} />
       </aside>
       <section className="editor-main">
         {selected ? <>
@@ -418,7 +557,13 @@ export default function Editor() {
           <div className="inline-actions step-order action-category"><span>{t('steps.actions')}</span><button className="icon-button" onClick={() => move(selected.id, -1)}><Icon name="arrowUp" />{t('steps.moveUp')}</button><button className="icon-button" onClick={() => move(selected.id, 1)}><Icon name="arrowDown" />{t('steps.moveDown')}</button><button className="danger icon-button" onClick={async () => { await api.deleteStep(id, selected.id); const fresh = await api.demo(id); setDemo(fresh); setSelectedId(fresh.steps[0]?.id || null) }}><Icon name="delete" />{t('steps.delete')}</button></div>
         </> : <div className="empty editor-empty"><h2>{t('steps.empty')}</h2><p>{t('steps.emptyHint')}</p></div>}
       </section>
-      <aside className="publish-panel inspector-panel">
+      <InspectorLayoutContext.Provider value={{
+        mode: inspectorLayoutMode,
+        activeSection: activeInspectorSection,
+        toggleSection: section => setActiveInspectorSection(current => current === section ? null : section),
+      }}>
+      <aside ref={inspectorPanelRef} className={`publish-panel inspector-panel inspector-layout-${inspectorLayoutMode}`} style={floatingPanelStyle('inspector')}>
+        <div className="floating-panel-header"><span onPointerDown={event => dragFloatingPanel('inspector', event)}><Icon name="move" />{t('mobileDock.inspector')}</span><button aria-label={t('common:actions.close')} onClick={() => setMobilePanel(null)}>×</button></div>
         <div className="inspector-tabs">{inspectorTabs.filter(item => item.value !== 'ai' || demo.ai_enabled).map(item => <button className={tab === item.value ? 'active' : ''} key={item.value} onClick={() => { setTab(item.value); if (item.value === 'animation') setCanvasMode('edit') }}><Icon name={item.icon} /><span>{t(`tabs.${item.value}`)}</span></button>)}</div>
         {tab === 'content' && selected && <div className="inspector-body">
           <InspectorSection icon="text" title={t('content.copyTitle')} description={t('content.copyDescription')}>
@@ -516,13 +661,29 @@ export default function Editor() {
             <p className="field-note">{t('ai.background')}</p>
           </InspectorSection>
           {aiJob && <InspectorSection icon="settings" title={t('ai.recent')}><div className={`ai-job ${aiJob.status}`}><strong>{aiJob.status === 'complete' ? t('ai.complete') : aiJob.status === 'failed' ? t('ai.failed') : t('ai.running')}</strong><span>{aiJob.progress}% · {aiJob.model}</span>{aiJob.status === 'complete' && aiJob.can_revert && <button onClick={async () => { setAIJob(await api.revertAI(aiJob.id)); setDemo(await api.demo(id)) }}>{t('ai.revert')}</button>}</div></InspectorSection>}
+          {aiJob?.status === 'complete' && aiChangeReport && <InspectorSection icon="copy" title={t('ai.review')} description={t('ai.reviewDescription')}>
+            {aiChangeReport.demo?.fields && Object.keys(aiChangeReport.demo.fields).length > 0 && <section className="ai-change-group"><header><Icon name="text" /><strong>{t('ai.demoInfo')}</strong></header>
+              {(['title', 'description'] as const).map(field => aiChangeReport.demo?.fields?.[field] && <AIFieldComparison key={field} label={t(`ai.fields.${field}`)} change={aiChangeReport.demo.fields[field]} originalLabel={t('ai.original')} generatedLabel={t('ai.generated')} appliedLabel={t('ai.applied')} retainedLabel={t('ai.retained')} emptyLabel={t('ai.empty')} />)}
+            </section>}
+            <div className="ai-step-change-list">{(aiChangeReport.steps || []).slice().sort((a, b) => a.position - b.position).map((item, index) => <details key={item.id}>
+              <summary><span>{t('ai.stepReview', { index: item.position + 1 })}</span><small>{t('ai.fieldCount', { count: Object.keys(item.fields || {}).length })}</small></summary>
+              <div>{(['title', 'body'] as const).map(field => item.fields?.[field] && <AIFieldComparison key={field} label={t(`ai.fields.${field}`)} change={item.fields[field]} originalLabel={t('ai.original')} generatedLabel={t('ai.generated')} appliedLabel={t('ai.applied')} retainedLabel={t('ai.retained')} emptyLabel={t('ai.empty')} />)}
+                {(item.hotspots || []).map((hotspot, hotspotIndex) => <AIFieldComparison key={hotspot.id} label={`${t('ai.fields.tooltip')} ${hotspotIndex + 1}`} change={hotspot.tooltip} originalLabel={t('ai.original')} generatedLabel={t('ai.generated')} appliedLabel={t('ai.applied')} retainedLabel={t('ai.retained')} emptyLabel={t('ai.empty')} />)}
+                {(item.warnings?.length || item.redundant) && <div className="ai-step-review-note">{item.warnings?.map((warning, warningIndex) => <span key={warningIndex}><Icon name="warning" />{displayAIWarning(warning)}</span>)}{item.redundant && <span><Icon name="warning" />{t('ai.redundant')}</span>}</div>}
+              </div>
+            </details>)}</div>
+            {!(aiChangeReport.steps || []).length && !Object.keys(aiChangeReport.demo?.fields || {}).length && <p className="field-note">{t('ai.noChanges')}</p>}
+          </InspectorSection>}
           {(selected?.ai_metadata?.warnings?.length || selected?.ai_metadata?.redundant) && <InspectorSection icon="warning" title={t('ai.suggestions')}>
-            {selected?.ai_metadata?.warnings?.map((warning, index) => <div className="ai-warning" key={index}><Icon name="warning" />{warning}</div>)}
+            <p className="field-note">{t('ai.suggestionsDescription')}</p>
+            {selected?.ai_metadata?.warnings?.map((warning, index) => <div className="ai-warning" key={index}><Icon name="warning" />{displayAIWarning(warning)}</div>)}
             {selected?.ai_metadata?.redundant && <div className="ai-warning"><Icon name="warning" />{t('ai.redundant')}</div>}
           </InspectorSection>}
           <InspectorSection icon="eye" title={t('ai.dataRules')}><p className="field-note">{t('ai.dataRulesHint')}</p></InspectorSection>
         </div>}
+        <div className="floating-panel-resize-handle" role="separator" aria-label={t('mobileDock.resize')} title={t('mobileDock.resize')} onPointerDown={event => resizeFloatingPanel('inspector', event)} />
       </aside>
+      </InspectorLayoutContext.Provider>
     </div>}
   </main>
 }

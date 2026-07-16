@@ -2,7 +2,7 @@ import io
 import re
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -75,6 +75,9 @@ def download_export(job_id: str, db: Session = Depends(get_db), user: User = Dep
     suffix = {"pdf": "pdf", "mp4": "mp4", "markdown": "zip"}[job.kind]
     demo = db.get(Demo, job.demo_id)
     fallback_name, encoded_name = export_filename(demo.title if demo else "未命名演示", job.created_at, suffix)
+    direct = storage.direct_url(job.result_key, fallback_name)
+    if direct:
+        return RedirectResponse(direct, status_code=307)
     return StreamingResponse(
         io.BytesIO(storage.read(job.result_key)), media_type=media,
         headers={"Content-Disposition": f"attachment; filename=\"{fallback_name}\"; filename*=UTF-8''{encoded_name}"},

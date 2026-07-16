@@ -16,6 +16,7 @@ import ExtensionConnect from './pages/ExtensionConnect'
 import Brand from './components/Brand'
 import AccountMenu, { LAST_WORKSPACE_KEY } from './components/AccountMenu'
 import LanguageSwitcher from './components/LanguageSwitcher'
+import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 import type { User } from './types'
 
 function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
@@ -64,7 +65,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
 
 function WorkspaceShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
   useEffect(() => { localStorage.setItem(LAST_WORKSPACE_KEY, 'user') }, [])
-  return <div className="app-shell"><header className="workspace-header"><Link className="brand" to="/"><Brand /></Link><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></header><Dashboard /></div>
+  return <div className="app-shell"><header className="workspace-header"><Link className="brand" to="/"><Brand /></Link><div className="topbar-account-actions"><WorkspaceSwitcher user={user} onUserChange={onUserChange} /><LanguageSwitcher account /><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></div></header><Dashboard /></div>
 }
 
 function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
