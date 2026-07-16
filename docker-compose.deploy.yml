@@ -1,0 +1,32 @@
+services:
+  postgres:
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped
+
+  api:
+    image: ${REGISTRY}/docflow-api:${APP_VERSION}
+    restart: unless-stopped
+    ports: !reset []
+
+  worker:
+    image: ${REGISTRY}/docflow-worker:${APP_VERSION}
+    restart: unless-stopped
+    # Celery performs a warm shutdown so in-flight exports/AI jobs can finish.
+    stop_grace_period: 30m
+
+  web:
+    image: ${REGISTRY}/docflow-web:${APP_VERSION}
+    restart: unless-stopped
+    ports: !reset []
+    networks:
+      default: {}
+      npm_proxy:
+        aliases:
+          - docflow-web
+
+networks:
+  npm_proxy:
+    external: true
+    name: npm_proxy
