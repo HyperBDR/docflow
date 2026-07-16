@@ -4,7 +4,7 @@
   "navigation": { "account": "Personal settings", "admin": "Admin console" },
   "workspace": { "adminView": "Administrator view", "userView": "User view", "backToUser": "Back to dashboard", "enterAdmin": "Open admin console" },
   "organization": { "label": "Current space", "personalGroup": "Personal spaces", "teamGroup": "Team spaces", "manage": "Manage current team space", "create": "Create team space", "createTitle": "Create a team space", "createHelp": "Team spaces separate members, resources, and permissions. A platform administrator creates the space and assigns its owner.", "name": "Team space name", "placeholder": "For example: Marketing team", "createAction": "Create and switch", "creating": "Creating…" },
-  "status": { "draft": "Draft", "published": "Published", "queued": "Queued", "running": "Processing", "complete": "Complete", "failed": "Failed", "loading": "Loading…", "creating": "Creating" },
+  "status": { "draft": "Draft", "published": "Published", "queued": "Queued", "running": "Processing", "complete": "Complete", "failed": "Failed", "cancelled": "Cancelled", "loading": "Loading…", "creating": "Creating" },
   "contentLanguage": { "label": "Demo content language", "description": "Controls the language used by future AI generation and newly recorded steps. Existing content will not be changed.", "zh-CN": "Simplified Chinese", "en": "English" },
   "errors": {
     "requestFailed": "The request failed. Please try again.",
@@ -18,6 +18,7 @@
       "step": { "not_found": "This step does not exist." },
       "export": { "publish_first": "Publish the demo before exporting.", "not_found": "This export job does not exist.", "render_failed": "Export rendering failed. Please try again." },
       "ai": { "not_configured": "AI is not configured on the server.", "no_steps": "Record at least one step first.", "job_not_found": "This AI job does not exist.", "generation_failed": "AI generation failed. Please try again." },
+      "job": { "cancelled_by_admin": "The task was cancelled by an administrator.", "dispatch_failed": "The task could not be dispatched. Please retry." },
       "extension": { "invalid_pairing_code": "The pairing code is invalid or expired." },
       "category": { "not_found": "This category does not exist." },
       "tag": { "not_found": "This tag does not exist." },

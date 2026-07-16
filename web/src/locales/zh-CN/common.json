@@ -4,7 +4,7 @@
   "navigation": { "account": "个人设置", "admin": "后台管理" },
   "workspace": { "adminView": "管理员视图", "userView": "普通用户视图", "backToUser": "返回我的工作台", "enterAdmin": "进入管理后台" },
   "organization": { "label": "当前空间", "personalGroup": "个人空间", "teamGroup": "团队空间", "manage": "管理当前团队空间", "create": "创建团队空间", "createTitle": "创建团队空间", "createHelp": "团队空间用于隔离成员、资源和权限，由平台管理员创建并指定所有者。", "name": "团队空间名称", "placeholder": "例如：市场团队", "createAction": "创建并切换", "creating": "正在创建…" },
-  "status": { "draft": "草稿", "published": "已发布", "queued": "排队中", "running": "处理中", "complete": "已完成", "failed": "失败", "loading": "正在加载…", "creating": "创建中" },
+  "status": { "draft": "草稿", "published": "已发布", "queued": "排队中", "running": "处理中", "complete": "已完成", "failed": "失败", "cancelled": "已取消", "loading": "正在加载…", "creating": "创建中" },
   "contentLanguage": { "label": "演示内容语言", "description": "决定后续 AI 和新录制步骤生成文案所使用的语言。已有内容不会被改写。", "zh-CN": "简体中文", "en": "English" },
   "errors": {
     "requestFailed": "请求失败，请稍后重试。",
@@ -18,6 +18,7 @@
       "step": { "not_found": "步骤不存在。" },
       "export": { "publish_first": "请先发布演示再导出。", "not_found": "导出任务不存在。", "render_failed": "导出渲染失败，请重试。" },
       "ai": { "not_configured": "服务端尚未配置 AI。", "no_steps": "请至少录制一个步骤。", "job_not_found": "AI 任务不存在。", "generation_failed": "AI 生成失败，请重试。" },
+      "job": { "cancelled_by_admin": "任务已被管理员取消。", "dispatch_failed": "任务下发失败，请重试。" },
       "extension": { "invalid_pairing_code": "配对码无效或已过期。" },
       "category": { "not_found": "分类不存在。" },
       "tag": { "not_found": "标签不存在。" },
