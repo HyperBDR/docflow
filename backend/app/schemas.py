@@ -218,6 +218,40 @@ class OverviewTrendPoint(BaseModel):
     ai_tokens: int = 0
 
 
+class OverviewFailedJob(BaseModel):
+    id: str
+    job_type: Literal["ai", "export"]
+    kind: str
+    resource_id: str
+    resource_title: str
+    user_name: str = ""
+    user_email: str = ""
+    error: str = ""
+    created_at: datetime
+
+
+class OverviewExportJob(BaseModel):
+    id: str
+    kind: str
+    status: str
+    progress: int = 0
+    resource_id: str
+    resource_title: str
+    user_name: str = ""
+    user_email: str = ""
+    created_at: datetime
+
+
+class OverviewResourceTraffic(BaseModel):
+    id: str
+    title: str
+    owner_name: str = ""
+    owner_email: str = ""
+    views: int = 0
+    unique_viewers: int = 0
+    last_viewed_at: datetime | None = None
+
+
 class AdminOverview(BaseModel):
     users: int = 0
     active_users: int = 0
@@ -238,6 +272,9 @@ class AdminOverview(BaseModel):
     demo_status: list[MetricPoint] = Field(default_factory=list)
     content_locales: list[MetricPoint] = Field(default_factory=list)
     top_organizations: list[MetricPoint] = Field(default_factory=list)
+    recent_failed_jobs: list[OverviewFailedJob] = Field(default_factory=list)
+    recent_exports: list[OverviewExportJob] = Field(default_factory=list)
+    top_resources: list[OverviewResourceTraffic] = Field(default_factory=list)
 
 
 class AIModelConfigInput(BaseModel):

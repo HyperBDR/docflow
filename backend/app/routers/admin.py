@@ -42,6 +42,9 @@ from app.models import (
 from app.schemas import (
     AdminOverview,
     OverviewTrendPoint,
+    OverviewFailedJob,
+    OverviewExportJob,
+    OverviewResourceTraffic,
     MetricPoint,
     AIModelConfigInput,
     AIModelConfigOut,
@@ -208,6 +211,9 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     analytics = db.scalars(select(AnalyticsEvent)).all()
     usage = db.scalars(select(AIUsageRecord)).all()
     exports = db.scalars(select(ExportJob)).all()
+    ai_jobs = db.scalars(select(AIJob)).all()
+    users_by_id = {item.id: item for item in users}
+    demos_by_id = {item.id: item for item in demos}
     start = utcnow().date() - timedelta(days=29)
     trend = []
     for offset in range(30):
@@ -228,6 +234,54 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
             key=organization.id, label=organization.name, value=len(organization_demos),
             secondary=len({item.session_id for item in analytics if item.demo_id in demo_ids}),
         ))
+    recent_exports = []
+    for item in sorted(exports, key=lambda value: value.created_at, reverse=True)[:6]:
+        demo = demos_by_id.get(item.demo_id)
+        user = users_by_id.get(item.owner_id)
+        recent_exports.append(OverviewExportJob(
+            id=item.id, kind=item.kind, status=item.status.value, progress=item.progress,
+            resource_id=item.demo_id, resource_title=demo.title if demo else "",
+            user_name=user.name if user else "", user_email=user.email if user else "",
+            created_at=item.created_at,
+        ))
+    failed_jobs = []
+    for item in exports:
+        if item.status.value != "failed":
+            continue
+        demo = demos_by_id.get(item.demo_id)
+        user = users_by_id.get(item.owner_id)
+        failed_jobs.append(OverviewFailedJob(
+            id=item.id, job_type="export", kind=item.kind, resource_id=item.demo_id,
+            resource_title=demo.title if demo else "", user_name=user.name if user else "",
+            user_email=user.email if user else "", error=item.error or item.error_code or "",
+            created_at=item.created_at,
+        ))
+    for item in ai_jobs:
+        if item.status.value != "failed":
+            continue
+        demo = demos_by_id.get(item.demo_id)
+        user = users_by_id.get(item.owner_id)
+        failed_jobs.append(OverviewFailedJob(
+            id=item.id, job_type="ai", kind="ai", resource_id=item.demo_id,
+            resource_title=demo.title if demo else "", user_name=user.name if user else "",
+            user_email=user.email if user else "", error=item.error or item.error_code or "",
+            created_at=item.created_at,
+        ))
+    failed_jobs.sort(key=lambda value: value.created_at, reverse=True)
+    top_resources = []
+    for demo in demos:
+        events = [item for item in analytics if item.demo_id == demo.id]
+        if not events:
+            continue
+        user = users_by_id.get(demo.owner_id)
+        top_resources.append(OverviewResourceTraffic(
+            id=demo.id, title=demo.title, owner_name=user.name if user else "",
+            owner_email=user.email if user else "",
+            views=len({item.session_id for item in events}),
+            unique_viewers=len({item.visitor_id for item in events}),
+            last_viewed_at=max(item.created_at for item in events),
+        ))
+    top_resources.sort(key=lambda value: (value.views, value.unique_viewers), reverse=True)
     return AdminOverview(
         users=len(users),
         active_users=sum(1 for user in users if user.is_active),
@@ -239,8 +293,7 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         views=sum(item.views for item in stats),
         unique_viewers=len({item.visitor_id for item in analytics}), exports=len(exports),
         ai_requests=len(usage), ai_tokens=sum(item.total_tokens for item in usage),
-        failed_jobs=sum(1 for item in exports if item.status.value == "failed") +
-                    (db.scalar(select(func.count(AIJob.id)).where(AIJob.status == "failed")) or 0),
+        failed_jobs=len(failed_jobs),
         storage_bytes=sum(item.storage_bytes for item in stats),
         trend=trend,
         demo_status=[
@@ -249,6 +302,8 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         ],
         content_locales=[MetricPoint(key=locale, label=locale, value=sum(1 for item in demos if item.content_locale == locale)) for locale in sorted({item.content_locale for item in demos})],
         top_organizations=sorted(organization_points, key=lambda item: (item.value, item.secondary), reverse=True)[:8],
+        recent_failed_jobs=failed_jobs[:6], recent_exports=recent_exports,
+        top_resources=top_resources[:6],
     )
 
 

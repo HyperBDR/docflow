@@ -35,14 +35,24 @@ export default function AdminRecycle() {
     finally { setBusy('') }
   }
 
+  const pageItems = items.slice((page - 1) * pageSize, page * pageSize)
+
   return <div className="admin-content-page">
     <div className="admin-page-intro"><div><h1>{t('recycle.title')}</h1><p>{t('recycle.subtitle')}</p></div><span>{t('recycle.total', { count: items.length })}</span></div>
     {error && <div className="error">{error}</div>}
-    <section className={`recycle-grid ${!items.length ? 'is-empty' : ''}`}>{items.slice((page - 1) * pageSize, page * pageSize).map(item => <article key={`${item.item_type}-${item.id}`}>
-      <span className={item.item_type}><Icon name={item.item_type === 'user' ? 'user' : item.item_type === 'team_space' ? 'users' : 'folder'} /></span>
-      <div><strong>{item.title}</strong><span className="recycle-type-label">{t(`recycle.types.${item.item_type}`)}</span><small>{item.owner_email}</small><p>{t('recycle.deletedAt', { date: formatDate(item.deleted_at, locale) })}</p><p>{t('recycle.expiresAt', { date: formatDate(item.expires_at, locale) })}</p></div>
-      <div><button className="secondary icon-button" disabled={busy === item.id} onClick={() => restore(item)}><Icon name="arrowUp" />{t('recycle.restore')}</button><button className="danger icon-button" disabled={busy === item.id} onClick={() => purge(item)}><Icon name="delete" />{t('recycle.purge')}</button></div>
-    </article>)}{loading && !items.length ? <div className="empty"><span className="action-spinner" /><p>{t('loading')}</p></div> : !items.length && <div className="empty"><span className="recycle-empty-icon"><Icon name="delete" size={28} /></span><strong>{t('recycle.empty')}</strong><p>{t('recycle.subtitle')}</p></div>}</section>
-    {!!items.length && <AdminPagination page={page} pageSize={pageSize} total={items.length} onPage={setPage} onPageSize={size => { setPageSize(size); setPage(1) }} />}
+    <section className="admin-list-card recycle-list-card">
+      <div className="recycle-table-wrap"><table className="recycle-table"><thead><tr><th>{t('recycle.columns.item')}</th><th>{t('recycle.columns.type')}</th><th>{t('recycle.columns.owner')}</th><th>{t('recycle.columns.deletedBy')}</th><th>{t('recycle.columns.deletedAt')}</th><th>{t('recycle.columns.expiresAt')}</th><th>{t('recycle.columns.actions')}</th></tr></thead><tbody>{pageItems.map(item => <tr key={`${item.item_type}-${item.id}`}>
+        <td><div className="recycle-item-name"><span className={item.item_type}><Icon name={item.item_type === 'user' ? 'user' : item.item_type === 'team_space' ? 'users' : 'folder'} /></span><strong title={item.title}>{item.title}</strong></div></td>
+        <td><span className={`recycle-type-label ${item.item_type}`}>{t(`recycle.types.${item.item_type}`)}</span></td>
+        <td><span className="recycle-cell-text" title={item.owner_email}>{item.owner_email || '—'}</span></td>
+        <td><span className="recycle-cell-text" title={item.deleted_by_name}>{item.deleted_by_name || '—'}</span></td>
+        <td><time>{formatDate(item.deleted_at, locale)}</time></td><td><time>{formatDate(item.expires_at, locale)}</time></td>
+        <td><div className="recycle-actions"><button className="secondary icon-button" disabled={busy === item.id} onClick={() => restore(item)}>{busy === item.id ? <span className="action-spinner" /> : <Icon name="arrowUp" />}{t('recycle.restore')}</button><button className="danger icon-button" disabled={busy === item.id} onClick={() => purge(item)}><Icon name="delete" />{t('recycle.purge')}</button></div></td>
+      </tr>)}</tbody></table>
+        {loading && <div className="admin-table-state"><span className="action-spinner" />{t('loading')}</div>}
+        {!loading && !items.length && <div className="recycle-empty"><span className="recycle-empty-icon"><Icon name="delete" size={28} /></span><strong>{t('recycle.empty')}</strong><p>{t('recycle.subtitle')}</p></div>}
+      </div>
+      {!!items.length && <AdminPagination page={page} pageSize={pageSize} total={items.length} onPage={setPage} onPageSize={size => { setPageSize(size); setPage(1) }} />}
+    </section>
   </div>
 }

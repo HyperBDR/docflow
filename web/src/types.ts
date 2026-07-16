@@ -76,6 +76,9 @@ export type AdminOverview = {
   demo_status: { key: string; label: string; value: number; secondary: number }[]
   content_locales: { key: string; label: string; value: number; secondary: number }[]
   top_organizations: { key: string; label: string; value: number; secondary: number }[]
+  recent_failed_jobs: { id: string; job_type: 'ai' | 'export'; kind: string; resource_id: string; resource_title: string; user_name: string; user_email: string; error: string; created_at: string }[]
+  recent_exports: { id: string; kind: string; status: string; progress: number; resource_id: string; resource_title: string; user_name: string; user_email: string; created_at: string }[]
+  top_resources: { id: string; title: string; owner_name: string; owner_email: string; views: number; unique_viewers: number; last_viewed_at?: string | null }[]
 }
 
 export type AdminResourceOwner = { id: string; name: string; email: string }

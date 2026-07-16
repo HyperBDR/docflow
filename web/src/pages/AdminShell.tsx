@@ -46,8 +46,8 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
         <NavLink to="/admin/users" title={t('nav.users')}><Icon name="user" /><span>{t('nav.users')}</span></NavLink>
         <div className="admin-nav-separator"><span>{t('nav.content')}</span></div>
         <NavLink to="/admin/resources" title={t('nav.resources')}><Icon name="folder" /><span>{t('nav.resources')}</span></NavLink>
-        <NavLink to="/admin/recycle" title={t('nav.recycle')}><Icon name="delete" /><span>{t('nav.recycle')}</span></NavLink>
         <NavLink to="/admin/storage" title={t('nav.storage')}><Icon name="database" /><span>{t('nav.storage')}</span></NavLink>
+        <NavLink to="/admin/recycle" title={t('nav.recycle')}><Icon name="delete" /><span>{t('nav.recycle')}</span></NavLink>
         <div className="admin-nav-separator"><span>{t('nav.ai')}</span></div>
         <NavLink to="/admin/ai/settings" title={t('nav.aiSettings')}><Icon name="settings" /><span>{t('nav.aiSettings')}</span></NavLink>
         <NavLink to="/admin/ai/models" title={t('nav.aiModels')}><Icon name="ai" /><span>{t('nav.aiModels')}</span></NavLink>

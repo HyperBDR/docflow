@@ -7,7 +7,7 @@ from PIL import Image
 
 from app.main import app
 from app.database import SessionLocal
-from app.models import ExtensionToken
+from app.models import AIJob, AnalyticsEvent, ExportJob, ExtensionToken, JobStatus
 from app.security import hash_token, utcnow
 
 
@@ -80,6 +80,9 @@ def test_admin_user_lifecycle_and_safety_guards(client):
     overview = client.get("/api/admin/overview").json()
     assert overview["users"] == 2
     assert overview["demos"] == 2
+    assert overview["recent_exports"] == []
+    assert overview["recent_failed_jobs"] == []
+    assert overview["top_resources"] == []
 
     protected = client.patch(f"/api/admin/users/{admin['id']}", json={"role": "user"})
     assert protected.status_code == 400
@@ -102,6 +105,42 @@ def test_admin_user_lifecycle_and_safety_guards(client):
     disabled_login = login(client, "member@example.com", "reset-password")
     assert disabled_login.status_code == 401
     assert disabled_login.json()["code"] == "auth.account_disabled"
+
+
+def test_admin_overview_includes_recent_jobs_and_resource_traffic(client):
+    user = register(client, "admin@example.com").json()
+    demo = client.post("/api/demos", json={"title": "Traffic report"}).json()
+    with SessionLocal() as db:
+        db.add_all([
+            ExportJob(
+                owner_id=user["id"], demo_id=demo["id"], revision_id="revision-1", kind="pdf",
+                status=JobStatus.failed, progress=45, error="renderer stopped",
+            ),
+            AIJob(
+                owner_id=user["id"], demo_id=demo["id"], status=JobStatus.failed,
+                model="test-model", error="invalid JSON response",
+            ),
+            AnalyticsEvent(
+                share_id="share-1", demo_id=demo["id"], revision_id="revision-1",
+                visitor_id="visitor-1", session_id="session-1", event_type="view",
+            ),
+            AnalyticsEvent(
+                share_id="share-1", demo_id=demo["id"], revision_id="revision-1",
+                visitor_id="visitor-1", session_id="session-2", event_type="view",
+            ),
+        ])
+        db.commit()
+
+    overview = client.get("/api/admin/overview")
+    assert overview.status_code == 200
+    value = overview.json()
+    assert value["failed_jobs"] == 2
+    assert value["recent_exports"][0]["resource_title"] == "Traffic report"
+    assert value["recent_exports"][0]["kind"] == "pdf"
+    assert {item["job_type"] for item in value["recent_failed_jobs"]} == {"ai", "export"}
+    assert value["top_resources"][0]["title"] == "Traffic report"
+    assert value["top_resources"][0]["views"] == 2
+    assert value["top_resources"][0]["unique_viewers"] == 1
 
 
 def test_cannot_remove_last_other_administrator(client):
