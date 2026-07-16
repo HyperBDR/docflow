@@ -1,10 +1,14 @@
 import io
 import json
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.main import app
+from app.database import SessionLocal
+from app.models import ExtensionToken
+from app.security import hash_token, utcnow
 
 
 def register(client, email: str):
@@ -301,6 +305,35 @@ def test_team_space_creation_session_isolation_and_extension_context(client):
         headers = {"Authorization": f"Bearer {token}"}
         assert client.post(f"/api/organizations/{personal_id}/switch").status_code == 200
         assert client.get("/api/auth/me", headers=headers).json()["active_organization_id"] == team_id
+
+
+def test_extension_connection_uses_sliding_expiration_and_can_be_revoked(client):
+    register(client, "admin@example.com")
+    code = client.post("/api/extension/pair").json()["code"]
+    token = client.post("/api/extension/pair/exchange", json={"code": code}).json()["token"]
+    second_code = client.post("/api/extension/pair").json()["code"]
+    second_token = client.post("/api/extension/pair/exchange", json={"code": second_code}).json()["token"]
+    with SessionLocal() as db:
+        credential = db.query(ExtensionToken).filter(ExtensionToken.token_hash == hash_token(token)).one()
+        credential.expires_at = utcnow() + timedelta(hours=1)
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {token}"}
+    me = client.get("/api/auth/me", headers=headers)
+    assert me.status_code == 200
+    extension_config = client.get("/api/extension/config", headers=headers)
+    assert extension_config.status_code == 200
+    assert extension_config.json() == {"ai_enabled": False, "default_content_locale": "zh-CN"}
+    with SessionLocal() as db:
+        credential = db.query(ExtensionToken).filter(ExtensionToken.token_hash == hash_token(token)).one()
+        expires_at = credential.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=utcnow().tzinfo)
+        assert expires_at > utcnow() + timedelta(days=100)
+
+    assert client.delete("/api/extension/tokens", headers=headers).status_code == 204
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {second_token}"}).status_code == 200
 
 
 def test_regular_user_restrictions_invited_registration_and_team_lifecycle(client):

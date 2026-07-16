@@ -366,6 +366,7 @@ class DemoCreate(BaseModel):
     description: str = Field(default="", max_length=5000)
     category_id: str | None = None
     content_locale: Locale = "zh-CN"
+    auto_title: bool = False
 
 
 class DemoUpdate(BaseModel):
@@ -463,6 +464,7 @@ class StepUpdate(BaseModel):
 
 class DemoOut(BaseModel):
     id: str
+    organization_id: str
     title: str
     description: str
     content_locale: Locale = "zh-CN"

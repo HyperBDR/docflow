@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     web_origin: str = "http://localhost:5173"
     cookie_secure: bool = False
     session_days: int = 14
-    extension_token_days: int = 30
+    # Extension credentials use sliding expiration. Active installations stay
+    # connected, while disabled accounts/password changes still revoke them.
+    extension_token_days: int = 180
     allow_user_create_team_space: bool = False
     dom_slides_enabled: bool = True
     snapshot_compressed_limit_mb: int = 15

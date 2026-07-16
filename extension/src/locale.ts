@@ -10,4 +10,6 @@ export function browserLocale(): Locale {
 }
 
 export type MessageKey = keyof typeof en
-export function tr(locale: Locale, key: MessageKey): string { return messages[locale][key] }
+export function tr(locale: Locale, key: MessageKey, values: Record<string, string | number> = {}): string {
+  return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{{${name}}}`, String(value)), messages[locale][key])
+}

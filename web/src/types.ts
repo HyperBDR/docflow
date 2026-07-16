@@ -101,6 +101,7 @@ export type Step = {
 
 export type Demo = {
   id: string
+  organization_id: string
   title: string
   description: string
   content_locale: Locale

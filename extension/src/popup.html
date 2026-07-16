@@ -1,16 +1,23 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><link rel="stylesheet" href="popup.css"></head><body>
-  <main><header><span class="logo"><img src="icons/icon48.png" alt=""></span><div><h1>DocFlow</h1><small>RECORDER</small></div><label class="locale"><span data-i18n="language">Language</span><select id="locale"><option value="zh-CN">中文</option><option value="en">EN</option></select></label></header><div id="message"></div>
-    <section id="connect"><label><span data-i18n="apiAddress">DocFlow API 地址</span><input id="api" value="http://localhost:8001"></label><label><span data-i18n="pairingCode">六位配对码</span><input id="code" maxlength="6" inputmode="numeric" placeholder="000000"></label><button id="pair" data-i18n="connect">连接账号</button></section>
+  <main>
+    <header><span class="logo"><img src="icons/icon48.png" alt=""></span><div><h1>DocFlow</h1><small>RECORDER</small></div><nav class="header-actions"><button id="home-link" class="header-icon" data-i18n-title="openHome" aria-label="DocFlow Home"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></svg></button><button id="settings-toggle" class="header-icon" data-i18n-title="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 15a2 2 0 0 0 .4 2.2l-2.2 2.2A2 2 0 0 0 15 19l-1 .4V22h-4v-2.6L9 19a2 2 0 0 0-2.2.4l-2.2-2.2A2 2 0 0 0 5 15l-.4-1H2v-4h2.6L5 9a2 2 0 0 0-.4-2.2l2.2-2.2A2 2 0 0 0 9 5l1-.4V2h4v2.6l1 .4a2 2 0 0 0 2.2-.4l2.2 2.2A2 2 0 0 0 19 9l.4 1H22v4h-2.6l-.4 1Z"/></svg></button></nav></header>
+    <div id="message"></div>
+    <section id="connect"><div class="connect-card"><span>↗</span><div><strong data-i18n="connectTitle">连接 DocFlow</strong><p data-i18n="connectDescription">从 DocFlow 网站一键授权，无需填写服务地址和连接码。</p></div></div><button id="open-connect"><b data-i18n="openDocFlow">打开 DocFlow 并连接</b></button><small class="privacy-note" data-i18n="connectionSaved">连接会安全保存在当前浏览器中。</small></section>
     <section id="recorder" hidden>
-      <div id="setup"><label><span data-i18n="chooseSpace">选择保存空间</span><select id="space"></select></label><label><span data-i18n="chooseDemo">选择演示</span><select id="demo"></select></label>
-        <div class="setup-note"><span class="setup-icon">✦</span><p data-i18n="setupHint">录制模式、AI 和快速教学将在当前页面中打开。</p></div>
-        <button id="start"><span>↗</span><b data-i18n="openRecorder">开始录制当前标签页</b></button>
+      <div id="home-view">
+        <div id="setup">
+          <div class="record-actions">
+            <button id="record-interactive" class="record-button record-primary"><svg viewBox="0 0 24 24"><path d="m5 3 13 9-6 1.5L9 19 5 3Z"/><path d="m13 14 4 5"/></svg><span data-i18n="recordInteractiveDemo">Record Interactive Demo</span></button>
+            <div class="record-secondary-row">
+              <button id="record-video" class="record-button record-secondary"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg><span data-i18n="recordVideo">Record Video</span></button>
+              <button id="take-screenshot" class="record-button record-secondary"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4V8Z"/><circle cx="12" cy="13" r="3"/></svg><span data-i18n="takeScreenshot">Take a Screenshot</span></button>
+            </div>
+          </div>
+          <div class="account-footer"><div><small data-i18n="loggedInAs">Logged in as</small><strong id="footer-user-name">DocFlow</strong></div><span id="extension-version">v0.9.0</span></div>
+        </div>
+        <div id="active-recording" hidden><div class="recording-summary"><span class="record-dot"></span><div><strong id="record-status">Recording</strong><small id="record-mode"></small></div><b id="step-count">0 Steps</b></div><div class="tab-summary"><span>▣</span><p id="tab-count">1</p></div><button id="attach-tab" class="secondary" hidden data-i18n="attachTab">将当前标签页加入录制</button><div class="active-actions"><button id="pause" class="secondary">Pause</button><button id="stop" class="danger" data-i18n="stop">停止录制</button></div></div>
       </div>
-      <div id="active-recording" hidden>
-        <div class="recording-summary"><span class="record-dot"></span><div><strong id="record-status">Recording</strong><small id="record-mode"></small></div><b id="step-count">0 Steps</b></div>
-        <div class="active-actions"><button id="pause" class="secondary">Pause</button><button id="stop" class="danger" data-i18n="stop">Stop Recording</button></div>
-      </div>
-      <button id="disconnect" class="link" data-i18n="disconnect">断开账号</button>
+      <div id="settings-view" hidden><div class="settings-heading"><button id="settings-back" class="back-icon">←</button><div><strong data-i18n="settingsTitle">插件设置</strong><small data-i18n="settingsDescription">管理账号连接和录制教学</small></div></div><div class="connected-user"><span class="connected-avatar" id="user-avatar">DF</span><div><strong id="user-name">DocFlow</strong><small id="user-email"></small></div><em data-i18n="connected">已连接</em></div><div class="settings-card"><strong data-i18n="recordingHelp">录制帮助</strong><button id="reset-tutorial" class="guide-button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.5 2.1c-.9.5-1.3 1.1-1.3 2M12 17h.01"/></svg><span data-i18n="showGuideAgain">下次重新显示录制教学</span></button></div><button id="disconnect" class="disconnect-button" data-i18n="disconnect">断开账号</button></div>
     </section>
   </main><script src="popup.js"></script>
 </body></html>

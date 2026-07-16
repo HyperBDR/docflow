@@ -3,19 +3,17 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import { copyText } from '../clipboard'
-import { formatDate, normalizeLocale } from '../i18n'
+import { formatDate } from '../i18n'
 import Icon from '../components/Icon'
 import type { Category, Demo, Tag } from '../types'
 
 type Dialog = 'categories' | 'move' | 'tags' | 'merge' | null
 
 export default function Dashboard() {
-  const { t, i18n } = useTranslation('dashboard')
+  const { t } = useTranslation('dashboard')
   const [demos, setDemos] = useState<Demo[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [tags, setTags] = useState<Tag[]>([])
-  const [title, setTitle] = useState('')
-  const [pair, setPair] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | 'draft' | 'published'>('all')
@@ -61,14 +59,6 @@ export default function Dashboard() {
     return demos.filter(item => item.category_id && ids.has(item.category_id)).length
   }
 
-  async function create(event: React.FormEvent) {
-    event.preventDefault()
-    try {
-      const categoryId = categories.some(item => item.id === categoryFilter) ? categoryFilter : undefined
-      const demo = await api.createDemo(title || t('untitled'), categoryId, normalizeLocale(i18n.language))
-      navigate(`/demos/${demo.id}?mode=edit`)
-    } catch (value) { showError(value) }
-  }
   async function remove(ids: string[]) {
     if (!ids.length || !window.confirm(t('messages.deleteConfirm', { count: ids.length }))) return
     setBusy(true); setError('')
@@ -100,10 +90,8 @@ export default function Dashboard() {
   }
 
   return <main className={`page resource-page library-page ${selected.size ? 'has-bulk-selection' : ''}`}>
-    <div className="page-title"><div><h1>{t('title')}</h1><p className="muted">{t('subtitle')}</p></div><button className="secondary icon-button" onClick={async () => setPair((await api.pair()).code)}><Icon name="link" />{t('connectExtension')}</button></div>
-    {pair && <div className="pair-banner"><div><strong>{t('pairTitle')}</strong><p>{t('pairHint')}</p></div><code>{pair}</code><button className="ghost" onClick={() => setPair(null)}>{t('common:actions.close')}</button></div>}
+    <div className="page-title"><div><h1>{t('title')}</h1><p className="muted">{t('subtitle')}</p></div></div>
     {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
-    <form className="create-card" onSubmit={create}><input value={title} onChange={event => setTitle(event.target.value)} placeholder={t('newPlaceholder')} maxLength={200} /><button className="primary icon-button"><Icon name="plus" />{t('createDemo')}</button></form>
 
     <div className="library-layout">
       <aside className="library-sidebar">
@@ -154,7 +142,7 @@ export default function Dashboard() {
               <button disabled={busy} className="danger" onClick={() => { setOpenMenu(null); remove([demo.id]) }}><Icon name="delete" />{t('deleteDemo')}</button>
             </div>}
           </article>)}
-          {!filtered.length && <div className="empty"><Icon name="folder" size={42} /><h3>{demos.length ? t('emptyFiltered') : t('emptyAll')}</h3><p>{t('emptyHint')}</p></div>}
+          {!filtered.length && <div className="empty"><Icon name="folder" size={42} /><h3>{demos.length ? t('emptyFiltered') : t('emptyAll')}</h3><p>{demos.length ? t('emptyHint') : t('emptyRecordHint')}</p></div>}
         </div>
       </section>
     </div>

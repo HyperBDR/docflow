@@ -72,7 +72,24 @@ export function pageContext(element?: HTMLElement) {
     target_aria: element?.getAttribute('aria-label') || '',
     nearby_text: nearby.trim().replace(/\s+/g, ' ').slice(0, 1500),
     visible_text: (document.body?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 6000),
+    raster_regions: rasterFallbackRegions(),
   }
+}
+
+function rasterFallbackRegions() {
+  return Array.from(document.querySelectorAll<HTMLElement>('iframe,frame')).flatMap(frame => {
+    const rect = frame.getBoundingClientRect()
+    const left = Math.max(0, rect.left), top = Math.max(0, rect.top)
+    const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom)
+    if (right - left < 2 || bottom - top < 2) return []
+    const style = getComputedStyle(frame)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return []
+    return [{
+      x: left / innerWidth, y: top / innerHeight,
+      w: (right - left) / innerWidth, h: (bottom - top) / innerHeight,
+      kind: 'iframe',
+    }]
+  }).slice(0, 20)
 }
 
 export function passwordRects(): Rect[] {
@@ -92,7 +109,6 @@ export function passwordRects(): Rect[] {
 export function captureWarnings(): string[] {
   const warnings: string[] = []
   if (document.querySelector('canvas')) warnings.push('Canvas content may use a raster fallback')
-  if (document.querySelector('iframe')) warnings.push('Cross-origin iframe content may use a raster fallback')
   return warnings
 }
 

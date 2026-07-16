@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ExtensionToken, Session as UserSession, User
-from app.security import hash_token, utcnow
+from app.config import settings
+from app.security import expires_in, hash_token, utcnow
 
 
 def expired(value) -> bool:
@@ -30,6 +31,14 @@ def current_user(
     credential = db.scalar(select(model).where(model.token_hash == hash_token(token)))
     if not credential or expired(credential.expires_at) or getattr(credential, "revoked", False):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session expired")
+    if model is ExtensionToken:
+        expires_at = credential.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        # Renew only near expiry to avoid a write on every extension request.
+        if expires_at < expires_in(days=max(7, settings.extension_token_days // 3)):
+            credential.expires_at = expires_in(days=settings.extension_token_days)
+            db.commit()
     user = db.get(User, credential.user_id)
     if not user or not user.is_active or user.deleted_at:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="account disabled")

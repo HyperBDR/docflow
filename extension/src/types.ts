@@ -1,8 +1,11 @@
 export type Credentials = { api: string; token: string; web?: string }
+export type RecordingTarget = { demoId: string; organizationId: string; title: string; contentLocale: Locale; aiEnabled: boolean }
 export type RecordingMode = 'html' | 'screenshot'
 export type Locale = 'zh-CN' | 'en'
 export type Recording = {
-  tabId: number
+  rootTabId: number
+  activeTabId: number
+  trackedTabIds: number[]
   demoId: string
   api: string
   token: string
@@ -16,6 +19,7 @@ export type Recording = {
   aiEnabled: boolean
   locale: Locale
   contentLocale: Locale
+  autoCreated: boolean
 }
 export type Rect = { x: number; y: number; w: number; h: number }
 

@@ -7,6 +7,7 @@ import { formatDate } from '../i18n'
 import Icon, { type IconName } from '../components/Icon'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import SlideStage from '../components/SlideStage'
+import { prepareExtensionRecording } from '../extensionBridge'
 import type { AIJob, Demo, ExportJob, HotspotData, Rect, SelectorInfo, Step } from '../types'
 
 type InspectorTab = 'content' | 'hotspot' | 'tooltip' | 'theme' | 'animation' | 'ai'
@@ -55,8 +56,14 @@ function RangeField({ label, value, min, max, step = 1, suffix = '', onChange }:
 }
 
 function visibleCaptureWarnings(warnings: string[] = []) {
-  const legacyAudit = /^(removed unsafe|removed external|removed recorder or browser-extension|removed injected|Video playback is not included)/i
+  const legacyAudit = /^(removed unsafe|removed external|removed recorder or browser-extension|removed injected|Video playback is not included|Cross-origin iframe content may use a raster fallback)/i
   return warnings.filter(warning => !legacyAudit.test(warning))
+}
+
+function eventId() {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
 }
 
 export default function Editor() {
@@ -76,6 +83,7 @@ export default function Editor() {
   const [exportAction, setExportAction] = useState<ExportCenterAction>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [recorderBusy, setRecorderBusy] = useState(false)
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
   const selectedHotspot = useMemo(() => selected?.hotspots.find(item => item.id === selectedHotspotId) || selected?.hotspots[0], [selected, selectedHotspotId])
 
@@ -177,7 +185,7 @@ export default function Editor() {
   }
   async function upload(file: File) {
     const bitmap = await createImageBitmap(file)
-    const meta = { event_id: crypto.randomUUID(), title: t('steps.step', { index: (demo?.steps.length || 0) + 1 }), body: '', viewport_width: bitmap.width, viewport_height: bitmap.height, hotspot: { x: .5, y: .5, w: .04, h: .04 }, duration: 3 }
+    const meta = { event_id: eventId(), title: t('steps.step', { index: (demo?.steps.length || 0) + 1 }), body: '', viewport_width: bitmap.width, viewport_height: bitmap.height, hotspot: { x: .5, y: .5, w: .04, h: .04 }, duration: 3 }
     bitmap.close()
     const form = new FormData(); form.append('meta', JSON.stringify(meta)); form.append('screenshot', file)
     const step = await api.uploadStep(id, form)
@@ -224,6 +232,13 @@ export default function Editor() {
   }
   async function generateAI(stepId?: string) {
     try { setAIJob(await api.generateAI(id, stepId)); setTab('ai') } catch (value) { setError((value as Error).message) }
+  }
+  async function prepareRecorder() {
+    if (!demo || recorderBusy) return
+    setRecorderBusy(true); setError(''); setNotice('')
+    try { await prepareExtensionRecording(demo.id); setNotice(t('messages.recorderReady')) }
+    catch (value) { setError((value as Error).message === 'extension_not_detected' ? t('messages.extensionNotDetected') : t('messages.recorderFailed')) }
+    finally { setRecorderBusy(false) }
   }
 
   function selectPresentationStep(index: number) {
@@ -301,6 +316,7 @@ export default function Editor() {
           <button className="topbar-action icon-button compact-action" title={t('top.fullscreen')} onClick={() => document.documentElement.requestFullscreen()}><Icon name="layout" /></button>
         </> : <button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />{t('top.present')}</button>}
         {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title={t('top.publicLink')}><Icon name="share" /></a>}
+        {detailMode === 'edit' && <button className="topbar-action icon-button" disabled={recorderBusy} onClick={prepareRecorder}>{recorderBusy ? <span className="action-spinner" /> : <Icon name="record" />}{t(recorderBusy ? 'top.preparingRecorder' : 'top.continueRecording')}</button>}
         {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />{t('top.aiOptimize')}</button>}
         <LanguageSwitcher account />
         <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''} ${actionBusy ? 'action-pending' : ''}`} aria-busy={actionBusy} disabled={actionBusy} onClick={() => setExportCenterOpen(value => !value)}>{actionBusy ? <span className="action-spinner" /> : <Icon name="share" />}{actionBusy ? t('top.processing') : t('top.shareExport')}</button>

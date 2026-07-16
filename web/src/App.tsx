@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from './api'
 import { applyLocale, normalizeLocale } from './i18n'
@@ -12,6 +12,7 @@ import Account from './pages/Account'
 import AdminShell from './pages/AdminShell'
 import Invite from './pages/Invite'
 import TeamSpaceSettings from './pages/TeamSpaceSettings'
+import ExtensionConnect from './pages/ExtensionConnect'
 import Brand from './components/Brand'
 import AccountMenu, { LAST_WORKSPACE_KEY } from './components/AccountMenu'
 import LanguageSwitcher from './components/LanguageSwitcher'
@@ -25,6 +26,7 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -34,7 +36,8 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
       const user = await api.me()
       await applyLocale(user.ui_locale)
       onAuthenticated(user)
-      navigate(user.role === 'admin' && localStorage.getItem(LAST_WORKSPACE_KEY) === 'admin' ? '/admin' : '/')
+      const resumeExtensionConnect = location.pathname === '/extension/connect'
+      navigate(resumeExtensionConnect ? `${location.pathname}${location.search}` : user.role === 'admin' && localStorage.getItem(LAST_WORKSPACE_KEY) === 'admin' ? '/admin' : '/')
     } catch (value) {
       setError(value instanceof Error ? value.message : t('loginFailed'))
     } finally { setBusy(false) }
@@ -69,6 +72,7 @@ function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserCh
     <Route path="/admin/*" element={user.role === 'admin' ? <AdminShell user={user} onUserChange={onUserChange} logout={logout} /> : <Navigate to="/" />} />
     <Route path="/account/*" element={<Account user={user} onUserChange={onUserChange} onPasswordChanged={logout} />} />
     <Route path="/spaces/:id" element={<TeamSpaceSettings user={user} onUserChange={onUserChange} logout={logout} />} />
+    <Route path="/extension/connect" element={<ExtensionConnect />} />
     <Route path="/demos/:id/analytics" element={<Analytics />} />
     <Route path="/demos/:id" element={<Editor />} />
     <Route path="/" element={<WorkspaceShell user={user} onUserChange={onUserChange} logout={logout} />} />

@@ -1,7 +1,7 @@
 import secrets
 from datetime import timezone
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,19 @@ class TokenOut(BaseModel):
     expires_in: int
     api_url: str
     web_url: str
+
+
+class ExtensionConfigOut(BaseModel):
+    ai_enabled: bool
+    default_content_locale: str
+
+
+@router.get("/config", response_model=ExtensionConfigOut)
+def extension_config(user: User = Depends(current_user)):
+    return ExtensionConfigOut(
+        ai_enabled=settings.ai_enabled and bool(settings.ai_api_key),
+        default_content_locale=user.ui_locale or "zh-CN",
+    )
 
 
 def expired(value) -> bool:
@@ -62,7 +75,12 @@ def exchange_pair(payload: PairExchange, db: Session = Depends(get_db)):
 
 
 @router.delete("/tokens", status_code=204)
-def revoke_tokens(db: Session = Depends(get_db), user: User = Depends(current_user)):
+def revoke_tokens(request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    credential = request.state.credential
+    if isinstance(credential, ExtensionToken):
+        credential.revoked = True
+        db.commit()
+        return
     tokens = db.scalars(select(ExtensionToken).where(ExtensionToken.user_id == user.id, ExtensionToken.revoked.is_(False))).all()
     for token in tokens:
         token.revoked = True

@@ -37,6 +37,16 @@ def test_authentication_and_demo_ownership(client, authenticated):
     assert authenticated.get(f"/api/demos/{demo_id}").status_code == 401
 
 
+def test_extension_auto_title_remains_available_for_ai(authenticated):
+    automatic = authenticated.post("/api/demos", json={
+        "title": "Billing Console · 2026-07-15 17:30", "content_locale": "en", "auto_title": True,
+    })
+    assert automatic.status_code == 201
+    assert "title" not in automatic.json()["manual_fields"]
+    manual = authenticated.post("/api/demos", json={"title": "My curated demo"})
+    assert "title" in manual.json()["manual_fields"]
+
+
 def test_record_publish_markdown_and_revoke(authenticated):
     demo = authenticated.post("/api/demos", json={"title": "创建项目"}).json()
     first = create_step(authenticated, demo["id"])

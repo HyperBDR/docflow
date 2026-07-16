@@ -20,6 +20,19 @@ export function preloadSnapshot(url?: string) {
 }
 
 type TargetSelection = { selector: SelectorInfo; rect: Rect }
+type RasterRegion = { x: number; y: number; w: number; h: number; kind: 'iframe' }
+
+function rasterRegions(context: Record<string, unknown>): RasterRegion[] {
+  const source = context.raster_regions
+  if (!Array.isArray(source)) return []
+  return source.flatMap(item => {
+    if (!item || typeof item !== 'object') return []
+    const value = item as Record<string, unknown>
+    const x = Number(value.x), y = Number(value.y), w = Number(value.w), h = Number(value.h)
+    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return []
+    return [{ x, y, w, h, kind: 'iframe' as const }]
+  }).slice(0, 20)
+}
 
 type Props = {
   step: Step
@@ -241,7 +254,9 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const [previewReady, setPreviewReady] = useState(false)
   const [zoomActive, setZoomActive] = useState(false)
   const zoomTimer = useRef<number | undefined>(undefined)
-  const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url)
+  const fallbackRegions = useMemo(() => rasterRegions(step.page_context || {}), [step.id, step.page_context])
+  const legacyIframeFallback = fallbackRegions.length === 0 && step.capture_warnings?.some(warning => warning.startsWith('Cross-origin iframe content may use a raster fallback'))
+  const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url) && !legacyIframeFallback
   const zoom = step.animation?.zoom
   const zoomRect = zoom?.rect
   const zoomTransitionDuration = Math.max(0, Math.min(5000, Number(zoom?.transition_duration_ms ?? 1200)))
@@ -369,6 +384,14 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
           sandbox="allow-scripts allow-same-origin"
           style={{ width: step.viewport_width, height: step.viewport_height, transform: `scale(${scale})`, opacity: contentReady ? 1 : 0 }}
         />}
+        {showDomFrame && contentReady && fallbackRegions.map((region, index) => <div
+          className="raster-fallback-region"
+          key={`${region.kind}-${index}`}
+          style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.w * 100}%`, height: `${region.h * 100}%` }}
+        ><img src={step.image_url} alt="" draggable={false} style={{
+          width: `${100 / region.w}%`, height: `${100 / region.h}%`,
+          left: `${-region.x / region.w * 100}%`, top: `${-region.y / region.h * 100}%`,
+        }} /></div>)}
       </div>
       {!contentReady && !previewReady && <div className="slide-transition-loading"><span /><b>{t('guide.loadingNext')}</b></div>}
       {!contentReady && previewReady && useDom && <div className="slide-background-loading"><span />{t('guide.loadingPage')}</div>}

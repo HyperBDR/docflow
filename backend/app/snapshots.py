@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import io
 import json
+import math
 import re
 from copy import deepcopy
 from urllib.parse import urlsplit, urlunsplit
@@ -212,4 +213,20 @@ def sanitize_page_context(value: dict) -> dict:
             result["url"] = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))[:2000]
         except ValueError:
             pass
+    regions = []
+    for item in value.get("raster_regions", [])[:20] if isinstance(value.get("raster_regions"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            x, y, w, h = (float(item.get(key, 0)) for key in ("x", "y", "w", "h"))
+        except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(number) for number in (x, y, w, h)) or w <= 0 or h <= 0:
+            continue
+        x, y = max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
+        w, h = min(1.0 - x, w), min(1.0 - y, h)
+        if w > 0 and h > 0:
+            regions.append({"x": x, "y": y, "w": w, "h": h, "kind": "iframe"})
+    if regions:
+        result["raster_regions"] = regions
     return result

@@ -32,7 +32,7 @@ def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User =
     organization_id = current_organization_id(db, user)
     require_organization_role(db, user, organization_id, {"owner", "admin", "editor"})
     manual_fields = []
-    if payload.title != "未命名演示":
+    if payload.title != "未命名演示" and not payload.auto_title:
         manual_fields.append("title")
     if payload.description:
         manual_fields.append("description")

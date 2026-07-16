@@ -131,6 +131,7 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
     first_step = min(demo.steps, key=lambda item: item.position, default=None)
     return DemoOut(
         id=demo.id,
+        organization_id=demo.organization_id,
         title=demo.title,
         description=demo.description,
         content_locale=demo.content_locale or "zh-CN",

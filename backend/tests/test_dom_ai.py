@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.ai_service import apply_results
 from app.database import SessionLocal
 from app.models import AIJob, Demo, Hotspot, Step, User
-from app.snapshots import sanitize_snapshot
+from app.snapshots import sanitize_page_context, sanitize_snapshot
 
 
 def screenshot() -> bytes:
@@ -76,6 +76,21 @@ def test_snapshot_sanitizer_only_warns_for_missing_visual_assets():
     assert "cici-inline-container" not in encoded
     assert "data:image/png;base64,AA==" in encoded
     assert warnings == ["Stylesheet could not be embedded; preview may differ from the source page"]
+
+
+def test_page_context_keeps_only_safe_raster_fallback_regions():
+    value = sanitize_page_context({
+        "page_title": "Embedded report",
+        "raster_regions": [
+            {"x": .1, "y": .2, "w": .5, "h": .4, "kind": "iframe"},
+            {"x": -.2, "y": .9, "w": .4, "h": .5},
+            {"x": "bad", "y": 0, "w": 1, "h": 1},
+        ],
+    })
+    assert value["raster_regions"] == [
+        {"x": .1, "y": .2, "w": .5, "h": .4, "kind": "iframe"},
+        {"x": 0.0, "y": .9, "w": .4, "h": 1 - .9, "kind": "iframe"},
+    ]
 
 
 def test_dom_slide_hotspot_and_public_playback(authenticated):

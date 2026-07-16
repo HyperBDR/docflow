@@ -1,5 +1,6 @@
-import type { Credentials, Locale, Recording, RecordingMode } from './types'
+import type { Credentials, Locale, Recording, RecordingMode, RecordingTarget } from './types'
 import { browserLocale } from './locale'
+import { configuredApiUrl, configuredWebUrl, isConfiguredWebPage, isRecordableUrl } from './config'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
 let recording: Recording | null = null
@@ -16,6 +17,15 @@ function savedState(state: Recording): SavedRecording {
 
 async function persist(state: Recording) {
   await chrome.storage.session.set({ recording: savedState(state) })
+}
+
+function statePayload(state: Recording, active = true) {
+  return {
+    type: 'RECORDING_STATE', active, paused: state.paused,
+    capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode,
+    aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale,
+    trackedTabs: state.trackedTabIds.length,
+  }
 }
 
 async function capture(tabId: number): Promise<string> {
@@ -41,27 +51,47 @@ async function captureClean(tabId: number): Promise<string> {
 
 async function notify(state: Recording | null) {
   if (!state) return
-  try {
-    await chrome.tabs.sendMessage(state.tabId, {
-      type: 'RECORDING_STATE', active: state.active, paused: state.paused,
-      capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode,
-      aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale,
-    })
-  } catch { /* restricted or navigating page */ }
   const badge = !state.active ? '' : state.capturing ? '…' : state.paused ? 'Ⅱ' : state.steps ? (state.steps > 99 ? '99+' : String(state.steps)) : 'REC'
-  await chrome.action.setBadgeText({ tabId: state.tabId, text: badge })
-  await chrome.action.setBadgeBackgroundColor({ tabId: state.tabId, color: state.paused ? '#f59e0b' : state.capturing ? '#7c3aed' : '#e53945' })
-  await chrome.action.setTitle({ tabId: state.tabId, title: state.active ? `${state.steps} Steps Recorded · ${state.mode === 'html' ? 'HTML Cloning' : 'Screenshot'}` : 'DocFlow Recorder' })
+  await Promise.all(state.trackedTabIds.map(async tabId => {
+    try {
+      const tab = await chrome.tabs.get(tabId)
+      if (isRecordableUrl(tab.url)) await sendToRecordableTab(tabId, statePayload(state, state.active))
+    } catch { /* restricted, navigating, or closed page */ }
+    try {
+      await chrome.action.setBadgeText({ tabId, text: badge })
+      await chrome.action.setBadgeBackgroundColor({ tabId, color: state.paused ? '#f59e0b' : state.capturing ? '#7c3aed' : '#e53945' })
+      await chrome.action.setTitle({ tabId, title: state.active ? `${state.steps} Steps Recorded · ${state.trackedTabIds.length} Tabs` : 'DocFlow Recorder' })
+    } catch { /* tab was closed */ }
+  }))
 }
 
-async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale) {
+async function attachTab(tabId: number, makeActive = false) {
+  const state = await restore()
+  if (!state?.active) return null
+  if (!state.trackedTabIds.includes(tabId)) state.trackedTabIds.push(tabId)
+  if (makeActive) state.activeTabId = tabId
+  await persist(state); await notify(state)
+  return state
+}
+
+async function deleteAutomaticDemo(state: Pick<Recording, 'api' | 'token' | 'demoId' | 'autoCreated' | 'steps'>) {
+  if (!state.autoCreated || state.steps > 0) return
+  try {
+    await fetch(`${state.api}/api/demos/${state.demoId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${state.token}` },
+    })
+  } catch { /* best-effort cleanup; the server recycle bin remains the fallback */ }
+}
+
+async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false) {
   const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
-  if (!auth || !tab.id || !tab.url?.startsWith('http')) throw new Error('请打开可录制的网页并确认扩展已连接')
+  if (!auth || !tab.id || !isRecordableUrl(tab.url)) throw new Error('请打开可录制的业务页面并确认扩展已连接')
   recording = {
-    tabId: tab.id, demoId, api: auth.api, token: auth.token,
+    rootTabId: tab.id, activeTabId: tab.id, trackedTabIds: [tab.id], demoId, api: auth.api, token: auth.token,
     screenshot: await capture(tab.id), active: true, paused: false,
     capturing: false, phase: '', steps: 0, mode, aiEnabled, locale, contentLocale,
+    autoCreated,
   }
   await persist(recording)
   await notify(recording)
@@ -72,12 +102,25 @@ async function restore(): Promise<Recording | null> {
   const saved = await savedRecording()
   if (!saved) return null
   try {
+    const legacy = saved as SavedRecording & { tabId?: number; trackedTabIds?: number[]; activeTabId?: number; rootTabId?: number }
+    const rootTabId = legacy.rootTabId || legacy.tabId
+    if (!rootTabId) throw new Error('recording tab is missing')
+    const trackedTabIds = [...new Set(legacy.trackedTabIds?.length ? legacy.trackedTabIds : [rootTabId])]
+    const existingTabs = (await Promise.all(trackedTabIds.map(id => chrome.tabs.get(id).catch(() => null)))).filter(Boolean)
+    const existingIds = existingTabs.map(tab => tab!.id!)
+    if (!existingIds.length) {
+      await deleteAutomaticDemo({ ...saved, autoCreated: Boolean(saved.autoCreated), steps: Number(saved.steps || 0) })
+      await chrome.storage.session.remove('recording')
+      return null
+    }
+    const activeTabId = existingIds.includes(legacy.activeTabId || 0) ? legacy.activeTabId! : existingIds[0] || rootTabId
     recording = {
-      ...saved, screenshot: await captureClean(saved.tabId),
+      ...saved, rootTabId, activeTabId, trackedTabIds: existingIds, screenshot: 'data:image/png;base64,',
       paused: Boolean(saved.paused), capturing: false,
       phase: '',
       steps: Number(saved.steps || 0), mode: saved.mode || 'html',
       aiEnabled: Boolean(saved.aiEnabled), locale: saved.locale || browserLocale(), contentLocale: saved.contentLocale || saved.locale || browserLocale(),
+      autoCreated: Boolean(saved.autoCreated),
     }
     return recording
   } catch { await chrome.storage.session.remove('recording'); return null }
@@ -199,7 +242,7 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
   const upload = await fetch(`${state.api}/api/recordings/${state.demoId}/slides`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` }, body: form })
   if (!upload.ok) {
     const error = await upload.json().catch(() => ({ detail: '上传失败' }))
-    await chrome.action.setBadgeText({ tabId: state.tabId, text: '!' })
+    await chrome.action.setBadgeText({ tabId: state.activeTabId, text: '!' })
     throw new Error(error.detail)
   }
   return upload.json() as Promise<{ id: string }>
@@ -211,12 +254,15 @@ async function recordStep(data: Record<string, any>, snapshot: Record<string, an
   await uploadStep(data, enriched, screenshotOverride, state)
 }
 
-async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording) {
+async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording, sourceTabId: number) {
+  const sourceTab = await chrome.tabs.get(sourceTabId)
+  if (!sourceTab.active || !state.trackedTabIds.includes(sourceTabId)) return { ignored: true, steps: state.steps }
+  state.activeTabId = sourceTabId
   state.capturing = true; state.phase = 'uploading'
   await persist(state); await notify(state)
   let captured: { screenshot: string; snapshot?: Record<string, any> }
   try {
-    captured = await captureSynchronized(state.tabId, state.mode === 'html')
+    captured = await captureSynchronized(sourceTabId, state.mode === 'html')
   } catch (error) {
     state.capturing = false; state.phase = ''
     await persist(state); await notify(state)
@@ -233,8 +279,8 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
   queue = task.catch(async error => {
     console.warn('DocFlow step upload:', error)
     try {
-      await chrome.action.setBadgeText({ tabId: state.tabId, text: '!' })
-      await chrome.action.setBadgeBackgroundColor({ tabId: state.tabId, color: '#dc2626' })
+      await chrome.action.setBadgeText({ tabId: sourceTabId, text: '!' })
+      await chrome.action.setBadgeBackgroundColor({ tabId: sourceTabId, color: '#dc2626' })
     } catch { /* the tab may already be closed */ }
   })
   return { accepted: true, steps: state.steps }
@@ -258,8 +304,11 @@ async function stop(open = true) {
   state.paused = false; state.capturing = true; state.phase = 'uploading'
   await notify(state)
   try {
-    const final = await chrome.tabs.sendMessage(state.tabId, { type: 'CAPTURE_FINAL' })
-    if (final?.data) await uploadStep(final.data, state.mode === 'html' ? final.snapshot : undefined, await captureClean(state.tabId), state)
+    const finalTab = await chrome.tabs.get(state.activeTabId)
+    if (finalTab.active) {
+      const final = await chrome.tabs.sendMessage(state.activeTabId, { type: 'CAPTURE_FINAL' })
+      if (final?.data) await uploadStep(final.data, state.mode === 'html' ? final.snapshot : undefined, await captureClean(state.activeTabId), state)
+    }
   } catch (error) { console.warn('DocFlow final slide:', error) }
   if (state.aiEnabled) {
     try {
@@ -278,33 +327,216 @@ async function stop(open = true) {
   }
 }
 
+function requireWebSender(sender: chrome.runtime.MessageSender) {
+  if (!isConfiguredWebPage(sender.url)) throw new Error('Untrusted DocFlow connection request')
+}
+
+async function connectFromWeb(code: string, sender: chrome.runtime.MessageSender) {
+  requireWebSender(sender)
+  const response = await fetch(`${configuredApiUrl}/api/extension/pair/exchange`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+  })
+  if (!response.ok) throw new Error('The pairing request is invalid or expired')
+  const result = await response.json()
+  const credentials: Credentials = { api: configuredApiUrl, web: configuredWebUrl, token: result.token }
+  await chrome.storage.local.set({ credentials })
+  await chrome.storage.local.remove('pendingTarget')
+  return { connected: true }
+}
+
+function automaticTitle(tab: chrome.tabs.Tab, locale: Locale) {
+  let host = ''
+  try { host = new URL(tab.url || '').hostname.replace(/^www\./, '') } catch { /* title is enough */ }
+  const pageTitle = String(tab.title || '').replace(/\s+/g, ' ').trim()
+  const base = pageTitle || host || (locale === 'zh-CN' ? '新演示' : 'New demo')
+  const date = new Intl.DateTimeFormat(locale === 'zh-CN' ? 'zh-CN' : 'en-US', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date())
+  return `${base} · ${date}`.slice(0, 200)
+}
+
+async function createAutomaticDemo(auth: Credentials, tab: chrome.tabs.Tab, contentLocale: Locale) {
+  const response = await fetch(`${auth.api}/api/demos`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: automaticTitle(tab, contentLocale), content_locale: contentLocale, auto_title: true }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Could not create a recording draft' }))
+    throw new Error(error.detail || 'Could not create a recording draft')
+  }
+  return response.json() as Promise<{ id: string }>
+}
+
+async function validateRecordingTarget(auth: Credentials, demoId: string) {
+  const response = await fetch(`${auth.api}/api/demos/${demoId}`, {
+    headers: { Authorization: `Bearer ${auth.token}` },
+  })
+  if (!response.ok) throw new Error(response.status === 401 ? 'Extension connection expired' : 'Recording target is unavailable')
+}
+
+async function switchRecordingOrganization(auth: Credentials, organizationId: string) {
+  if (!organizationId) return
+  const response = await fetch(`${auth.api}/api/organizations/${organizationId}/switch`, {
+    method: 'POST', headers: { Authorization: `Bearer ${auth.token}` },
+  })
+  if (!response.ok) throw new Error('The selected space is unavailable or you do not have recording permission')
+  await chrome.storage.local.set({ activeOrganizationId: organizationId })
+}
+
+async function sendToRecordableTab(tabId: number, message: Record<string, unknown>) {
+  try { return await chrome.tabs.sendMessage(tabId, message) }
+  catch {
+    // Tabs that were already open when the extension was installed/reloaded do
+    // not have the manifest content script yet. Inject it once and retry so the
+    // user does not have to discover that a manual page refresh is required.
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] })
+    return chrome.tabs.sendMessage(tabId, message)
+  }
+}
+
+const RECOMMENDED_RECORDING_SIZE = { width: 1056, height: 660 }
+
+async function recordingDiagnostics(tab: chrome.tabs.Tab) {
+  if (tab.windowId === undefined) throw new Error('Recording window is unavailable')
+  const [windowInfo, windowTabs] = await Promise.all([
+    chrome.windows.get(tab.windowId), chrome.tabs.query({ windowId: tab.windowId }),
+  ])
+  return {
+    width: Number(windowInfo.width || 0), height: Number(windowInfo.height || 0),
+    tabCount: windowTabs.length,
+    closableTabCount: windowTabs.filter(item => item.id !== tab.id && !item.pinned).length,
+    recommendedWidth: RECOMMENDED_RECORDING_SIZE.width,
+    recommendedHeight: RECOMMENDED_RECORDING_SIZE.height,
+  }
+}
+
+async function resizeRecordingWindow(sender: chrome.runtime.MessageSender) {
+  const windowId = sender.tab?.windowId
+  if (windowId === undefined) throw new Error('Recording window is unavailable')
+  let current = await chrome.windows.get(windowId)
+  if (current.state !== 'normal') {
+    await chrome.windows.update(windowId, { state: 'normal' })
+    current = await chrome.windows.get(windowId)
+  }
+  const width = RECOMMENDED_RECORDING_SIZE.width, height = RECOMMENDED_RECORDING_SIZE.height
+  const left = Math.max(0, Math.round((current.left || 0) + ((current.width || width) - width) / 2))
+  const top = Math.max(0, Math.round((current.top || 0) + ((current.height || height) - height) / 2))
+  const updated = await chrome.windows.update(windowId, { width, height, left, top })
+  return { width: Number(updated.width || width), height: Number(updated.height || height) }
+}
+
+async function closeOtherRecordingTabs(sender: chrome.runtime.MessageSender) {
+  const sourceTab = sender.tab
+  if (!sourceTab?.id || sourceTab.windowId === undefined) throw new Error('Recording tab is unavailable')
+  const windowTabs = await chrome.tabs.query({ windowId: sourceTab.windowId })
+  const removable = windowTabs.filter(tab => tab.id !== sourceTab.id && !tab.pinned).flatMap(tab => tab.id === undefined ? [] : [tab.id])
+  if (removable.length) await chrome.tabs.remove(removable)
+  const remaining = await chrome.tabs.query({ windowId: sourceTab.windowId })
+  return {
+    tabCount: remaining.length,
+    closableTabCount: remaining.filter(tab => tab.id !== sourceTab.id && !tab.pinned).length,
+  }
+}
+
+async function selectTargetFromWeb(demoId: string, sender: chrome.runtime.MessageSender) {
+  requireWebSender(sender)
+  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  if (!auth) throw new Error('Extension is not connected')
+  const response = await fetch(`${auth.api}/api/demos/${demoId}`, { headers: { Authorization: `Bearer ${auth.token}` } })
+  if (!response.ok) throw new Error(response.status === 401 ? 'Extension connection expired' : 'Recording target is unavailable')
+  const demo = await response.json()
+  const target: RecordingTarget = {
+    demoId: demo.id, organizationId: demo.organization_id, title: demo.title,
+    contentLocale: demo.content_locale || browserLocale(), aiEnabled: Boolean(demo.ai_enabled),
+  }
+  const switched = await fetch(`${auth.api}/api/organizations/${target.organizationId}/switch`, {
+    method: 'POST', headers: { Authorization: `Bearer ${auth.token}` },
+  })
+  if (!switched.ok) throw new Error('Could not activate the target team space')
+  await chrome.storage.local.set({ pendingTarget: target, activeOrganizationId: target.organizationId })
+  return { selected: true, title: target.title }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   ;(async () => {
+    if (message.type === 'CONNECT_FROM_WEB') return connectFromWeb(String(message.code || ''), sender)
+    if (message.type === 'PING_FROM_WEB') {
+      requireWebSender(sender)
+      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      if (!auth?.token) return { installed: true, connected: false }
+      const response = await fetch(`${auth.api}/api/extension/config`, { headers: { Authorization: `Bearer ${auth.token}` } }).catch(() => null)
+      if (response?.ok) return { installed: true, connected: true }
+      if (response?.status === 401) await chrome.storage.local.remove(['credentials', 'pendingTarget'])
+      return { installed: true, connected: false }
+    }
+    if (message.type === 'SET_TARGET_FROM_WEB') return selectTargetFromWeb(String(message.demoId || ''), sender)
+    if (message.type === 'RESIZE_RECORDING_WINDOW') return resizeRecordingWindow(sender)
+    if (message.type === 'CLOSE_OTHER_RECORDING_TABS') return closeOtherRecordingTabs(sender)
     if (message.type === 'OPEN_SETUP') {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id || !tab.url?.startsWith('http')) throw new Error('Please open a recordable web page first.')
-      await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_RECORDING_SETUP', demoId: message.demoId, aiAvailable: Boolean(message.aiAvailable), locale: message.locale || browserLocale(), contentLocale: message.contentLocale || message.locale || browserLocale() })
+      const tab = message.tabId ? await chrome.tabs.get(Number(message.tabId)) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
+      if (!tab?.id || !isRecordableUrl(tab.url)) throw new Error('Please switch to the business page you want to record first.')
+      const diagnostics = await recordingDiagnostics(tab)
+      await sendToRecordableTab(tab.id, {
+        type: 'SHOW_RECORDING_SETUP', demoId: message.demoId || undefined,
+        aiAvailable: Boolean(message.aiAvailable), defaultMode: message.defaultMode || 'html',
+        defaultAI: Boolean(message.defaultAI), spaces: Array.isArray(message.spaces) ? message.spaces : [],
+        organizationId: message.organizationId || '', lockOrganization: Boolean(message.lockOrganization),
+        diagnostics,
+        locale: message.locale || browserLocale(),
+        contentLocale: message.contentLocale || message.locale || browserLocale(),
+      })
       return { ok: true }
     }
-    if (message.type === 'START') { await begin(message.demoId, message.mode, Boolean(message.aiEnabled), sender.tab?.id, message.locale || browserLocale(), message.contentLocale || message.locale || browserLocale()); return { ok: true } }
+    if (message.type === 'START') {
+      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      const tab = sender.tab
+      if (!auth || !tab?.id || !isRecordableUrl(tab.url)) throw new Error('Please open a recordable business page first.')
+      const contentLocale = (message.contentLocale || message.locale || browserLocale()) as Locale
+      await switchRecordingOrganization(auth, String(message.organizationId || ''))
+      let demoId = String(message.demoId || '')
+      let autoCreated = false
+      if (!demoId) {
+        demoId = (await createAutomaticDemo(auth, tab, contentLocale)).id
+        autoCreated = true
+      } else await validateRecordingTarget(auth, demoId)
+      try {
+        await begin(demoId, message.mode, Boolean(message.aiEnabled), tab.id, message.locale || browserLocale(), contentLocale, autoCreated)
+      } catch (error) {
+        if (autoCreated) await deleteAutomaticDemo({ api: auth.api, token: auth.token, demoId, autoCreated, steps: 0 })
+        throw error
+      }
+      await chrome.storage.local.remove('pendingTarget')
+      return { ok: true, demoId, autoCreated }
+    }
+    if (message.type === 'ATTACH_CURRENT_TAB') {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id || !isRecordableUrl(tab.url)) throw new Error('Please open a recordable business page first.')
+      const state = await attachTab(tab.id, true)
+      return state ? { active: true, trackedTabs: state.trackedTabIds.length } : { active: false }
+    }
     if (message.type === 'PAUSE') { const state = await pause(); return state ? { active: true, paused: state.paused, steps: state.steps, mode: state.mode } : { active: false } }
     if (message.type === 'STOP') { await stop(message.open !== false); return { ok: true } }
-    if (message.type === 'STATUS') { const state = await restore(); return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale } : { active: false, steps: 0 } }
+    if (message.type === 'STATUS') {
+      const state = await restore()
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale, trackedTabs: state.trackedTabIds.length, currentTabTracked: Boolean(tab?.id && state.trackedTabIds.includes(tab.id)) } : { active: false, steps: 0, trackedTabs: 0, currentTabTracked: false }
+    }
     if (message.type === 'IS_RECORDING') {
       const state = await restore()
-      return state?.active && state.tabId === sender.tab?.id
-        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale }
+      return state?.active && Boolean(sender.tab?.id && state.trackedTabIds.includes(sender.tab.id))
+        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale, trackedTabs: state.trackedTabIds.length }
         : { active: false }
     }
     if (message.type === 'MANUAL_STEP' && sender.tab?.id) {
       const state = await restore()
-      if (!state || state.tabId !== sender.tab.id || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
-      return captureAndQueueStep(message.data, message.snapshot, state)
+      if (!state || !state.trackedTabIds.includes(sender.tab.id) || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
+      return captureAndQueueStep(message.data, message.snapshot, state, sender.tab.id)
     }
     if (message.type === 'STEP_EVENT' && sender.tab?.id) {
       const state = await restore()
-      if (!state || state.tabId !== sender.tab.id || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
-      return captureAndQueueStep(message.data, message.snapshot, state)
+      if (!state || !state.trackedTabIds.includes(sender.tab.id) || !state.active || state.paused || state.capturing) return { ignored: true, steps: state?.steps || 0 }
+      return captureAndQueueStep(message.data, message.snapshot, state, sender.tab.id)
     }
     return undefined
   })().then(sendResponse).catch(error => sendResponse({ error: error.message }))
@@ -313,10 +545,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.tabs.onUpdated.addListener(async (tabId, change) => {
   const state = await restore()
-  if (state?.active && state.tabId === tabId && change.status === 'complete') {
+  if (state?.active && state.trackedTabIds.includes(tabId) && change.status === 'complete') {
     await new Promise(resolve => setTimeout(resolve, 650))
-    try { state.screenshot = await captureClean(tabId); await notify(state) } catch { /* restricted page */ }
+    try {
+      const tab = await chrome.tabs.get(tabId)
+      if (tab.active) { state.activeTabId = tabId; state.screenshot = await captureClean(tabId) }
+      await persist(state); await notify(state)
+    } catch { /* restricted page */ }
   }
 })
 
-chrome.tabs.onRemoved.addListener(tabId => { if (recording?.tabId === tabId) stop(false) })
+chrome.tabs.onCreated.addListener(async tab => {
+  if (!tab.id || !tab.openerTabId) return
+  const state = await restore()
+  if (state?.active && state.trackedTabIds.includes(tab.openerTabId)) await attachTab(tab.id, Boolean(tab.active))
+})
+
+chrome.webNavigation.onCreatedNavigationTarget.addListener(async details => {
+  const state = await restore()
+  if (state?.active && state.trackedTabIds.includes(details.sourceTabId)) await attachTab(details.tabId, true)
+})
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  const state = await restore()
+  if (!state?.active) return
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab || !isRecordableUrl(tab.url)) return
+  if (!state.trackedTabIds.includes(tabId)) {
+    await attachTab(tabId, true)
+    return
+  }
+  state.activeTabId = tabId
+  await persist(state); await notify(state)
+})
+
+chrome.tabs.onRemoved.addListener(async tabId => {
+  const state = await restore()
+  if (!state?.trackedTabIds.includes(tabId)) return
+  state.trackedTabIds = state.trackedTabIds.filter(id => id !== tabId)
+  try { await chrome.action.setBadgeText({ tabId, text: '' }) } catch { /* already closed */ }
+  if (!state.trackedTabIds.length) {
+    await deleteAutomaticDemo(state)
+    recording = null
+    await chrome.storage.session.remove('recording')
+    return
+  }
+  if (state.activeTabId === tabId) state.activeTabId = state.trackedTabIds[state.trackedTabIds.length - 1]
+  await persist(state); await notify(state)
+})

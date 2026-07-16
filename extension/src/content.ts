@@ -1,6 +1,7 @@
 import { captureDom, captureWarnings, normalized, pageContext, passwordRects, targetInfo } from './snapshot'
 import { browserLocale, tr } from './locale'
 import type { CapturedSnapshot, Locale, RecordingMode } from './types'
+import { isConfiguredWebPage } from './config'
 
 type RecorderState = {
   active?: boolean
@@ -27,6 +28,7 @@ let currentSnapshot: CapturedSnapshot | null = null
 let refreshTimer: number | undefined
 let hudHost: HTMLDivElement | null = null
 let setupHost: HTMLDivElement | null = null
+let setupCleanup: (() => void) | null = null
 let highlight: HTMLDivElement | null = null
 let statusText: HTMLSpanElement | null = null
 let modeText: HTMLSpanElement | null = null
@@ -38,7 +40,13 @@ let blockedClickTarget: HTMLElement | null = null
 let replayingClick = false
 let lockTimer: number | undefined
 
-const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'pause' | 'play' | 'camera' | 'steps' | 'drag') => {
+function eventId() {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+}
+
+const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'pause' | 'play' | 'camera' | 'steps' | 'drag' | 'team' | 'user' | 'warning' | 'resize' | 'tabs') => {
   const paths = {
     clone: '<rect x="4" y="4" width="13" height="13" rx="2"/><path d="M8 17v3h12V8h-3"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',
@@ -51,8 +59,17 @@ const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'pa
     camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4V8Z"/><circle cx="12" cy="13" r="3"/>',
     steps: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
     drag: '<path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/>',
+    team: '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6M15 14c3 0 5 2 5 5"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
+    warning: '<path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17h.01"/>',
+    resize: '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/><path d="m3 8 6-6M21 8l-6-6M3 16l6 6M21 16l-6 6"/>',
+    tabs: '<rect x="3" y="5" width="14" height="14" rx="2"/><path d="M7 5V3h14v14h-4"/>',
   }
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]}</svg>`
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 }
 
 function selectableTarget(raw: Element | null): HTMLElement | null {
@@ -62,60 +79,144 @@ function selectableTarget(raw: Element | null): HTMLElement | null {
   return !target || target === document.documentElement || target === document.body ? null : target
 }
 
-function showRecordingSetup(message: { demoId: string; aiAvailable?: boolean; locale?: Locale; contentLocale?: Locale }) {
+function showRecordingSetup(message: {
+  demoId?: string
+  aiAvailable?: boolean
+  defaultMode?: RecordingMode
+  defaultAI?: boolean
+  spaces?: { id: string; name: string; kind: 'personal' | 'team' }[]
+  organizationId?: string
+  lockOrganization?: boolean
+  diagnostics?: {
+    width: number
+    height: number
+    tabCount: number
+    closableTabCount: number
+    recommendedWidth: number
+    recommendedHeight: number
+  }
+  locale?: Locale
+  contentLocale?: Locale
+}) {
   if (window.top !== window || active) return
-  setupHost?.remove()
+  setupCleanup?.()
   locale = message.locale || browserLocale()
   contentLocale = message.contentLocale || locale
   const host = document.createElement('div')
   host.className = 'docflow-recorder-ui'
   const shadow = host.attachShadow({ mode: 'closed' })
   setupHost = host
-  let selectedMode: RecordingMode = 'html'
-  let selectedAI = Boolean(message.aiAvailable)
+  let selectedMode: RecordingMode = message.defaultMode || 'html'
+  let selectedAI = Boolean(message.aiAvailable && message.defaultAI)
   let tutorialIndex = 0
+  let setupView: 'config' | 'tutorial' = 'config'
+  const availableSpaces = [...(message.spaces || [])].sort((left, right) => Number(left.kind === 'personal') - Number(right.kind === 'personal'))
+  let selectedOrganizationId = availableSpaces.some(space => space.id === message.organizationId) ? message.organizationId! : availableSpaces[0]?.id || ''
+  let diagnostics = message.diagnostics
+  let resizeTimer: number | undefined
+  let onWindowResize = () => {}
+  const closeSetup = () => {
+    window.clearTimeout(resizeTimer)
+    window.removeEventListener('resize', onWindowResize)
+    host.remove()
+    if (setupHost === host) setupHost = null
+    if (setupCleanup === closeSetup) setupCleanup = null
+  }
+  setupCleanup = closeSetup
   shadow.innerHTML = `<style>
     :host{all:initial;position:fixed;inset:0;z-index:2147483647;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#182033}
     *{box-sizing:border-box}.backdrop{position:fixed;inset:0;display:grid;place-items:center;padding:24px;background:#0b1020a8;backdrop-filter:blur(5px)}
-    .modal{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;border:1px solid #ffffff30;border-radius:20px;background:#fff;box-shadow:0 30px 90px #0007}
-    .head{padding:24px 26px 16px}.brand{display:flex;align-items:center;gap:8px;margin-bottom:15px;color:#635bff;font-size:12px;font-weight:800;letter-spacing:.05em}.brand i{width:9px;height:9px;border-radius:50%;background:#635bff;box-shadow:0 0 0 5px #635bff1c}
-    h2{margin:0 0 7px;font-size:22px;line-height:1.25}p{margin:0;color:#6b768a;font-size:13px;line-height:1.55}.body{display:grid;gap:12px;padding:4px 26px 22px}
-    .modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mode{position:relative;display:grid;grid-template-columns:38px 1fr;gap:11px;padding:15px;border:1px solid #dfe3eb;border-radius:13px;background:#fff;text-align:left;cursor:pointer}.mode.active{border-color:#635bff;box-shadow:0 0 0 3px #635bff1a;background:#faf9ff}.mode svg,.step-icon svg,.ai-icon svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mode>span:first-child{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;color:#554ae8;background:#eeedff}.mode strong{display:block;margin-bottom:4px;font-size:13px}.mode small{display:block;color:#748095;font-size:11px;line-height:1.4}.badge{position:absolute;right:10px;top:9px;padding:3px 6px;border-radius:10px;color:#4f46e5;background:#ecebff;font-size:8px;font-style:normal}
-    .ai-row{display:grid;grid-template-columns:36px 1fr auto;align-items:center;gap:11px;padding:13px 14px;border:1px solid #e3e6ed;border-radius:12px;background:#f8f9fc}.ai-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;color:#7357df;background:#eee9ff}.ai-row strong{display:block;margin-bottom:2px;font-size:12px}.ai-row small{display:block;color:#7c8799;font-size:10px;line-height:1.35}.switch{position:relative;width:42px;height:24px}.switch input{position:absolute;opacity:0}.switch span{position:absolute;inset:0;border-radius:20px;background:#cbd2dd;transition:.2s}.switch span:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0003;transition:.2s}.switch input:checked+span{background:#635bff}.switch input:checked+span:after{transform:translateX(18px)}.switch input:disabled+span{opacity:.45}
-    .actions{display:flex;justify-content:flex-end;gap:9px;padding:15px 26px 22px;border-top:1px solid #edf0f4}.btn{min-width:100px;padding:10px 15px;border:1px solid #d8dde7;border-radius:10px;background:#fff;color:#38445a;font:600 12px inherit;cursor:pointer}.btn.primary{border-color:#635bff;background:#635bff;color:#fff}.btn:hover{filter:brightness(.98)}
+    .modal{width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;border:1px solid #ffffff30;border-radius:22px;background:#fff;box-shadow:0 30px 90px #0007}
+    .head{padding:26px 32px 18px}.brand{display:flex;align-items:center;gap:8px;margin-bottom:15px;color:#635bff;font-size:12px;font-weight:800;letter-spacing:.05em}.brand i{width:9px;height:9px;border-radius:50%;background:#635bff;box-shadow:0 0 0 5px #635bff1c}
+    h2{margin:0 0 7px;font-size:23px;line-height:1.25}p{margin:0;color:#6b768a;font-size:13px;line-height:1.55}.body{display:grid;gap:17px;padding:4px 32px 25px}
+    .diagnostics{width:calc(100% - 82px);display:grid;gap:8px;margin:-1px auto 22px}.diagnostic{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px 12px;border:1px solid #f0d58a;border-radius:0 0 12px 12px;background:linear-gradient(180deg,#fffdf7,#fff8e9);box-shadow:0 7px 18px #8e650e12}.diagnostic+ .diagnostic{border-radius:12px}.diagnostic>span{width:36px;height:36px;display:grid;place-items:center;border-radius:9px;color:#b7791f;background:#fff0c7}.diagnostic>span svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.diagnostic div{min-width:0}.diagnostic strong{display:block;margin-bottom:2px;color:#7a5315;font-size:12px}.diagnostic p{color:#906d34;font-size:10px;line-height:1.4}.diagnostic button{min-width:92px;padding:8px 10px;border:1px solid #e7c56b;border-radius:8px;color:#855d17;background:#fff;font:700 10px inherit;cursor:pointer;white-space:nowrap}.diagnostic button:hover{background:#fff5d9}.diagnostic button:disabled{opacity:.55;cursor:progress}
+    .modes{display:grid;grid-template-columns:1fr 1fr;gap:16px}.mode{position:relative;min-height:196px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px 22px;border:1px solid #dfe3eb;border-radius:17px;background:#fff;text-align:center;cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .2s,background .2s}.mode:hover{border-color:#c9c5ff;transform:translateY(-1px)}.mode.active{border-color:#7468f4;box-shadow:0 12px 30px #635bff22,0 0 0 3px #635bff16;background:linear-gradient(145deg,#fff 0%,#f8f6ff 46%,#ece9ff 100%)}.mode svg,.step-icon svg,.ai-icon svg,.space-icon svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mode>span:first-child{width:62px;height:62px;display:grid;place-items:center;border-radius:18px;color:#554ae8;background:linear-gradient(145deg,#eeedff,#dfdcff);box-shadow:0 8px 20px #635bff20}.mode>span:first-child svg{width:31px;height:31px}.mode>span:nth-child(2){display:block}.mode strong{display:block;margin-bottom:6px;font-size:15px;text-align:center}.mode small{display:block;max-width:260px;color:#748095;font-size:12px;line-height:1.5;text-align:center}.badge{position:absolute;right:13px;top:12px;padding:4px 8px;border-radius:10px;color:#4f46e5;background:#e8e6ff;font-size:9px;font-style:normal;font-weight:750}
+    .config-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:16px;padding-top:2px}.space-field{min-width:0;margin:0;padding:0 10px 9px;border:1px solid #d9dee8;border-radius:11px}.space-field legend{margin-left:auto;padding:0 7px;color:#69758a;background:#fff;font-size:11px;font-weight:750}.space-dropdown{position:relative}.space-trigger{width:100%;height:42px;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:9px;padding:4px 1px;border:0;color:#344054;background:#fff;font:600 12px inherit;text-align:left;cursor:pointer}.space-trigger:disabled{cursor:not-allowed;opacity:.7}.space-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#5c52df;background:#eeedff}.space-icon svg{width:17px;height:17px}.space-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chevron{color:#8a94a6;font-size:11px}.space-menu{position:absolute;z-index:4;left:-10px;right:-10px;bottom:calc(100% + 10px);max-height:210px;overflow:auto;padding:6px;border:1px solid #dfe3eb;border-radius:11px;background:#fff;box-shadow:0 14px 35px #1820332e}.space-menu[hidden]{display:none}.space-option{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px;padding:7px;border:0;border-radius:8px;color:#344054;background:transparent;text-align:left;cursor:pointer}.space-option:hover,.space-option.active{background:#f3f1ff}.space-option.group-start{margin-top:5px;padding-top:10px;border-top:1px solid #edf0f4;border-radius:0 0 8px 8px}.space-option div{min-width:0}.space-option strong,.space-option small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.space-option strong{font-size:11px}.space-option small{margin-top:2px;color:#8a94a6;font-size:9px}
+    .ai-compact{height:44px;display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #e3e6ed;border-radius:10px;background:#f8f9fc}.ai-compact>span{display:flex;align-items:center;gap:7px;color:#465267;font-size:11px;font-weight:700;white-space:nowrap}.ai-icon{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;color:#7357df;background:#eee9ff}.ai-icon svg{width:16px;height:16px}.switch{position:relative;width:42px;height:24px}.switch input{position:absolute;opacity:0}.switch span{position:absolute;inset:0;border-radius:20px;background:#cbd2dd;transition:.2s}.switch span:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0003;transition:.2s}.switch input:checked+span{background:#635bff}.switch input:checked+span:after{transform:translateX(18px)}.switch input:disabled+span{opacity:.45}
+    .actions{display:flex;justify-content:flex-end;gap:9px;padding:16px 32px 22px;border-top:1px solid #edf0f4}.btn{min-width:106px;padding:11px 16px;border:1px solid #d8dde7;border-radius:10px;background:#fff;color:#38445a;font:600 12px inherit;cursor:pointer}.btn.primary{border-color:#635bff;background:#635bff;color:#fff}.btn:hover{filter:brightness(.98)}
     .tutorial{padding:6px 26px 24px}.progress{display:flex;gap:6px;margin:0 0 19px}.progress i{height:4px;flex:1;border-radius:4px;background:#e5e7ec}.progress i.done{background:#635bff}.step-card{min-height:205px;display:grid;place-items:center;align-content:center;gap:14px;padding:28px;border:1px solid #e2e5ec;border-radius:16px;text-align:center;background:linear-gradient(145deg,#fafaff,#f5f6fa);animation:enter .25s ease}.step-icon{width:60px;height:60px;display:grid;place-items:center;border-radius:18px;color:#5b50e5;background:#eae8ff;box-shadow:0 8px 24px #635bff20}.step-icon svg{width:29px;height:29px}.step-card h3{margin:0;font-size:17px}.step-card p{max-width:450px}.step-number{color:#8a94a6;font-size:10px;font-weight:700;letter-spacing:.08em}@keyframes enter{from{opacity:.2;transform:translateY(5px)}}
-    @media(max-width:560px){.modes{grid-template-columns:1fr}.modal{border-radius:15px}.head,.body,.tutorial{padding-left:18px;padding-right:18px}.actions{padding-left:18px;padding-right:18px}}
+    @media(max-width:620px){.modes{grid-template-columns:1fr}.mode{min-height:178px}.config-row{grid-template-columns:1fr}.ai-compact{justify-content:space-between}.diagnostics{width:calc(100% - 36px)}.diagnostic{grid-template-columns:32px 1fr}.diagnostic button{grid-column:2;width:max-content}.modal{border-radius:15px}.head,.body,.tutorial{padding-left:18px;padding-right:18px}.actions{padding-left:18px;padding-right:18px}}
   </style><div class="backdrop"><section class="modal"><div id="view"></div></section></div>`
   const view = shadow.querySelector<HTMLDivElement>('#view')!
 
-  const renderConfig = () => {
-    view.innerHTML = `<div class="head"><div class="brand"><i></i>DOCFLOW RECORDER</div><h2>${tr(locale, 'setupTitle')}</h2><p>${tr(locale, 'setupDescription')}</p></div><div class="body"><div class="modes">
-      <button class="mode ${selectedMode === 'html' ? 'active' : ''}" data-mode="html"><span>${icon('clone')}</span><span><strong>${tr(locale, 'htmlTitle')}</strong><small>${tr(locale, 'htmlDescription')}</small></span><em class="badge">${tr(locale, 'htmlBadge')}</em></button>
-      <button class="mode ${selectedMode === 'screenshot' ? 'active' : ''}" data-mode="screenshot"><span>${icon('image')}</span><span><strong>${tr(locale, 'screenshotTitle')}</strong><small>${tr(locale, 'screenshotDescription')}</small></span></button></div>
-      <div class="ai-row"><span class="ai-icon">${icon('ai')}</span><span><strong>${tr(locale, 'aiTitle')}</strong><small>${message.aiAvailable ? tr(locale, 'aiDescription') : tr(locale, 'aiUnavailable')}</small></span><label class="switch"><input id="ai-toggle" type="checkbox" ${selectedAI ? 'checked' : ''} ${message.aiAvailable ? '' : 'disabled'}><span></span></label></div></div>
-      <div class="actions"><button class="btn" id="cancel">${tr(locale, 'cancel')}</button><button class="btn primary" id="continue">${tr(locale, 'startSetup')}</button></div>`
-    view.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => { selectedMode = button.dataset.mode as RecordingMode; renderConfig() }))
-    view.querySelector<HTMLInputElement>('#ai-toggle')?.addEventListener('change', event => { selectedAI = (event.currentTarget as HTMLInputElement).checked })
-    view.querySelector('#cancel')?.addEventListener('click', () => { host.remove(); setupHost = null })
-    view.querySelector('#continue')?.addEventListener('click', () => { tutorialIndex = 0; renderTutorial() })
+  const startRecording = async () => {
+    closeSetup()
+    const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, organizationId: selectedOrganizationId, mode: selectedMode, aiEnabled: selectedAI, locale, contentLocale })
+    if (result?.error) { window.alert(result.error); showRecordingSetup(message) }
   }
 
-  const tutorial = [
-    { icon: 'cursor' as const, title: tr(locale, 'hoverTitle'), description: tr(locale, 'hoverDescription') },
-    { icon: 'clock' as const, title: tr(locale, 'pauseTitle'), description: tr(locale, 'pauseDescription') },
-    { icon: 'stop' as const, title: tr(locale, 'stopTitle'), description: tr(locale, 'stopDescription') },
-  ]
+  const renderConfig = () => {
+    setupView = 'config'
+    const selectedSpace = availableSpaces.find(space => space.id === selectedOrganizationId)
+    const spaceOptions = availableSpaces.map((space, index) => `<button class="space-option ${space.id === selectedOrganizationId ? 'active' : ''} ${space.kind === 'personal' && index > 0 && availableSpaces[index - 1].kind !== 'personal' ? 'group-start' : ''}" data-space-id="${escapeHtml(space.id)}"><span class="space-icon">${icon(space.kind === 'team' ? 'team' : 'user')}</span><div><strong>${escapeHtml(space.name)}</strong><small>${tr(locale, space.kind === 'team' ? 'teamSpace' : 'personalSpace')}</small></div></button>`).join('')
+    const resizeWarning = Boolean(diagnostics?.width && diagnostics?.height && (Math.abs(diagnostics.width - diagnostics.recommendedWidth) > 48 || Math.abs(diagnostics.height - diagnostics.recommendedHeight) > 48))
+    const tabWarning = Boolean(diagnostics && diagnostics.tabCount >= 10)
+    const diagnosticCards = `${resizeWarning ? `<article class="diagnostic"><span>${icon('resize')}</span><div><strong>${tr(locale, 'resizeForOptimalRecording')}</strong><p>${tr(locale, 'resizeDescription', { width: diagnostics!.width, height: diagnostics!.height, recommendedWidth: diagnostics!.recommendedWidth, recommendedHeight: diagnostics!.recommendedHeight })}</p></div><button id="resize-window">${tr(locale, 'resize')}</button></article>` : ''}${tabWarning ? `<article class="diagnostic"><span>${icon('tabs')}</span><div><strong>${tr(locale, 'tabsOpen', { count: diagnostics!.tabCount })}</strong><p>${tr(locale, 'tabsDescription')}</p></div><button id="close-tabs" ${diagnostics!.closableTabCount ? '' : 'disabled'}>${tr(locale, 'closeOtherTabs')}</button></article>` : ''}`
+    view.innerHTML = `<div class="head"><div class="brand"><i></i>DOCFLOW RECORDER</div><h2>${tr(locale, 'setupTitle')}</h2><p>${tr(locale, 'setupDescription')}</p></div><div class="body"><div class="modes">
+      <button class="mode ${selectedMode === 'html' ? 'active' : ''}" data-mode="html"><span>${icon('clone')}</span><span><strong>${tr(locale, 'htmlTitle')}</strong><small>${tr(locale, 'htmlDescription')}</small></span><em class="badge">${tr(locale, 'htmlBadge')}</em></button>
+      <button class="mode ${selectedMode === 'screenshot' ? 'active' : ''}" data-mode="screenshot"><span>${icon('image')}</span><span><strong>${tr(locale, 'screenshotDemoTitle')}</strong><small>${tr(locale, 'screenshotDescription')}</small></span></button></div>
+      <div class="config-row"><fieldset class="space-field"><legend>${tr(locale, 'saveTo')}</legend><div class="space-dropdown"><button id="space-trigger" class="space-trigger" ${message.lockOrganization ? 'disabled' : ''}><span class="space-icon">${icon(selectedSpace?.kind === 'personal' ? 'user' : 'team')}</span><strong>${escapeHtml(selectedSpace?.name || tr(locale, 'noAvailableSpace'))}</strong><span class="chevron">⌄</span></button><div id="space-menu" class="space-menu" hidden>${spaceOptions}</div></div></fieldset>
+      <div class="ai-compact" title="${message.aiAvailable ? escapeHtml(tr(locale, 'aiDescription')) : escapeHtml(tr(locale, 'aiUnavailable'))}"><span><i class="ai-icon">${icon('ai')}</i>${tr(locale, 'enhanceWithAI')}</span><label class="switch"><input id="ai-toggle" type="checkbox" ${selectedAI ? 'checked' : ''} ${message.aiAvailable ? '' : 'disabled'}><span></span></label></div></div></div>
+      <div class="actions"><button class="btn" id="cancel">${tr(locale, 'cancel')}</button><button class="btn primary" id="continue">${tr(locale, 'startSetup')}</button></div>${diagnosticCards ? `<div class="diagnostics">${diagnosticCards}</div>` : ''}`
+    view.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => { selectedMode = button.dataset.mode as RecordingMode; renderConfig() }))
+    view.querySelector<HTMLButtonElement>('#resize-window')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement
+      button.disabled = true; button.textContent = tr(locale, 'resizing')
+      const result = await chrome.runtime.sendMessage({ type: 'RESIZE_RECORDING_WINDOW' })
+      if (result?.error) { window.alert(result.error); button.disabled = false; button.textContent = tr(locale, 'resize'); return }
+      if (diagnostics) diagnostics = { ...diagnostics, width: result.width, height: result.height }
+      renderConfig()
+    })
+    view.querySelector<HTMLButtonElement>('#close-tabs')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement
+      button.disabled = true; button.textContent = tr(locale, 'closingTabs')
+      const result = await chrome.runtime.sendMessage({ type: 'CLOSE_OTHER_RECORDING_TABS' })
+      if (result?.error) { window.alert(result.error); button.disabled = false; button.textContent = tr(locale, 'closeOtherTabs'); return }
+      if (diagnostics) diagnostics = { ...diagnostics, tabCount: result.tabCount, closableTabCount: result.closableTabCount }
+      renderConfig()
+    })
+    view.querySelector<HTMLInputElement>('#ai-toggle')?.addEventListener('change', event => { selectedAI = (event.currentTarget as HTMLInputElement).checked })
+    const spaceMenu = view.querySelector<HTMLElement>('#space-menu')
+    view.querySelector('#space-trigger')?.addEventListener('click', () => { if (spaceMenu) spaceMenu.hidden = !spaceMenu.hidden })
+    view.querySelectorAll<HTMLButtonElement>('[data-space-id]').forEach(button => button.addEventListener('click', () => { selectedOrganizationId = button.dataset.spaceId || selectedOrganizationId; renderConfig() }))
+    view.querySelector('#cancel')?.addEventListener('click', closeSetup)
+    view.querySelector('#continue')?.addEventListener('click', async () => {
+      const stored = await chrome.storage.local.get('recordingTutorialSeen')
+      const tutorialState = stored.recordingTutorialSeen as Partial<Record<RecordingMode, boolean>> | undefined
+      if (tutorialState?.[selectedMode]) { await startRecording(); return }
+      tutorialIndex = 0; renderTutorial()
+    })
+  }
+
   const renderTutorial = () => {
+    setupView = 'tutorial'
+    const isHTMLMode = selectedMode === 'html'
+    const tutorial = [
+      { icon: 'cursor' as const, title: tr(locale, 'hoverTitle'), description: tr(locale, 'hoverDescription') },
+      { icon: 'clock' as const, title: tr(locale, isHTMLMode ? 'pauseTitle' : 'screenshotPauseTitle'), description: tr(locale, isHTMLMode ? 'pauseDescription' : 'screenshotPauseDescription') },
+      { icon: 'stop' as const, title: tr(locale, 'stopTitle'), description: tr(locale, isHTMLMode ? 'stopDescription' : 'screenshotStopDescription') },
+    ]
     const step = tutorial[tutorialIndex]
     view.innerHTML = `<div class="head"><div class="brand"><i></i>DOCFLOW RECORDER</div><h2>${tr(locale, 'tutorialTitle')}</h2></div><div class="tutorial"><div class="progress">${tutorial.map((_, index) => `<i class="${index <= tutorialIndex ? 'done' : ''}"></i>`).join('')}</div><div class="step-card"><span class="step-number">${tutorialIndex + 1} / ${tutorial.length}</span><span class="step-icon">${icon(step.icon)}</span><h3>${step.title}</h3><p>${step.description}</p></div></div><div class="actions"><button class="btn" id="back">${tutorialIndex ? tr(locale, 'back') : tr(locale, 'cancel')}</button><button class="btn primary" id="next">${tutorialIndex === tutorial.length - 1 ? tr(locale, 'getStarted') : tr(locale, 'next')}</button></div>`
     view.querySelector('#back')?.addEventListener('click', () => { if (tutorialIndex) { tutorialIndex -= 1; renderTutorial() } else renderConfig() })
     view.querySelector('#next')?.addEventListener('click', async () => {
       if (tutorialIndex < tutorial.length - 1) { tutorialIndex += 1; renderTutorial(); return }
-      host.remove(); setupHost = null
-      const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, mode: selectedMode, aiEnabled: selectedAI, locale, contentLocale })
-      if (result?.error) { window.alert(result.error); showRecordingSetup(message) }
+      const stored = await chrome.storage.local.get('recordingTutorialSeen')
+      await chrome.storage.local.set({ recordingTutorialSeen: { ...(stored.recordingTutorialSeen || {}), [selectedMode]: true } })
+      await startRecording()
     })
   }
+  onWindowResize = () => {
+    if (!diagnostics || !host.isConnected) return
+    window.clearTimeout(resizeTimer)
+    resizeTimer = window.setTimeout(() => {
+      const width = Math.round(window.outerWidth), height = Math.round(window.outerHeight)
+      if (!diagnostics || (diagnostics.width === width && diagnostics.height === height)) return
+      diagnostics = { ...diagnostics, width, height }
+      if (setupView === 'config') renderConfig()
+    }, 180)
+  }
+  window.addEventListener('resize', onWindowResize)
   renderConfig()
   ;(document.documentElement || document.body).appendChild(host)
 }
@@ -170,7 +271,7 @@ function ensureHud() {
     if (!active || paused || capturing) return
     const snapshot = mode === 'html' ? (captureDom() || currentSnapshot) : undefined
     const data = {
-      event_id: crypto.randomUUID(), title: tr(contentLocale, 'manualTitle'), body: tr(contentLocale, 'manualBody'),
+      event_id: eventId(), title: tr(contentLocale, 'manualTitle'), body: tr(contentLocale, 'manualBody'),
       viewport_width: innerWidth, viewport_height: innerHeight, page_context: { ...pageContext(), manual_capture: true },
       scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(),
       capture_warnings: captureWarnings(), duration: 3, terminal: false,
@@ -296,7 +397,7 @@ async function onPointer(event: PointerEvent) {
     ? (isInput ? `在「${label}」中输入或选择内容` : `点击「${label}」`)
     : (isInput ? `Enter or select a value in “${label}”` : `Click “${label}”`)
   const data = {
-    event_id: crypto.randomUUID(), title: body, body, viewport_width: innerWidth, viewport_height: innerHeight,
+    event_id: eventId(), title: body, body, viewport_width: innerWidth, viewport_height: innerHeight,
     hotspot: normalized(target.getBoundingClientRect()), target: info, page_context: pageContext(target),
     scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: false,
   }
@@ -336,7 +437,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({
       snapshot: mode === 'html' ? currentSnapshot : undefined,
       data: {
-        event_id: crypto.randomUUID(), title: tr(contentLocale, 'flowComplete'), body: tr(contentLocale, 'flowCompleteBody'),
+        event_id: eventId(), title: tr(contentLocale, 'flowComplete'), body: tr(contentLocale, 'flowCompleteBody'),
         viewport_width: innerWidth, viewport_height: innerHeight, page_context: pageContext(), scroll_state: { x: scrollX, y: scrollY },
         password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: true,
       },
@@ -346,6 +447,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 })
 
 chrome.runtime.sendMessage({ type: 'IS_RECORDING' }).then(applyState).catch(() => {})
+if (window.top === window && isConfiguredWebPage(window.location.href)) {
+  window.addEventListener('message', event => {
+    if (event.source !== window || event.origin !== window.location.origin) return
+    const payload = event.data
+    if (!payload || payload.source !== 'docflow-web' || !payload.requestId) return
+    const type = payload.type === 'DOCFLOW_EXTENSION_CONNECT' ? 'CONNECT_FROM_WEB'
+      : payload.type === 'DOCFLOW_EXTENSION_SET_TARGET' ? 'SET_TARGET_FROM_WEB'
+        : payload.type === 'DOCFLOW_EXTENSION_PING' ? 'PING_FROM_WEB' : ''
+    if (!type) return
+    chrome.runtime.sendMessage({ type, code: payload.code, demoId: payload.demoId }).then(result => {
+      window.postMessage({ source: 'docflow-extension', requestId: payload.requestId, result }, window.location.origin)
+    }).catch(error => {
+      window.postMessage({ source: 'docflow-extension', requestId: payload.requestId, error: error.message }, window.location.origin)
+    })
+  })
+}
 window.addEventListener('click', suppressBlockedClick, true)
 document.addEventListener('pointermove', onPointerMove, true)
 document.addEventListener('pointerdown', onPointer, true)
