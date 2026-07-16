@@ -158,7 +158,7 @@ export default function Editor() {
   useEffect(() => {
     const active = jobs.some(job => job.status === 'queued' || job.status === 'running')
     if (!active) return
-    const timer = window.setInterval(async () => setJobs(await Promise.all(jobs.map(job => job.status === 'complete' || job.status === 'failed' ? job : api.export(job.id)))), 1500)
+    const timer = window.setInterval(async () => setJobs(await Promise.all(jobs.map(job => ['complete','failed','cancelled'].includes(job.status) ? job : api.export(job.id)))), 1500)
     return () => clearInterval(timer)
   }, [jobs])
   useEffect(() => {
@@ -169,7 +169,7 @@ export default function Editor() {
       if (next.status === 'complete') {
         const fresh = await api.demo(id); setDemo(fresh); setNotice(t('messages.aiComplete'))
       }
-      if (next.status === 'failed') setError(next.error_code ? t(`common:errors.codes.${next.error_code}`) : t('messages.aiFailed'))
+      if (next.status === 'failed' || next.status === 'cancelled') setError(next.error_code ? t(`common:errors.codes.${next.error_code}`) : t('messages.aiFailed'))
     }, 1800)
     return () => clearInterval(timer)
   }, [aiJob?.id, aiJob?.status, id])

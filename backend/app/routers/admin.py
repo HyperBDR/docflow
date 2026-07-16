@@ -1403,19 +1403,44 @@ def recycle_bin(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     items = []
     users = db.scalars(select(User).where(User.deleted_at.is_not(None)).order_by(User.deleted_at.desc())).all()
     for user in users:
+        stats = user_stats(db, user.id)
+        team_count = db.scalar(select(func.count(OrganizationMember.id)).join(
+            Organization, Organization.id == OrganizationMember.organization_id
+        ).where(OrganizationMember.user_id == user.id, Organization.kind == "team")) or 0
         items.append(RecycleItemOut(
             id=user.id, item_type="user", title=user.name or user.email, owner_email=user.email,
             deleted_at=user.deleted_at, expires_at=user.deleted_at + timedelta(days=30),
+            preview={
+                "email": user.email, "role": user.role, "is_active": user.is_active,
+                "ui_locale": user.ui_locale, "created_at": user.created_at.isoformat(),
+                "resource_count": stats.demos, "team_count": team_count,
+                "storage_bytes": stats.storage_bytes,
+            },
         ))
     rows = db.execute(select(Demo, User).join(User, User.id == Demo.owner_id).where(
         Demo.deleted_at.is_not(None)
     ).order_by(Demo.deleted_at.desc())).all()
+    resource_usage = resource_usage_map(db, [demo.id for demo, _owner in rows])
     for demo, owner in rows:
         deleted_by = db.get(User, demo.deleted_by_id) if demo.deleted_by_id else None
+        organization = db.get(Organization, demo.organization_id) if demo.organization_id else None
+        first_step = min(demo.steps, key=lambda value: value.position, default=None)
+        usage = resource_usage[demo.id]
         items.append(RecycleItemOut(
             id=demo.id, item_type="resource", title=demo.title, owner_email=owner.email,
             deleted_at=demo.deleted_at, deleted_by_name=(deleted_by.name or deleted_by.email) if deleted_by else "",
             expires_at=demo.deleted_at + timedelta(days=30),
+            thumbnail_url=(
+                f"{settings.public_base_url}/api/admin/recycle-bin/resources/{demo.id}/thumbnail"
+                if first_step else None
+            ),
+            preview={
+                "description": demo.description, "status": demo.status.value,
+                "content_locale": demo.content_locale, "step_count": usage["steps"],
+                "views": usage["views"], "storage_bytes": usage["storage"],
+                "organization_name": organization.name if organization else "",
+                "created_at": demo.created_at.isoformat(), "updated_at": demo.updated_at.isoformat(),
+            },
         ))
     organizations = db.scalars(select(Organization).where(
         Organization.kind == "team", Organization.status == "archived"
@@ -1427,12 +1452,44 @@ def recycle_bin(db: Session = Depends(get_db), _: User = Depends(admin_user)):
             OrganizationMember.organization_id == organization.id,
             OrganizationMember.role == "owner",
         ).order_by(OrganizationMember.created_at)).scalar()
+        archived_by = db.get(User, organization.archived_by_id) if organization.archived_by_id else None
+        member_count = db.scalar(select(func.count(OrganizationMember.id)).where(
+            OrganizationMember.organization_id == organization.id
+        )) or 0
+        resource_count = db.scalar(select(func.count(Demo.id)).where(
+            Demo.organization_id == organization.id, Demo.deleted_at.is_(None)
+        )) or 0
         items.append(RecycleItemOut(
             id=organization.id, item_type="team_space", title=organization.name,
             owner_email=owner.email if owner else "", deleted_at=organization.archived_at,
+            deleted_by_name=(archived_by.name or archived_by.email) if archived_by else "",
             expires_at=organization.scheduled_purge_at or organization.archived_at + timedelta(days=30),
+            preview={
+                "slug": organization.slug, "owner_name": owner.name if owner else "",
+                "member_count": member_count, "resource_count": resource_count,
+                "created_at": organization.created_at.isoformat(),
+            },
         ))
     return sorted(items, key=lambda item: item.deleted_at, reverse=True)
+
+
+@router.get("/recycle-bin/resources/{demo_id}/thumbnail")
+def recycle_resource_thumbnail(
+    demo_id: str, db: Session = Depends(get_db), _: User = Depends(admin_user),
+):
+    demo = db.scalar(select(Demo).where(Demo.id == demo_id, Demo.deleted_at.is_not(None)))
+    if not demo:
+        raise HTTPException(status_code=404, detail="recycled resource not found")
+    step = db.scalar(select(Step).where(Step.demo_id == demo.id).order_by(Step.position))
+    if not step or not storage.exists(step.asset_key):
+        raise HTTPException(status_code=404, detail="asset not found")
+    direct = storage.direct_url(step.asset_key)
+    if direct:
+        return RedirectResponse(direct, status_code=307, headers={"Cache-Control": "private, no-store"})
+    return StreamingResponse(
+        io.BytesIO(storage.read(step.asset_key)), media_type="image/webp",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.post("/recycle-bin/users/{user_id}/restore", response_model=AdminUserOut)

@@ -124,6 +124,8 @@ class RecycleItemOut(BaseModel):
     deleted_at: datetime
     deleted_by_name: str = ""
     expires_at: datetime
+    thumbnail_url: str | None = None
+    preview: dict = Field(default_factory=dict)
 
 
 class AdminOrganizationOut(BaseModel):

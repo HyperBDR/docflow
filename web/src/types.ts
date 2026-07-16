@@ -19,7 +19,36 @@ export type AdminMembership = { id: string; organization_id: string; organizatio
 export type Invitation = { id: string; email: string; role: OrganizationRole; organization_id: string; organization_name: string; invite_url?: string; expires_at: string; accepted_at?: string; created_at: string }
 export type AdminOrganization = { id: string; name: string; slug: string; kind: 'personal' | 'team'; status: 'active' | 'archived'; owner_name: string; owner_email: string; member_count: number; demo_count: number; storage_bytes: number; created_by_email: string; created_at: string; archived_at?: string }
 export type AuditLog = { id: string; actor_id?: string; actor_name: string; actor_email: string; organization_id?: string; organization_name: string; action: string; target_type: string; target_id: string; target_label: string; before: Record<string, unknown>; after: Record<string, unknown>; ip_address: string; user_agent: string; source: string; outcome: string; created_at: string }
-export type RecycleItem = { id: string; item_type: 'user' | 'resource' | 'team_space'; title: string; owner_email: string; deleted_at: string; deleted_by_name: string; expires_at: string }
+export type RecycleItem = {
+  id: string
+  item_type: 'user' | 'resource' | 'team_space'
+  title: string
+  owner_email: string
+  deleted_at: string
+  deleted_by_name: string
+  expires_at: string
+  thumbnail_url?: string | null
+  preview: {
+    description?: string
+    status?: string
+    content_locale?: string
+    step_count?: number
+    views?: number
+    storage_bytes?: number
+    organization_name?: string
+    email?: string
+    role?: string
+    is_active?: boolean
+    ui_locale?: string
+    team_count?: number
+    resource_count?: number
+    slug?: string
+    owner_name?: string
+    member_count?: number
+    created_at?: string
+    updated_at?: string
+  }
+}
 
 export type UserStats = {
   demos: number
@@ -48,6 +77,17 @@ export type AIUsageRecord = {
   input_tokens: number; output_tokens: number; total_tokens: number; first_token_ms?: number | null; latency_ms: number
   request_detail: Record<string, unknown>; response_detail: Record<string, unknown>; error: string; created_at: string
 }
+export type AdminJobStatus = 'queued' | 'running' | 'complete' | 'failed' | 'cancelled'
+export type AdminJobItem = {
+  id: string; job_type: 'ai' | 'export'; kind: string; status: AdminJobStatus; progress: number
+  resource_id: string; resource_title: string; organization_id?: string | null; organization_name: string
+  user_id: string; user_name: string; user_email: string; model: string; step_id?: string | null
+  error_code?: string | null; error?: string | null; retry_of_id?: string | null
+  created_at: string; updated_at: string; started_at?: string | null; completed_at?: string | null; cancelled_at?: string | null
+  duration_ms?: number | null; download_url?: string | null; can_retry: boolean; can_cancel: boolean
+}
+export type AdminJobDetail = AdminJobItem & { result: Record<string, unknown>; metadata: Record<string, unknown> }
+export type AdminJobPage = { items: AdminJobItem[]; total: number; page: number; page_size: number; summary: Record<AdminJobStatus, number> }
 export type StorageConfig = {
   id: string; name: string; kind: 'local' | 's3'; enabled: boolean; is_default: boolean
   local_path: string; endpoint_url: string; region: string; bucket: string; prefix: string
@@ -176,7 +216,7 @@ export type Analytics = {
 export type ExportJob = {
   id: string
   kind: 'pdf' | 'mp4' | 'markdown'
-  status: 'queued' | 'running' | 'complete' | 'failed'
+  status: AdminJobStatus
   progress: number
   error?: string
   error_code?: string
@@ -188,7 +228,7 @@ export type AIJob = {
   id: string
   demo_id: string
   step_id?: string
-  status: 'queued' | 'running' | 'complete' | 'failed'
+  status: AdminJobStatus
   progress: number
   model: string
   result: Record<string, any>

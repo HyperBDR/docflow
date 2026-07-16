@@ -1,5 +1,5 @@
 import i18n from './i18n'
-import type { AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
+import type { AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -35,6 +35,10 @@ export const api = {
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/api/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  adminJobs: (filters: { query?: string; job_type?: string; status?: string; user_id?: string; organization_id?: string; from_at?: string; to_at?: string; page?: number; page_size?: number } = {}) => request<AdminJobPage>(`/api/admin/jobs?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),
+  adminJob: (type: 'ai' | 'export', id: string) => request<AdminJobDetail>(`/api/admin/jobs/${type}/${id}`),
+  retryAdminJob: (type: 'ai' | 'export', id: string) => request<AdminJobDetail>(`/api/admin/jobs/${type}/${id}/retry`, { method: 'POST' }),
+  cancelAdminJob: (type: 'ai' | 'export', id: string) => request<AdminJobDetail>(`/api/admin/jobs/${type}/${id}/cancel`, { method: 'POST' }),
   aiSettings: () => request<AIPlatformSettings>('/api/admin/ai/settings'),
   updateAISettings: (values: Pick<AIPlatformSettings, 'enabled' | 'chunk_size'>) => request<AIPlatformSettings>('/api/admin/ai/settings', { method: 'PATCH', body: JSON.stringify(values) }),
   aiModels: () => request<AIModelConfig[]>('/api/admin/ai/models'),
