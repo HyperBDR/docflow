@@ -30,7 +30,7 @@ export default function AdminJobs() {
   const [items,setItems] = useState<AdminJobItem[]>([]), [total,setTotal] = useState(0), [summary,setSummary] = useState<Record<AdminJobStatus,number>>(emptySummary)
   const [query,setQuery] = useState(params.get('query')||''), [jobType,setJobType] = useState(params.get('type')||''), [status,setStatus] = useState(params.get('status')||'')
   const [userId,setUserId] = useState(''), [organizationId,setOrganizationId] = useState(''), [from,setFrom] = useState(''), [to,setTo] = useState('')
-  const [page,setPage] = useState(1), [pageSize,setPageSize] = useState(20), [loading,setLoading] = useState(true), [error,setError] = useState('')
+  const [page,setPage] = useState(1), [pageSize,setPageSize] = useState(10), [loading,setLoading] = useState(true), [error,setError] = useState('')
   const [users,setUsers] = useState<AdminUser[]>([]), [organizations,setOrganizations] = useState<AdminOrganization[]>([])
   const [selected,setSelected] = useState<AdminJobDetail|null>(null), [detailLoading,setDetailLoading] = useState(false), [busy,setBusy] = useState('')
 
