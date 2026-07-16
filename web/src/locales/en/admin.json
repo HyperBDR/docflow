@@ -1,7 +1,7 @@
 {
   "title": "Admin console",
   "subtitle": "Manage platform users, team spaces, account security, and usage data.",
-  "nav": { "platform": "Platform management", "overview": "Overview", "jobs": "Task center", "monitoring": "Monitoring", "accounts": "Accounts & spaces", "users": "Users", "organizations": "Team spaces", "content": "Content governance", "resources": "Resources", "recycle": "Recycle bin", "storage": "Storage", "ai": "AI services", "aiSettings": "Global AI settings", "aiModels": "Model management", "aiUsage": "Usage analytics", "security": "Security & compliance", "audit": "Audit log", "collapse": "Collapse navigation", "secure": "Secure management space" },
+  "nav": { "platform": "Platform management", "overview": "Overview", "jobs": "Task center", "monitoring": "Monitoring", "accounts": "Accounts & spaces", "users": "Users", "organizations": "Team spaces", "content": "Content governance", "resources": "Resources", "recycle": "Recycle bin", "storage": "Storage", "ai": "AI services", "aiSettings": "Global AI settings", "aiModels": "Model management", "aiUsage": "Usage analytics", "system": "System configuration", "settings": "System settings", "security": "Security & compliance", "audit": "Audit log", "collapse": "Collapse navigation", "secure": "Secure management space" },
   "overviewCards": { "users": "Manage users, space access, roles, and security.", "resources": "Review and govern every demo resource on the platform." },
   "users": { "title": "User management", "subtitle": "Manage platform accounts, space access, and resource usage.", "total": "{{count}} users" },
   "pagination": { "range": "Showing {{from}}–{{to}} of {{total}}", "perPage": "Per page" },

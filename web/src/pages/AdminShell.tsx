@@ -18,6 +18,7 @@ import AdminAIUsage from './AdminAIUsage'
 import AdminAISettings from './AdminAISettings'
 import AdminStorage from './AdminStorage'
 import AdminJobs from './AdminJobs'
+import PlatformSettings from './PlatformSettings'
 import MonitoringOverview from './monitoring/MonitoringOverview'
 import AlertEvents from './monitoring/AlertEvents'
 import AlertRules from './monitoring/AlertRules'
@@ -31,6 +32,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
   const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => { localStorage.setItem(LAST_WORKSPACE_KEY, 'admin'); setMobileOpen(false) }, [location.pathname])
   const title = location.pathname.startsWith('/admin/resources/') ? t('resource.detailTitle')
+    : location.pathname.startsWith('/admin/settings') ? t('nav.settings')
     : location.pathname.startsWith('/admin/monitoring') ? t('nav.monitoring')
     : location.pathname.startsWith('/admin/jobs') ? t('nav.jobs')
     : location.pathname.startsWith('/admin/storage') ? t('nav.storage')
@@ -62,6 +64,8 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
         <NavLink to="/admin/ai/settings" title={t('nav.aiSettings')}><Icon name="settings" /><span>{t('nav.aiSettings')}</span></NavLink>
         <NavLink to="/admin/ai/models" title={t('nav.aiModels')}><Icon name="ai" /><span>{t('nav.aiModels')}</span></NavLink>
         <NavLink to="/admin/ai/usage" title={t('nav.aiUsage')}><Icon name="analytics" /><span>{t('nav.aiUsage')}</span></NavLink>
+        <div className="admin-nav-separator"><span>{t('nav.system')}</span></div>
+        <NavLink to="/admin/settings" title={t('nav.settings')}><Icon name="settings" /><span>{t('nav.settings')}</span></NavLink>
         <div className="admin-nav-separator"><span>{t('nav.security')}</span></div>
         <NavLink to="/admin/audit" title={t('nav.audit')}><Icon name="clock" /><span>{t('nav.audit')}</span></NavLink>
       </nav>
@@ -87,6 +91,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
         <Route path="ai/settings" element={<AdminAISettings />} />
         <Route path="ai/usage" element={<AdminAIUsage />} />
         <Route path="storage" element={<AdminStorage />} />
+        <Route path="settings" element={<PlatformSettings />} />
         <Route path="*" element={<Navigate to="/admin" />} />
       </Routes></div>
     </div>

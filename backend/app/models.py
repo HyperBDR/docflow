@@ -499,3 +499,21 @@ class NotificationChannel(Base):
     created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class EmailPlatformSettings(Base):
+    """Singleton platform email transport configuration."""
+    __tablename__ = "email_platform_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    host: Mapped[str] = mapped_column(String(320), default="")
+    port: Mapped[int] = mapped_column(Integer, default=587)
+    username: Mapped[str] = mapped_column(String(320), default="")
+    password_encrypted: Mapped[str] = mapped_column(Text, default="")
+    from_email: Mapped[str] = mapped_column(String(320), default="")
+    from_name: Mapped[str] = mapped_column(String(160), default="DocFlow")
+    security: Mapped[str] = mapped_column(String(20), default="starttls")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=10)
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

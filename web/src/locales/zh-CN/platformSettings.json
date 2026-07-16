@@ -1,0 +1,20 @@
+{
+  "title": "系统设置",
+  "subtitle": "统一管理平台级服务配置，修改后立即生效并记录审计日志。",
+  "tabs": { "email": "邮件服务", "emailHint": "SMTP 与发件身份", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略" },
+  "status": { "ready": "配置正常", "inactive": "尚未配置", "enabled": "已启用", "disabled": "已停用", "running": "自动运行中" },
+  "email": {
+    "statusTitle": "平台邮件服务", "configured": "邮件通知可以正常发送", "notConfigured": "完成 SMTP 配置后可启用邮件通知渠道",
+    "transport": "SMTP 服务配置", "transportHint": "此配置供告警通知及后续平台邮件统一使用。", "saved": "邮件服务配置已保存", "source": "当前配置来源：{{value}}", "sources": { "database": "后台配置", "environment": "环境变量", "none": "未配置" },
+    "fields": { "host": "SMTP Host", "port": "端口", "security": "连接安全", "timeout": "超时（秒）", "username": "用户名", "password": "密码", "fromName": "发件人名称", "fromEmail": "发件邮箱" },
+    "securityNone": "无加密", "passwordRetained": "已配置，留空保持不变", "passwordHint": "密码使用平台密钥加密保存，永远不会返回浏览器。",
+    "testTitle": "发送测试邮件", "testHint": "保存配置后，向指定邮箱发送连接和投递测试。", "testRecipient": "测试收件人", "sendTest": "发送测试", "testing": "正在发送…", "testSent": "测试邮件已发送"
+  },
+  "monitoring": {
+    "statusTitle": "自动监控采集", "statusHint": "独立 Monitor 调度器定时下发任务，由 Worker 完成采集和告警判断。",
+    "interval": "采集间隔", "seconds": "{{count}} 秒", "intervalHint": "生产环境持续自动执行，无需人工点击采集。",
+    "retention": "原始数据保留", "days": "{{count}} 天", "retentionHint": "过期分钟快照由采集器自动清理。",
+    "ranges": "可查询范围", "rangesHint": "详情图表会根据时间范围自动降采样。",
+    "privacy": "隐私与安全", "privacyHint": "仅保存规范化接口路径、状态码、耗时和聚合数量，不保存请求参数、正文或响应内容。"
+  }
+}

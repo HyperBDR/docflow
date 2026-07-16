@@ -21,7 +21,11 @@ class MonitoringServiceOut(BaseModel):
 class MonitoringTrendPoint(BaseModel):
     collected_at: datetime
     requests: int = 0
+    status_2xx: int = 0
+    status_4xx: int = 0
+    status_5xx: int = 0
     error_rate: float = 0
+    avg_latency_ms: float = 0
     p95_latency_ms: float = 0
     queued_jobs: int = 0
     failed_jobs: int = 0
@@ -37,7 +41,10 @@ class MonitoringOverview(BaseModel):
     ai: dict = Field(default_factory=dict)
     active_alerts: dict[str, int] = Field(default_factory=dict)
     trend: list[MonitoringTrendPoint] = Field(default_factory=list)
+    thresholds: dict[str, float] = Field(default_factory=dict)
     updated_at: datetime | None = None
+    next_collection_at: datetime | None = None
+    interval_seconds: int = 60
     collector_stale: bool = False
 
 
@@ -89,6 +96,24 @@ class AlertEventOut(BaseModel):
     acknowledged_at: datetime | None = None
     acknowledged_by_name: str = ""
     resolved_at: datetime | None = None
+
+
+class MetricHistoryPoint(BaseModel):
+    collected_at: datetime
+    status: HealthStatus
+    values: dict[str, float] = Field(default_factory=dict)
+
+
+class MonitoringMetricDetail(BaseModel):
+    key: str
+    snapshot_key: str
+    category: str
+    status: HealthStatus
+    unit: str = ""
+    summary: dict = Field(default_factory=dict)
+    points: list[MetricHistoryPoint] = Field(default_factory=list)
+    breakdown: list[dict] = Field(default_factory=list)
+    alerts: list[AlertEventOut] = Field(default_factory=list)
 
 
 class AlertEventPage(BaseModel):

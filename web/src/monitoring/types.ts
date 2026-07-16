@@ -3,7 +3,7 @@ export type AlertSeverity = 'info' | 'warning' | 'critical'
 export type AlertStatus = 'active' | 'acknowledged' | 'resolved'
 
 export type MonitoringService = { key: string; status: HealthStatus; value: number; unit: string; message: string; metrics: Record<string, number | string | boolean>; collected_at?: string | null }
-export type MonitoringTrendPoint = { collected_at: string; requests: number; error_rate: number; p95_latency_ms: number; queued_jobs: number; failed_jobs: number; ai_failure_rate: number }
+export type MonitoringTrendPoint = { collected_at: string; requests: number; status_2xx: number; status_4xx: number; status_5xx: number; error_rate: number; avg_latency_ms: number; p95_latency_ms: number; queued_jobs: number; failed_jobs: number; ai_failure_rate: number }
 export type MonitoringOverview = {
   overall_status: HealthStatus
   services: MonitoringService[]
@@ -13,8 +13,16 @@ export type MonitoringOverview = {
   ai: Record<string, number>
   active_alerts: Record<AlertSeverity, number>
   trend: MonitoringTrendPoint[]
+  thresholds: Record<string, number>
   updated_at?: string | null
+  next_collection_at?: string | null
+  interval_seconds: number
   collector_stale: boolean
+}
+export type MetricHistoryPoint = { collected_at: string; status: HealthStatus; values: Record<string, number> }
+export type MonitoringMetricDetail = {
+  key: string; snapshot_key: string; category: string; status: HealthStatus; unit: string
+  summary: Record<string, unknown>; points: MetricHistoryPoint[]; breakdown: Record<string, unknown>[]; alerts: AlertEvent[]
 }
 export type AlertRule = {
   id: string; name: string; metric_key: string; operator: 'gt' | 'gte' | 'lt' | 'lte' | 'eq'; threshold: number

@@ -35,11 +35,17 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
                 )
                 try:
                     bucket = next((value for value in LATENCY_BUCKETS if elapsed <= value), 999999)
+                    route = request.scope.get("route")
+                    template = getattr(route, "path", "unmatched")
+                    route_prefix = f"route|{request.method}|{template}"
                     pipe = client.pipeline(transaction=False)
                     pipe.hincrby(key, "requests", 1)
                     pipe.hincrby(key, "status_4xx" if 400 <= status_code < 500 else "status_5xx" if status_code >= 500 else "status_2xx", 1)
                     pipe.hincrby(key, "latency_sum_ms", elapsed)
                     pipe.hincrby(key, f"latency_le_{bucket}", 1)
+                    pipe.hincrby(key, f"{route_prefix}|requests", 1)
+                    pipe.hincrby(key, f"{route_prefix}|status_4xx" if 400 <= status_code < 500 else f"{route_prefix}|status_5xx" if status_code >= 500 else f"{route_prefix}|status_2xx", 1)
+                    pipe.hincrby(key, f"{route_prefix}|latency_sum_ms", elapsed)
                     pipe.expire(key, 7200)
                     await pipe.execute()
                 except Exception:
@@ -48,7 +54,7 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
                     await client.aclose()
 
 
-def read_http_metrics(minutes: int = 5) -> dict[str, float]:
+def read_http_metrics(minutes: int = 5) -> dict:
     client = redis.Redis.from_url(
         settings.redis_url, decode_responses=True,
         socket_connect_timeout=.3, socket_timeout=.3,
@@ -77,6 +83,26 @@ def read_http_metrics(minutes: int = 5) -> dict[str, float]:
             p95 = bucket if bucket != 999999 else 5000
             break
     errors = totals.get("status_5xx", 0)
+    route_totals: dict[str, dict[str, int | float | str]] = {}
+    for key, value in totals.items():
+        if not key.startswith("route|"):
+            continue
+        try:
+            _, method, route, metric = key.split("|", 3)
+        except ValueError:
+            continue
+        item = route_totals.setdefault(f"{method} {route}", {"method": method, "route": route})
+        item[metric] = value
+    routes = []
+    for item in route_totals.values():
+        count = int(item.get("requests", 0))
+        failures = int(item.get("status_5xx", 0))
+        routes.append({
+            **item,
+            "avg_latency_ms": round(int(item.get("latency_sum_ms", 0)) / count, 1) if count else 0,
+            "error_rate": round(failures / count * 100, 2) if count else 0,
+        })
+    routes.sort(key=lambda item: int(item.get("requests", 0)), reverse=True)
     return {
         "available": 1,
         "requests": requests,
@@ -86,4 +112,5 @@ def read_http_metrics(minutes: int = 5) -> dict[str, float]:
         "error_rate": round(errors / requests * 100, 2) if requests else 0,
         "avg_latency_ms": round(totals.get("latency_sum_ms", 0) / requests, 1) if requests else 0,
         "p95_latency_ms": p95,
+        "routes": routes[:20],
     }

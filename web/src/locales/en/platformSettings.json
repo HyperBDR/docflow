@@ -1,0 +1,20 @@
+{
+  "title": "System settings",
+  "subtitle": "Manage platform-wide services. Changes take effect immediately and are audited.",
+  "tabs": { "email": "Email service", "emailHint": "SMTP and sender identity", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention" },
+  "status": { "ready": "Configured", "inactive": "Not configured", "enabled": "Enabled", "disabled": "Disabled", "running": "Running automatically" },
+  "email": {
+    "statusTitle": "Platform email service", "configured": "Email notifications are ready to send", "notConfigured": "Configure SMTP to enable email notification channels",
+    "transport": "SMTP service configuration", "transportHint": "Shared by alert notifications and future platform emails.", "saved": "Email service settings saved", "source": "Current source: {{value}}", "sources": { "database": "Admin settings", "environment": "Environment variables", "none": "Not configured" },
+    "fields": { "host": "SMTP host", "port": "Port", "security": "Connection security", "timeout": "Timeout (seconds)", "username": "Username", "password": "Password", "fromName": "Sender name", "fromEmail": "Sender email" },
+    "securityNone": "No encryption", "passwordRetained": "Configured; leave blank to retain", "passwordHint": "The password is encrypted with the platform key and is never returned to the browser.",
+    "testTitle": "Send a test email", "testHint": "Save settings, then verify connection and delivery to an address.", "testRecipient": "Test recipient", "sendTest": "Send test", "testing": "Sending…", "testSent": "Test email sent"
+  },
+  "monitoring": {
+    "statusTitle": "Automatic monitoring collection", "statusHint": "The Monitor scheduler dispatches tasks and the Worker collects metrics and evaluates alerts.",
+    "interval": "Collection interval", "seconds": "{{count}} seconds", "intervalHint": "Runs continuously in production without manual collection.",
+    "retention": "Raw data retention", "days": "{{count}} days", "retentionHint": "Expired minute snapshots are removed by the collector.",
+    "ranges": "Available ranges", "rangesHint": "Detail charts automatically downsample longer time ranges.",
+    "privacy": "Privacy and security", "privacyHint": "Only normalized routes, status codes, latency, and aggregate counts are stored—never request parameters, bodies, or responses."
+  }
+}

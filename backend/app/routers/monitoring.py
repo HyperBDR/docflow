@@ -9,7 +9,6 @@ from app.database import get_db
 from app.dependencies import admin_user
 from app.models import AlertEvent, AlertRule, MonitoringSnapshot, NotificationChannel, User, now
 from app.monitoring.alert_engine import ensure_default_rules
-from app.monitoring.collector import collect_monitoring
 from app.monitoring.notifications import test_channel
 from app.monitoring_schemas import (
     AlertEventOut,
@@ -17,7 +16,9 @@ from app.monitoring_schemas import (
     AlertRuleInput,
     AlertRuleOut,
     AlertRuleUpdate,
+    MetricHistoryPoint,
     MetricDefinition,
+    MonitoringMetricDetail,
     MonitoringOverview,
     MonitoringServiceOut,
     MonitoringTrendPoint,
@@ -41,6 +42,12 @@ METRICS = [
     MetricDefinition(key="service.redis.available", unit="boolean", recommended_operator="lt", recommended_threshold=1),
 ]
 METRIC_KEYS = {item.key for item in METRICS}
+DETAIL_SNAPSHOTS = {
+    "postgres": "postgres", "redis": "redis", "storage": "storage", "worker": "worker",
+    "api.requests": "api", "api.latency": "api", "api.error_rate": "api",
+    "jobs.queue": "jobs", "storage.capacity": "storage", "ai.failure_rate": "ai",
+}
+RANGES = {"1h": timedelta(hours=1), "6h": timedelta(hours=6), "24h": timedelta(hours=24), "7d": timedelta(days=7)}
 
 
 def _latest(db: Session, key: str) -> MonitoringSnapshot | None:
@@ -117,7 +124,11 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     points = [MonitoringTrendPoint(
         collected_at=timestamp,
         requests=values.get("api", {}).get("requests", 0),
+        status_2xx=values.get("api", {}).get("status_2xx", 0),
+        status_4xx=values.get("api", {}).get("status_4xx", 0),
+        status_5xx=values.get("api", {}).get("status_5xx", 0),
         error_rate=values.get("api", {}).get("error_rate", 0),
+        avg_latency_ms=values.get("api", {}).get("avg_latency_ms", 0),
         p95_latency_ms=values.get("api", {}).get("p95_latency_ms", 0),
         queued_jobs=values.get("jobs", {}).get("queued", 0),
         failed_jobs=values.get("jobs", {}).get("failed_10m", 0),
@@ -129,6 +140,8 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     active = db.execute(select(AlertEvent.severity, func.count(AlertEvent.id)).where(
         AlertEvent.status.in_(["active", "acknowledged"])
     ).group_by(AlertEvent.severity)).all()
+    thresholds = {rule.metric_key: rule.threshold for rule in db.scalars(select(AlertRule).where(AlertRule.enabled.is_(True))).all()}
+    interval = max(30, settings.monitoring_interval_seconds)
     return MonitoringOverview(
         overall_status=overall, services=services,
         api=latest["api"].metrics if latest["api"] else {},
@@ -136,13 +149,53 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         storage=latest["storage"].metrics if latest["storage"] else {},
         ai=latest["ai"].metrics if latest["ai"] else {},
         active_alerts={severity: count for severity, count in active},
-        trend=points, updated_at=updated_at, collector_stale=stale,
+        trend=points, thresholds=thresholds, updated_at=updated_at,
+        next_collection_at=updated_at + timedelta(seconds=interval) if updated_at else None,
+        interval_seconds=interval, collector_stale=stale,
     )
 
 
 @router.post("/collect", status_code=status.HTTP_202_ACCEPTED)
-def collect(db: Session = Depends(get_db), _: User = Depends(admin_user)):
-    return {"observations": collect_monitoring(db), "collected_at": now()}
+def collect(_: User = Depends(admin_user)):
+    from app.worker import collect_platform_monitoring
+    task = collect_platform_monitoring.delay()
+    return {"task_id": task.id, "queued_at": now()}
+
+
+@router.get("/details/{key:path}", response_model=MonitoringMetricDetail)
+def metric_detail(key: str, range_key: str = Query(default="24h", alias="range"), db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    snapshot_key = DETAIL_SNAPSHOTS.get(key)
+    if not snapshot_key:
+        raise HTTPException(status_code=404, detail="monitoring metric not found")
+    duration = RANGES.get(range_key)
+    if not duration:
+        raise HTTPException(status_code=422, detail="unsupported monitoring range")
+    rows = db.scalars(select(MonitoringSnapshot).where(
+        MonitoringSnapshot.metric_key == snapshot_key,
+        MonitoringSnapshot.collected_at >= now() - duration,
+    ).order_by(MonitoringSnapshot.collected_at)).all()
+    latest = rows[-1] if rows else _latest(db, snapshot_key)
+    points = []
+    for item in rows:
+        values = {name: float(value) for name, value in item.metrics.items() if isinstance(value, (int, float)) and not isinstance(value, bool)}
+        if snapshot_key in {"postgres", "redis", "worker"}:
+            values.update({"latency_ms": float(item.value), "available": 0.0 if item.status == "critical" else 1.0})
+        points.append(MetricHistoryPoint(collected_at=item.collected_at, status=item.status, values=values))
+    if len(points) > 240:
+        stride = max(1, len(points) // 240)
+        points = points[::stride][-240:]
+    summary = dict(latest.metrics) if latest else {}
+    if latest:
+        summary.update({"value": latest.value, "status": latest.status, "message": latest.message, "collected_at": latest.collected_at.isoformat()})
+    breakdown = summary.get("routes", []) if snapshot_key == "api" else []
+    alert_prefix = "api." if snapshot_key == "api" else "jobs." if snapshot_key == "jobs" else "storage." if snapshot_key == "storage" else "ai." if snapshot_key == "ai" else f"service.{snapshot_key}."
+    alerts = db.scalars(select(AlertEvent).where(AlertEvent.metric_key.startswith(alert_prefix)).order_by(AlertEvent.started_at.desc()).limit(10)).all()
+    return MonitoringMetricDetail(
+        key=key, snapshot_key=snapshot_key, category=latest.category if latest else "service",
+        status=latest.status if latest else "unknown", unit=latest.unit if latest else "",
+        summary=summary, points=points, breakdown=breakdown,
+        alerts=[_event_out(db, event) for event in alerts],
+    )
 
 
 @router.get("/metrics", response_model=list[MetricDefinition])
@@ -266,7 +319,7 @@ def test_notification_channel(channel_id: str, db: Session = Depends(get_db), _:
     if not channel:
         raise HTTPException(status_code=404, detail="notification channel not found")
     try:
-        test_channel(channel); channel.last_status = "success"; channel.last_error = ""
+        test_channel(db, channel); channel.last_status = "success"; channel.last_error = ""
     except Exception as exc:
         channel.last_status = "failed"; channel.last_error = str(exc)[:500]
     channel.last_sent_at = now(); db.commit(); db.refresh(channel)

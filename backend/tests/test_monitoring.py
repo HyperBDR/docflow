@@ -1,8 +1,9 @@
 from unittest.mock import patch
 
 from app.database import SessionLocal
-from app.models import AlertEvent, AlertRule, MonitoringSnapshot, NotificationChannel
+from app.models import AlertEvent, AlertRule, EmailPlatformSettings, MonitoringSnapshot, NotificationChannel
 from app.monitoring.alert_engine import ensure_default_rules, evaluate_rules
+from app.monitoring.collector import collect_monitoring
 from app.secrets import decrypt_secret
 
 
@@ -21,15 +22,26 @@ def test_monitoring_collection_and_overview(client):
     with patch("app.monitoring.collector.read_http_metrics", return_value={
         "available": 1, "requests": 24, "status_2xx": 22, "status_4xx": 1,
         "status_5xx": 1, "error_rate": 4.17, "avg_latency_ms": 42, "p95_latency_ms": 100,
+        "routes": [{"method": "GET", "route": "/api/demos", "requests": 12, "status_2xx": 12, "avg_latency_ms": 30, "error_rate": 0}],
     }):
+        with SessionLocal() as db:
+            collect_monitoring(db)
+    with patch("app.worker.collect_platform_monitoring.delay") as delay:
+        delay.return_value.id = "monitor-task"
         collected = client.post("/api/admin/monitoring/collect")
     assert collected.status_code == 202
+    assert collected.json()["task_id"] == "monitor-task"
     value = client.get("/api/admin/monitoring/overview").json()
     assert value["collector_stale"] is False
     assert value["api"]["requests"] == 24
     assert value["jobs"]["queued"] == 0
     assert len(value["services"]) == 4
     assert {item["key"] for item in value["services"]} == {"postgres", "redis", "storage", "worker"}
+    assert value["interval_seconds"] >= 30
+    detail = client.get("/api/admin/monitoring/details/api.requests", params={"range": "24h"})
+    assert detail.status_code == 200
+    assert detail.json()["summary"]["requests"] == 24
+    assert detail.json()["breakdown"][0]["route"] == "/api/demos"
     with SessionLocal() as db:
         assert db.query(MonitoringSnapshot).count() == 7
         assert db.query(AlertRule).filter(AlertRule.built_in.is_(True)).count() == 8
@@ -106,3 +118,30 @@ def test_regular_user_cannot_access_monitoring(client):
     client.post("/api/auth/logout")
     register(client, "regular-monitor@example.com")
     assert client.get("/api/admin/monitoring/overview").status_code == 403
+    assert client.get("/api/admin/settings/email").status_code == 403
+
+
+def test_platform_email_settings_are_encrypted_and_used(client):
+    register(client, "email-settings-admin@example.com")
+    initial = client.get("/api/admin/settings/email")
+    assert initial.status_code == 200
+    saved = client.patch("/api/admin/settings/email", json={
+        "enabled": True, "host": "smtp.example.com", "port": 587,
+        "username": "mailer", "password": "smtp-secret", "from_email": "docflow@example.com",
+        "from_name": "DocFlow Alerts", "security": "starttls", "timeout_seconds": 10,
+    })
+    assert saved.status_code == 200
+    assert saved.json()["configured"] is True
+    assert saved.json()["password_configured"] is True
+    assert "smtp-secret" not in saved.text
+    with SessionLocal() as db:
+        value = db.get(EmailPlatformSettings, "default")
+        assert value is not None
+        assert "smtp-secret" not in value.password_encrypted
+        assert decrypt_secret(value.password_encrypted) == "smtp-secret"
+    with patch("app.monitoring.notifications.smtplib.SMTP") as smtp:
+        response = client.post("/api/admin/settings/email/test", json={"recipient": "ops@example.com"})
+        assert response.status_code == 200
+        smtp.return_value.__enter__.return_value.starttls.assert_called_once()
+        smtp.return_value.__enter__.return_value.send_message.assert_called_once()
+    assert client.get("/api/admin/settings/monitoring").json()["automatic_collection"] is True

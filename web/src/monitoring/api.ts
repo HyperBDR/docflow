@@ -1,5 +1,5 @@
 import { request } from '../api'
-import type { AlertEvent, AlertEventPage, AlertRule, AlertRuleInput, MetricDefinition, MonitoringOverview, NotificationChannel, NotificationChannelInput } from './types'
+import type { AlertEvent, AlertEventPage, AlertRule, AlertRuleInput, MetricDefinition, MonitoringMetricDetail, MonitoringOverview, NotificationChannel, NotificationChannelInput } from './types'
 
 const params = (values: Record<string, string | number | undefined>) => {
   const result = new URLSearchParams()
@@ -9,7 +9,8 @@ const params = (values: Record<string, string | number | undefined>) => {
 
 export const monitoringApi = {
   overview: () => request<MonitoringOverview>('/api/admin/monitoring/overview'),
-  collect: () => request<{ observations: Record<string, number>; collected_at: string }>('/api/admin/monitoring/collect', { method: 'POST' }),
+  collect: () => request<{ task_id: string; queued_at: string }>('/api/admin/monitoring/collect', { method: 'POST' }),
+  detail: (key: string, range = '24h') => request<MonitoringMetricDetail>(`/api/admin/monitoring/details/${encodeURIComponent(key)}?${params({ range })}`),
   metrics: () => request<MetricDefinition[]>('/api/admin/monitoring/metrics'),
   rules: () => request<AlertRule[]>('/api/admin/monitoring/rules'),
   createRule: (value: AlertRuleInput) => request<AlertRule>('/api/admin/monitoring/rules', { method: 'POST', body: JSON.stringify(value) }),
