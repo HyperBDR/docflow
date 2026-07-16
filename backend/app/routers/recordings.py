@@ -63,6 +63,17 @@ async def upload_step(
     )
     db.add(step)
     try:
+        db.flush()
+        db.add(HotspotModel(
+            step_id=step.id,
+            position=0,
+            selector={},
+            fallback_rect=parsed.hotspot.model_dump(),
+            trigger="click",
+            action={"type": "next"},
+            tooltip={**DEFAULT_TOOLTIP, "content": parsed.body},
+            style=DEFAULT_HOTSPOT_STYLE,
+        ))
         db.commit()
     except IntegrityError:
         db.rollback()

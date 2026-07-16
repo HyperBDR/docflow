@@ -221,7 +221,8 @@ export default function Editor() {
     updateHotspotLocal(values, target)
     try {
       const updated = await api.updateHotspot(id, selected.id, target.id, values)
-      setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === selected.id ? { ...step, hotspots: step.hotspots.map(item => item.id === updated.id ? updated : item) } : step) } : current)
+      setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === selected.id ? { ...step, hotspots: step.hotspots.map(item => item.id === target.id ? updated : item) } : step) } : current)
+      setSelectedHotspotId(current => current === target.id ? updated.id : current)
     } catch (value) { setError((value as Error).message) }
   }
   async function chooseTarget(selection: { selector: SelectorInfo; rect: Rect }) {
@@ -240,6 +241,19 @@ export default function Editor() {
     const created = await api.createHotspot(id, selected.id, { selector: {}, fallback_rect: { x: .5, y: .5, w: .08, h: .06 }, trigger: 'click', action: { type: 'next' }, tooltip: defaultTooltip(demo?.content_locale), style: defaultStyle })
     setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === selected.id ? { ...step, hotspots: [...step.hotspots, created] } : step) } : current)
     setSelectedHotspotId(created.id); setTab('hotspot'); setCanvasMode('edit')
+  }
+  async function deleteSelectedHotspot() {
+    if (!selected || !selectedHotspot) return
+    const stepId = selected.id
+    setError('')
+    try {
+      await api.deleteHotspot(id, stepId, selectedHotspot.id)
+      const fresh = await api.demo(id)
+      setDemo(fresh)
+      setSelectedHotspotId(fresh.steps.find(step => step.id === stepId)?.hotspots[0]?.id || null)
+    } catch (value) {
+      setError(value instanceof Error ? value.message : t('common:errors.operationFailed'))
+    }
   }
   async function move(stepId: string, offset: number) {
     if (!demo) return
@@ -609,7 +623,7 @@ export default function Editor() {
               <div className="toggle-list"><label className="check"><input type="checkbox" checked={selectedHotspot.style.pulse} onChange={event => patchHotspot({ style: { ...selectedHotspot.style, pulse: event.target.checked } })} /><span><strong>{t('hotspot.pulse')}</strong><small>{t('hotspot.pulseHint')}</small></span></label>
               <label className="check"><input type="checkbox" checked={selectedHotspot.style.spotlight} onChange={event => patchHotspot({ style: { ...selectedHotspot.style, spotlight: event.target.checked } })} /><span><strong>{t('hotspot.spotlight')}</strong><small>{t('hotspot.spotlightHint')}</small></span></label></div>
             </InspectorSection>
-            <InspectorSection icon="delete" title={t('hotspot.danger')} tone="danger"><button className="danger icon-button" onClick={async () => { await api.deleteHotspot(id, selected!.id, selectedHotspot.id); const fresh = await api.demo(id); setDemo(fresh); setSelectedHotspotId(fresh.steps.find(step => step.id === selected!.id)?.hotspots[0]?.id || null) }}><Icon name="delete" />{t('hotspot.delete')}</button></InspectorSection>
+            <InspectorSection icon="delete" title={t('hotspot.danger')} tone="danger"><button className="danger icon-button" onClick={deleteSelectedHotspot}><Icon name="delete" />{t('hotspot.delete')}</button></InspectorSection>
           </> : null}
         </div>}
         {tab === 'tooltip' && selectedHotspot && <div className="inspector-body">

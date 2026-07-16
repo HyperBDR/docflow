@@ -2,6 +2,9 @@ import io
 import json
 from PIL import Image
 
+from app.database import SessionLocal
+from app.models import Hotspot, Step
+
 
 def image_bytes(color="white") -> bytes:
     output = io.BytesIO()
@@ -93,6 +96,92 @@ def test_step_validation_and_password_redaction(authenticated):
     assert response.status_code == 201
     assert len(response.json()["redactions"]) == 1
     assert authenticated.patch(f"/api/demos/{demo['id']}/steps/{response.json()['id']}", json={"duration": 16}).status_code == 422
+
+
+def test_screenshot_hotspots_stay_scoped_and_can_be_deleted(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "热点编辑"}).json()
+    first = create_step(authenticated, demo["id"], "first").json()
+    second = create_step(authenticated, demo["id"], "second").json()
+    assert not first["hotspots"][0]["id"].startswith("legacy-")
+    second_hotspot_ids = [item["id"] for item in second["hotspots"]]
+
+    added = authenticated.post(f"/api/demos/{demo['id']}/steps/{first['id']}/hotspots", json={
+        "fallback_rect": {"x": .25, "y": .3, "w": .1, "h": .1},
+    })
+    assert added.status_code == 201
+    refreshed = authenticated.get(f"/api/demos/{demo['id']}").json()
+    refreshed_first = next(step for step in refreshed["steps"] if step["id"] == first["id"])
+    refreshed_second = next(step for step in refreshed["steps"] if step["id"] == second["id"])
+    assert len(refreshed_first["hotspots"]) == 2
+    assert [item["id"] for item in refreshed_second["hotspots"]] == second_hotspot_ids
+
+    for hotspot in list(refreshed_first["hotspots"]):
+        response = authenticated.delete(f"/api/demos/{demo['id']}/steps/{first['id']}/hotspots/{hotspot['id']}")
+        assert response.status_code == 204
+    empty = authenticated.get(f"/api/demos/{demo['id']}").json()
+    empty_first = next(step for step in empty["steps"] if step["id"] == first["id"])
+    assert empty_first["hotspots"] == []
+    assert empty_first["hotspot"] == {}
+
+
+def test_legacy_hotspot_ids_are_materialized_without_disappearing(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "旧热点兼容"}).json()
+    step = create_step(authenticated, demo["id"], "legacy").json()
+    with SessionLocal() as db:
+        db.query(Hotspot).filter(Hotspot.step_id == step["id"]).delete()
+        db.commit()
+
+    legacy = authenticated.get(f"/api/demos/{demo['id']}").json()["steps"][0]["hotspots"][0]
+    assert legacy["id"] == f"legacy-{step['id']}"
+    added = authenticated.post(f"/api/demos/{demo['id']}/steps/{step['id']}/hotspots", json={
+        "fallback_rect": {"x": .75, "y": .7, "w": .1, "h": .1},
+    })
+    assert added.status_code == 201
+    refreshed = authenticated.get(f"/api/demos/{demo['id']}").json()["steps"][0]
+    assert len(refreshed["hotspots"]) == 2
+    assert all(not item["id"].startswith("legacy-") for item in refreshed["hotspots"])
+
+    # A browser tab that still holds the old synthetic ID can update and
+    # delete the newly materialized primary hotspot without a 404.
+    patched = authenticated.patch(
+        f"/api/demos/{demo['id']}/steps/{step['id']}/hotspots/{legacy['id']}",
+        json={"fallback_rect": {"x": .4, "y": .4, "w": .2, "h": .2}},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["fallback_rect"]["x"] == .4
+    assert authenticated.delete(
+        f"/api/demos/{demo['id']}/steps/{step['id']}/hotspots/{legacy['id']}"
+    ).status_code == 204
+    remaining = authenticated.get(f"/api/demos/{demo['id']}").json()["steps"][0]["hotspots"]
+    assert [item["id"] for item in remaining] == [added.json()["id"]]
+
+
+def test_stale_legacy_id_does_not_overwrite_a_new_hotspot(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "旧页面状态"}).json()
+    step = create_step(authenticated, demo["id"], "stale-legacy").json()
+    with SessionLocal() as db:
+        db.query(Hotspot).filter(Hotspot.step_id == step["id"]).delete()
+        newer = Hotspot(
+            step_id=step["id"], position=0, selector={},
+            fallback_rect={"x": .8, "y": .8, "w": .1, "h": .1}, trigger="click",
+            action={"type": "next"}, tooltip={}, style={}, manual_fields=[],
+        )
+        db.add(newer)
+        db.commit()
+        newer_id = newer.id
+        stored_step = db.get(Step, step["id"])
+        assert stored_step.hotspot != newer.fallback_rect, (stored_step.hotspot, newer.fallback_rect)
+
+    legacy_id = f"legacy-{step['id']}"
+    patched = authenticated.patch(
+        f"/api/demos/{demo['id']}/steps/{step['id']}/hotspots/{legacy_id}",
+        json={"fallback_rect": {"x": .35, "y": .35, "w": .2, "h": .2}},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["id"] != newer_id
+    refreshed = authenticated.get(f"/api/demos/{demo['id']}").json()["steps"][0]["hotspots"]
+    assert len(refreshed) == 2
+    assert {item["id"] for item in refreshed} == {patched.json()["id"], newer_id}
 
 
 def test_animation_autoplay_and_default_spotlight(authenticated):
