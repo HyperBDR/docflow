@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { API_URL, api } from '../api'
+import { API_URL, ApiError, api } from '../api'
 import { copyText } from '../clipboard'
 import { formatDate } from '../i18n'
 import Icon, { type IconName } from '../components/Icon'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import SlideStage from '../components/SlideStage'
 import { prepareExtensionRecording } from '../extensionBridge'
+import { prepareScreenshot, ScreenshotPreparationError } from '../screenshotUpload'
 import type { AIJob, Demo, ExportJob, HotspotData, Rect, SelectorInfo, Step } from '../types'
 
 type InspectorTab = 'content' | 'hotspot' | 'tooltip' | 'theme' | 'animation' | 'ai'
@@ -124,6 +125,7 @@ export default function Editor() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [recorderBusy, setRecorderBusy] = useState(false)
+  const [uploadBusy, setUploadBusy] = useState(false)
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
   const selectedHotspot = useMemo(() => selected?.hotspots.find(item => item.id === selectedHotspotId) || selected?.hotspots[0], [selected, selectedHotspotId])
   const aiChangeReport = aiJob?.result?.changes as AIChangeReport | undefined
@@ -247,12 +249,22 @@ export default function Editor() {
     setDemo(await api.reorder(id, steps.map(step => step.id)))
   }
   async function upload(file: File) {
-    const bitmap = await createImageBitmap(file)
-    const meta = { event_id: eventId(), title: t('steps.step', { index: (demo?.steps.length || 0) + 1 }), body: '', viewport_width: bitmap.width, viewport_height: bitmap.height, hotspot: { x: .5, y: .5, w: .04, h: .04 }, duration: 3 }
-    bitmap.close()
-    const form = new FormData(); form.append('meta', JSON.stringify(meta)); form.append('screenshot', file)
-    const step = await api.uploadStep(id, form)
-    setDemo(current => current ? { ...current, steps: [...current.steps, step] } : current); setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null)
+    if (uploadBusy) return
+    setUploadBusy(true); setError(''); setNotice('')
+    try {
+      const screenshot = await prepareScreenshot(file)
+      const meta = { event_id: eventId(), title: t('steps.step', { index: (demo?.steps.length || 0) + 1 }), body: '', viewport_width: screenshot.width, viewport_height: screenshot.height, hotspot: { x: .5, y: .5, w: .04, h: .04 }, duration: 3 }
+      const form = new FormData(); form.append('meta', JSON.stringify(meta)); form.append('screenshot', screenshot.file)
+      const step = await api.uploadStep(id, form)
+      setDemo(current => current ? { ...current, steps: [...current.steps, step] } : current); setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null)
+      setNotice(t(screenshot.compressed ? 'messages.screenshotCompressed' : 'messages.screenshotAdded'))
+    } catch (value) {
+      if (value instanceof ScreenshotPreparationError) setError(t(value.code === 'too_large' ? 'messages.screenshotTooLarge' : 'messages.screenshotInvalid'))
+      else if (value instanceof ApiError && value.status === 413) setError(t('messages.screenshotTooLarge'))
+      else setError(t('messages.screenshotUploadFailed'))
+    } finally {
+      setUploadBusy(false)
+    }
   }
   async function publish() {
     if (exportAction) return
@@ -525,7 +537,7 @@ export default function Editor() {
       <aside className="step-list" style={floatingPanelStyle('steps')}>
         <div className="floating-panel-header"><span onPointerDown={event => dragFloatingPanel('steps', event)}><Icon name="move" />{t('mobileDock.steps')}</span><button aria-label={t('common:actions.close')} onClick={() => setMobilePanel(null)}>×</button></div>
         <div className="step-list-scroll">
-          <div className="panel-heading"><span>{t('steps.resources')}</span><small>{demo.steps.length}</small></div><label className="upload-button icon-button"><Icon name="image" />{t('steps.addScreenshot')}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => event.target.files?.[0] && upload(event.target.files[0])} /></label>
+          <div className="panel-heading"><span>{t('steps.resources')}</span><small>{demo.steps.length}</small></div><label className={`upload-button icon-button ${uploadBusy ? 'uploading' : ''}`} aria-busy={uploadBusy} aria-disabled={uploadBusy}>{uploadBusy ? <span className="action-spinner" /> : <Icon name="image" />}{t(uploadBusy ? 'steps.uploadingScreenshot' : 'steps.addScreenshot')}<input disabled={uploadBusy} type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file) }} /></label>
           {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} title={step.title || t('steps.step', { index: index + 1 })} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} alt="" /><div><strong>{t('steps.step', { index: index + 1 })}</strong><small>{step.render_mode === 'dom' ? 'HTML Clone' : t('steps.screenshot')}</small></div></button>)}
         </div>
         <div className="floating-panel-resize-handle" role="separator" aria-label={t('mobileDock.resize')} title={t('mobileDock.resize')} onPointerDown={event => resizeFloatingPanel('steps', event)} />
