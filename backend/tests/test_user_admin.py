@@ -168,7 +168,9 @@ def test_deleted_user_can_be_restored_or_permanently_purged(client):
     assert login(client, "member@example.com").status_code == 401
     login(client, "admin@example.com")
     recycled = client.get("/api/admin/recycle-bin").json()
-    assert any(item["id"] == member["id"] and item["item_type"] == "user" for item in recycled)
+    recycled_user = next(item for item in recycled if item["id"] == member["id"] and item["item_type"] == "user")
+    assert recycled_user["preview"]["email"] == "member@example.com"
+    assert recycled_user["preview"]["role"] == "user"
     assert client.post(f"/api/admin/recycle-bin/users/{member['id']}/restore").status_code == 200
     logout(client); assert login(client, "member@example.com").status_code == 200
     logout(client); login(client, "admin@example.com")
@@ -217,6 +219,10 @@ def test_admin_resource_listing_preview_and_governance(client):
     recycled = client.get("/api/admin/recycle-bin").json()
     item = next(item for item in recycled if item["id"] == demo["id"])
     assert item["item_type"] == "resource"
+    assert item["preview"]["step_count"] == 1
+    assert item["preview"]["content_locale"] == "en"
+    assert "/api/admin/recycle-bin/resources/" in item["thumbnail_url"]
+    assert client.get(f"/api/admin/recycle-bin/resources/{demo['id']}/thumbnail").status_code == 200
     assert client.post(f"/api/admin/recycle-bin/resources/{demo['id']}/restore").status_code == 200
     assert client.get(f"/api/admin/resources/{demo['id']}").status_code == 200
     assert client.get(f"/public/{token}").status_code == 404
@@ -424,7 +430,9 @@ def test_regular_user_restrictions_invited_registration_and_team_lifecycle(clien
 
     logout(client); login(client, "admin@example.com")
     recycled = client.get("/api/admin/recycle-bin").json()
-    assert any(item["item_type"] == "team_space" and item["id"] == team_id for item in recycled)
+    recycled_team = next(item for item in recycled if item["item_type"] == "team_space" and item["id"] == team_id)
+    assert recycled_team["preview"]["member_count"] >= 1
+    assert recycled_team["preview"]["resource_count"] == 1
     assert client.post(f"/api/admin/recycle-bin/team-spaces/{team_id}/restore").status_code == 204
     assert any(item["id"] == team_id for item in client.get("/api/admin/organizations").json())
     assert client.post(f"/api/organizations/{team_id}/archive").status_code == 204
