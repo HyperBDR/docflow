@@ -24,6 +24,7 @@ from app.models import (
     Demo,
     DemoStatus,
     ExportJob,
+    JobStatus,
     ExtensionPair,
     ExtensionToken,
     Organization,
@@ -41,6 +42,9 @@ from app.models import (
 )
 from app.schemas import (
     AdminOverview,
+    AdminJobDetail,
+    AdminJobItem,
+    AdminJobPage,
     OverviewTrendPoint,
     OverviewFailedJob,
     OverviewExportJob,
@@ -82,6 +86,7 @@ from app.security import utcnow
 from app.ai_models import platform_settings, set_default
 from app.secrets import encrypt_secret
 from app.storage import storage, target_from_model
+from app.worker import celery
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -304,6 +309,238 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         top_organizations=sorted(organization_points, key=lambda item: (item.value, item.secondary), reverse=True)[:8],
         recent_failed_jobs=failed_jobs[:6], recent_exports=recent_exports,
         top_resources=top_resources[:6],
+    )
+
+
+def _job_status(value: JobStatus | str) -> str:
+    return value.value if isinstance(value, JobStatus) else str(value)
+
+
+def _job_duration_ms(job: AIJob | ExportJob) -> int | None:
+    start = job.started_at or job.created_at
+    end = job.completed_at or job.cancelled_at
+    if not end and job.status == JobStatus.running:
+        end = utcnow()
+    if not start or not end:
+        return None
+    if start.tzinfo is None and end.tzinfo is not None:
+        end = end.replace(tzinfo=None)
+    elif start.tzinfo is not None and end.tzinfo is None:
+        end = end.replace(tzinfo=start.tzinfo)
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
+def _admin_job_item(db: Session, job_type: str, job: AIJob | ExportJob) -> AdminJobItem:
+    demo = db.get(Demo, job.demo_id)
+    owner = db.get(User, job.owner_id)
+    organization = db.get(Organization, demo.organization_id) if demo and demo.organization_id else None
+    status_value = _job_status(job.status)
+    is_export = job_type == "export"
+    download_url = (
+        f"/api/admin/jobs/export/{job.id}/download"
+        if is_export and status_value == "complete" and getattr(job, "result_key", None) else None
+    )
+    return AdminJobItem(
+        id=job.id, job_type=job_type, kind=job.kind if is_export else "ai",
+        status=status_value, progress=job.progress, resource_id=job.demo_id,
+        resource_title=demo.title if demo else "", organization_id=demo.organization_id if demo else None,
+        organization_name=organization.name if organization else "", user_id=job.owner_id,
+        user_name=owner.name if owner else "", user_email=owner.email if owner else "",
+        model=getattr(job, "model", "") or "", step_id=getattr(job, "step_id", None),
+        error_code=job.error_code, error=job.error, retry_of_id=job.retry_of_id,
+        created_at=job.created_at, updated_at=job.updated_at, started_at=job.started_at,
+        completed_at=job.completed_at, cancelled_at=job.cancelled_at,
+        duration_ms=_job_duration_ms(job), download_url=download_url,
+        can_retry=status_value in {"failed", "cancelled"}, can_cancel=status_value in {"queued", "running"},
+    )
+
+
+def _admin_job_detail(db: Session, job_type: str, job: AIJob | ExportJob) -> AdminJobDetail:
+    item = _admin_job_item(db, job_type, job)
+    if job_type == "ai":
+        result = dict(job.result or {})
+        metadata = {
+            "model_config_id": job.model_config_id, "step_id": job.step_id,
+            "applied_demo_fields": len((job.applied_patch or {}).get("demo", {})),
+            "applied_steps": len((job.applied_patch or {}).get("steps", {})),
+            "applied_hotspots": len((job.applied_patch or {}).get("hotspots", {})),
+        }
+    else:
+        result = {}
+        metadata = {
+            "revision_id": job.revision_id, "result_available": bool(job.result_key),
+            "result_bytes": storage.size(job.result_key) if job.result_key else 0,
+        }
+    return AdminJobDetail(**item.model_dump(), result=result, metadata=metadata)
+
+
+def _job_statement(
+    model, job_type: str, query: str, status_filter: str, user_id: str,
+    organization_id: str, from_at: datetime | None, to_at: datetime | None,
+    include_status: bool = True,
+):
+    statement = select(model).join(Demo, Demo.id == model.demo_id).join(User, User.id == model.owner_id)
+    conditions = []
+    if query:
+        term = f"%{query.strip()}%"
+        type_field = model.model if job_type == "ai" else model.kind
+        conditions.append(or_(
+            model.id.ilike(term), Demo.title.ilike(term), User.email.ilike(term),
+            User.name.ilike(term), type_field.ilike(term),
+        ))
+    if include_status and status_filter:
+        conditions.append(model.status == JobStatus(status_filter))
+    if user_id:
+        conditions.append(model.owner_id == user_id)
+    if organization_id:
+        conditions.append(Demo.organization_id == organization_id)
+    if from_at:
+        conditions.append(model.created_at >= from_at)
+    if to_at:
+        conditions.append(model.created_at <= to_at)
+    return statement.where(*conditions)
+
+
+@router.get("/jobs", response_model=AdminJobPage)
+def admin_jobs(
+    query: str = "", job_type: str = "", status_filter: str = Query("", alias="status"),
+    user_id: str = "", organization_id: str = "", from_at: datetime | None = None,
+    to_at: datetime | None = None, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db), _: User = Depends(admin_user),
+):
+    if job_type not in {"", "ai", "export"}:
+        raise HTTPException(status_code=422, detail="invalid job type")
+    if status_filter not in {"", *(item.value for item in JobStatus)}:
+        raise HTTPException(status_code=422, detail="invalid job status")
+    models = [("ai", AIJob), ("export", ExportJob)]
+    if job_type:
+        models = [item for item in models if item[0] == job_type]
+    offset = (page - 1) * page_size
+    candidates: list[tuple[str, AIJob | ExportJob]] = []
+    total = 0
+    summary = {item.value: 0 for item in JobStatus}
+    for kind, model in models:
+        statement = _job_statement(model, kind, query, status_filter, user_id, organization_id, from_at, to_at)
+        total += db.scalar(select(func.count()).select_from(statement.order_by(None).subquery())) or 0
+        jobs = db.scalars(statement.order_by(model.created_at.desc()).limit(offset + page_size)).all()
+        candidates.extend((kind, item) for item in jobs)
+        summary_statement = _job_statement(model, kind, query, "", user_id, organization_id, from_at, to_at, False)
+        summary_subquery = summary_statement.subquery()
+        for value, count in db.execute(select(
+            summary_subquery.c.status, func.count()
+        ).group_by(summary_subquery.c.status)):
+            summary[_job_status(value)] = summary.get(_job_status(value), 0) + count
+    candidates.sort(key=lambda item: item[1].created_at, reverse=True)
+    selected = candidates[offset:offset + page_size]
+    return AdminJobPage(
+        items=[_admin_job_item(db, kind, job) for kind, job in selected], total=total,
+        page=page, page_size=page_size, summary=summary,
+    )
+
+
+def _admin_job_or_404(db: Session, job_type: str, job_id: str) -> AIJob | ExportJob:
+    model = AIJob if job_type == "ai" else ExportJob if job_type == "export" else None
+    job = db.get(model, job_id) if model else None
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job
+
+
+@router.get("/jobs/{job_type}/{job_id}", response_model=AdminJobDetail)
+def admin_job_detail(job_type: str, job_id: str, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return _admin_job_detail(db, job_type, _admin_job_or_404(db, job_type, job_id))
+
+
+@router.post("/jobs/{job_type}/{job_id}/cancel", response_model=AdminJobDetail)
+def cancel_admin_job(
+    job_type: str, job_id: str, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user),
+):
+    job = _admin_job_or_404(db, job_type, job_id)
+    before = _job_status(job.status)
+    if before not in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="only queued or running jobs can be cancelled")
+    demo = db.get(Demo, job.demo_id)
+    job.status = JobStatus.cancelled
+    job.cancelled_at = utcnow()
+    job.completed_at = job.cancelled_at
+    job.cancelled_by_id = actor.id
+    job.error = None
+    job.error_code = "job.cancelled_by_admin"
+    write_audit(
+        db, actor, "job.cancelled", "job", job.id,
+        f"{job_type}: {demo.title if demo else job.demo_id}", demo.organization_id if demo else None,
+        before={"status": before}, after={"status": "cancelled", "job_type": job_type}, request=request,
+    )
+    db.commit()
+    try:
+        celery.control.revoke(job.id, terminate=before == "running", signal="SIGTERM")
+    except Exception:
+        pass
+    db.refresh(job)
+    return _admin_job_detail(db, job_type, job)
+
+
+@router.post("/jobs/{job_type}/{job_id}/retry", response_model=AdminJobDetail, status_code=202)
+def retry_admin_job(
+    job_type: str, job_id: str, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user),
+):
+    source = _admin_job_or_404(db, job_type, job_id)
+    if _job_status(source.status) not in {"failed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="only failed or cancelled jobs can be retried")
+    demo = db.get(Demo, source.demo_id)
+    owner = db.get(User, source.owner_id)
+    if not demo or demo.deleted_at or not owner or owner.deleted_at:
+        raise HTTPException(status_code=409, detail="job resource or owner is no longer available")
+    if job_type == "ai":
+        if not active_model(db, source.model_config_id):
+            raise HTTPException(status_code=409, detail="configured AI model is unavailable")
+        target: AIJob | ExportJob = AIJob(
+            owner_id=source.owner_id, demo_id=source.demo_id, step_id=source.step_id,
+            model_config_id=source.model_config_id, model=source.model, retry_of_id=source.id,
+        )
+        task_name = "docflow.ai_generate"
+    else:
+        if not db.get(PublishedRevision, source.revision_id):
+            raise HTTPException(status_code=409, detail="published revision is no longer available")
+        target = ExportJob(
+            owner_id=source.owner_id, demo_id=source.demo_id, revision_id=source.revision_id,
+            kind=source.kind, retry_of_id=source.id,
+        )
+        task_name = "docflow.render_export"
+    db.add(target)
+    db.flush()
+    write_audit(
+        db, actor, "job.retried", "job", target.id, f"{job_type}: {demo.title}", demo.organization_id,
+        before={"source_job_id": source.id, "status": _job_status(source.status)},
+        after={"new_job_id": target.id, "status": "queued", "job_type": job_type}, request=request,
+    )
+    db.commit()
+    try:
+        celery.send_task(task_name, args=[target.id], task_id=target.id)
+    except Exception as exc:
+        target.status = JobStatus.failed
+        target.error_code = "job.dispatch_failed"
+        target.error = str(exc)
+        target.completed_at = utcnow()
+        db.commit()
+    db.refresh(target)
+    return _admin_job_detail(db, job_type, target)
+
+
+@router.get("/jobs/export/{job_id}/download")
+def download_admin_export(job_id: str, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    job = db.get(ExportJob, job_id)
+    if not job or job.status != JobStatus.complete or not job.result_key:
+        raise HTTPException(status_code=404, detail="export result not found")
+    suffix = {"pdf": "pdf", "mp4": "mp4", "markdown": "zip"}.get(job.kind, "bin")
+    media = {"pdf": "application/pdf", "mp4": "video/mp4", "markdown": "application/zip"}.get(job.kind, "application/octet-stream")
+    filename = f"DocFlow-{job.id}.{suffix}"
+    direct = storage.direct_url(job.result_key, filename)
+    if direct:
+        return RedirectResponse(direct, status_code=307)
+    return StreamingResponse(
+        io.BytesIO(storage.read(job.result_key)), media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

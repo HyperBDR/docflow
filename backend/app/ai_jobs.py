@@ -22,5 +22,5 @@ def enqueue_ai_job(db: Session, demo: Demo, user: User, step_id: str | None = No
     db.add(job)
     db.commit()
     db.refresh(job)
-    celery.send_task("docflow.ai_generate", args=[job.id])
+    celery.send_task("docflow.ai_generate", args=[job.id], task_id=job.id)
     return job

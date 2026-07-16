@@ -277,6 +277,48 @@ class AdminOverview(BaseModel):
     top_resources: list[OverviewResourceTraffic] = Field(default_factory=list)
 
 
+class AdminJobItem(BaseModel):
+    id: str
+    job_type: Literal["ai", "export"]
+    kind: str
+    status: Literal["queued", "running", "complete", "failed", "cancelled"]
+    progress: int = 0
+    resource_id: str
+    resource_title: str = ""
+    organization_id: str | None = None
+    organization_name: str = ""
+    user_id: str
+    user_name: str = ""
+    user_email: str = ""
+    model: str = ""
+    step_id: str | None = None
+    error_code: str | None = None
+    error: str | None = None
+    retry_of_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    duration_ms: int | None = None
+    download_url: str | None = None
+    can_retry: bool = False
+    can_cancel: bool = False
+
+
+class AdminJobDetail(AdminJobItem):
+    result: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
+
+class AdminJobPage(BaseModel):
+    items: list[AdminJobItem]
+    total: int
+    page: int
+    page_size: int
+    summary: dict[str, int] = Field(default_factory=dict)
+
+
 class AIModelConfigInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     provider: Literal["openai_compatible"] = "openai_compatible"

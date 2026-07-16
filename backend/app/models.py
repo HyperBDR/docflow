@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -26,6 +26,7 @@ class JobStatus(str, enum.Enum):
     running = "running"
     complete = "complete"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class User(Base):
@@ -295,6 +296,7 @@ class StepComment(Base):
 
 class ExportJob(Base):
     __tablename__ = "export_jobs"
+    __table_args__ = (Index("ix_export_jobs_status_created", "status", "created_at"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
@@ -305,12 +307,18 @@ class ExportJob(Base):
     result_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    retry_of_id: Mapped[str | None] = mapped_column(ForeignKey("export_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    cancelled_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
 class AIJob(Base):
     __tablename__ = "ai_jobs"
+    __table_args__ = (Index("ix_ai_jobs_status_created", "status", "created_at"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
@@ -324,6 +332,11 @@ class AIJob(Base):
     inverse_patch: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    retry_of_id: Mapped[str | None] = mapped_column(ForeignKey("ai_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    cancelled_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 

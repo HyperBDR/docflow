@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw
 
 from app.ai_models import active_model, ai_chunk_size
 from app.database import SessionLocal
-from app.models import AIJob, AIModelConfig, AIUsageRecord, Demo, Hotspot, JobStatus, Step
+from app.models import AIJob, AIModelConfig, AIUsageRecord, Demo, Hotspot, JobStatus, Step, now
 from app.storage import storage
 
 
@@ -342,10 +342,11 @@ def run_ai_generation(job_id: str) -> None:
     db = SessionLocal()
     try:
         job = db.get(AIJob, job_id)
-        if not job:
+        if not job or job.status == JobStatus.cancelled:
             return
         job.status = JobStatus.running
         job.progress = 5
+        job.started_at = job.started_at or now()
         db.commit()
         model = active_model(db, job.model_config_id)
         if not model:
@@ -363,6 +364,9 @@ def run_ai_generation(job_id: str) -> None:
             outline = {"title": demo.title, "description": demo.description}
         else:
             outline = chat_json(outline_prompt(steps, demo.content_locale), model, job, "outline")
+        db.refresh(job)
+        if job.status == JobStatus.cancelled:
+            return
         job.progress = 20
         db.commit()
 
@@ -373,21 +377,32 @@ def run_ai_generation(job_id: str) -> None:
             response = chat_json(chunk_prompt(chunk, outline, demo.content_locale, model.vision_enabled), model, job, "step_copy")
             if isinstance(response.get("steps"), list):
                 generated.extend(item for item in response["steps"] if isinstance(item, dict))
+            db.refresh(job)
+            if job.status == JobStatus.cancelled:
+                return
             job.progress = 20 + int(65 * min(len(steps), start + len(chunk)) / len(steps))
             db.commit()
 
+        db.refresh(job)
+        if job.status == JobStatus.cancelled:
+            return
         changes = apply_results(db, job, demo, outline, generated)
         job.result = {"outline": outline, "steps": generated, "changes": changes, "content_locale": demo.content_locale}
         job.status = JobStatus.complete
         job.progress = 100
+        job.completed_at = now()
         db.commit()
     except Exception as exc:
         db.rollback()
         job = db.get(AIJob, job_id)
         if job:
+            db.refresh(job)
+            if job.status == JobStatus.cancelled:
+                return
             job.status = JobStatus.failed
             job.error = f"{exc}\n{traceback.format_exc()[-1500:]}"
             job.error_code = "ai.generation_failed"
+            job.completed_at = now()
             db.commit()
         raise
     finally:

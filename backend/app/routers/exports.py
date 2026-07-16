@@ -54,7 +54,7 @@ def create_export(payload: ExportCreate, demo_id: str, db: Session = Depends(get
     db.add(job)
     db.commit()
     db.refresh(job)
-    celery.send_task("docflow.render_export", args=[job.id])
+    celery.send_task("docflow.render_export", args=[job.id], task_id=job.id)
     return export_out(job)
 
 
