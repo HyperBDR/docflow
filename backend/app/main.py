@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
 from app.errors import http_exception_response, validation_exception_response
-from app.routers import admin, ai, auth, demos, exports, extension, interactions, library, organizations, public, recordings, reorder, workspace
+from app.routers import admin, ai, auth, demos, exports, extension, interactions, library, monitoring, organizations, public, recordings, reorder, workspace
+from app.monitoring.request_metrics import RequestMetricsMiddleware
 
 
 @asynccontextmanager
@@ -25,8 +26,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestMetricsMiddleware)
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(monitoring.router)
 app.include_router(organizations.router)
 app.include_router(workspace.router)
 app.include_router(extension.router)

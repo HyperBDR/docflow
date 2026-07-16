@@ -18,6 +18,11 @@ import AdminAIUsage from './AdminAIUsage'
 import AdminAISettings from './AdminAISettings'
 import AdminStorage from './AdminStorage'
 import AdminJobs from './AdminJobs'
+import MonitoringOverview from './monitoring/MonitoringOverview'
+import AlertEvents from './monitoring/AlertEvents'
+import AlertRules from './monitoring/AlertRules'
+import NotificationChannels from './monitoring/NotificationChannels'
+import '../styles/monitoring.css'
 
 export default function AdminShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
   const { t } = useTranslation('admin')
@@ -26,6 +31,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
   const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => { localStorage.setItem(LAST_WORKSPACE_KEY, 'admin'); setMobileOpen(false) }, [location.pathname])
   const title = location.pathname.startsWith('/admin/resources/') ? t('resource.detailTitle')
+    : location.pathname.startsWith('/admin/monitoring') ? t('nav.monitoring')
     : location.pathname.startsWith('/admin/jobs') ? t('nav.jobs')
     : location.pathname.startsWith('/admin/storage') ? t('nav.storage')
     : location.pathname.startsWith('/admin/ai/settings') ? t('nav.aiSettings')
@@ -44,6 +50,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
       <nav aria-label={t('nav.platform')}>
         <NavLink end to="/admin" title={t('nav.overview')}><Icon name="grid" /><span>{t('nav.overview')}</span></NavLink>
         <NavLink to="/admin/jobs" title={t('nav.jobs')}><Icon name="list" /><span>{t('nav.jobs')}</span></NavLink>
+        <NavLink to="/admin/monitoring" title={t('nav.monitoring')}><Icon name="analytics" /><span>{t('nav.monitoring')}</span></NavLink>
         <div className="admin-nav-separator"><span>{t('nav.accounts')}</span></div>
         <NavLink to="/admin/organizations" title={t('nav.organizations')}><Icon name="users" /><span>{t('nav.organizations')}</span></NavLink>
         <NavLink to="/admin/users" title={t('nav.users')}><Icon name="user" /><span>{t('nav.users')}</span></NavLink>
@@ -66,6 +73,10 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
       <div className="admin-route-content"><Routes>
         <Route index element={<AdminOverview />} />
         <Route path="jobs" element={<AdminJobs />} />
+        <Route path="monitoring" element={<MonitoringOverview />} />
+        <Route path="monitoring/alerts" element={<AlertEvents />} />
+        <Route path="monitoring/rules" element={<AlertRules />} />
+        <Route path="monitoring/channels" element={<NotificationChannels />} />
         <Route path="users" element={<AdminUsers currentUser={user} onCurrentUserChange={onUserChange} />} />
         <Route path="resources" element={<AdminResources />} />
         <Route path="resources/:id" element={<AdminResourceDetail />} />

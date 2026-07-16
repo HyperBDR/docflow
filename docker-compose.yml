@@ -54,6 +54,21 @@ services:
       redis:
         condition: service_healthy
 
+  monitor:
+    build:
+      context: ./backend
+      target: api
+    command: celery -A app.worker.celery beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    env_file: .env
+    volumes:
+      - asset-data:/data
+      - ${DOCFLOW_HOST_STORAGE_DIR:-./storage-data}:/storage-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   web:
     build:
       context: ./web

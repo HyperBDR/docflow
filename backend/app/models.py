@@ -428,3 +428,74 @@ class StorageConfig(Base):
     created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class MonitoringSnapshot(Base):
+    """A compact time-series sample produced by the platform collector."""
+    __tablename__ = "monitoring_snapshots"
+    __table_args__ = (Index("ix_monitoring_snapshot_key_collected", "metric_key", "collected_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    metric_key: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="healthy", index=True)
+    value: Mapped[float] = mapped_column(Float, default=0)
+    unit: Mapped[str] = mapped_column(String(30), default="")
+    message: Mapped[str] = mapped_column(String(500), default="")
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class AlertRule(Base):
+    __tablename__ = "alert_rules"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(160))
+    metric_key: Mapped[str] = mapped_column(String(100), index=True)
+    operator: Mapped[str] = mapped_column(String(8), default="gte")
+    threshold: Mapped[float] = mapped_column(Float)
+    severity: Mapped[str] = mapped_column(String(20), default="warning", index=True)
+    consecutive_periods: Mapped[int] = mapped_column(Integer, default=2)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    built_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+    __table_args__ = (Index("ix_alert_event_status_started", "status", "started_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    rule_id: Mapped[str | None] = mapped_column(ForeignKey("alert_rules.id", ondelete="SET NULL"), nullable=True, index=True)
+    metric_key: Mapped[str] = mapped_column(String(100), index=True)
+    severity: Mapped[str] = mapped_column(String(20), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    message: Mapped[str] = mapped_column(String(1000), default="")
+    current_value: Mapped[float] = mapped_column(Float, default=0)
+    threshold: Mapped[float] = mapped_column(Float, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class NotificationChannel(Base):
+    __tablename__ = "notification_channels"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(20), index=True)  # webhook | email
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    target_encrypted: Mapped[str] = mapped_column(Text, default="")
+    minimum_severity: Mapped[str] = mapped_column(String(20), default="warning")
+    last_status: Mapped[str] = mapped_column(String(20), default="never")
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

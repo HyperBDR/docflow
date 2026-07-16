@@ -16,6 +16,10 @@ services:
     # Celery performs a warm shutdown so in-flight exports/AI jobs can finish.
     stop_grace_period: 30m
 
+  monitor:
+    image: ${REGISTRY}/docflow-api:${APP_VERSION}
+    restart: unless-stopped
+
   web:
     image: ${REGISTRY}/docflow-web:${APP_VERSION}
     restart: unless-stopped

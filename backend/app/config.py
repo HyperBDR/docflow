@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     snapshot_uncompressed_limit_mb: int = 50
     render_web_url: str = "http://web"
     chromium_executable: str = "/usr/bin/chromium"
+    monitoring_interval_seconds: int = 60
+    monitoring_retention_days: int = 7
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: bool = True
 
 
 @lru_cache

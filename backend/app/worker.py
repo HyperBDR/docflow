@@ -10,7 +10,15 @@ from app.storage import storage
 from app.ai_service import run_ai_generation
 
 celery = Celery("docflow", broker=settings.redis_url, backend=settings.redis_url)
-celery.conf.update(task_track_started=True, task_time_limit=1200, result_expires=3600)
+celery.conf.update(
+    task_track_started=True, task_time_limit=1200, result_expires=3600,
+    beat_schedule={
+        "collect-platform-monitoring": {
+            "task": "docflow.collect_monitoring",
+            "schedule": max(30, settings.monitoring_interval_seconds),
+        },
+    },
+)
 
 
 @celery.task(name="docflow.render_export")
@@ -76,3 +84,13 @@ def render_export(job_id: str):
 @celery.task(name="docflow.ai_generate")
 def ai_generate(job_id: str):
     run_ai_generation(job_id)
+
+
+@celery.task(name="docflow.collect_monitoring")
+def collect_platform_monitoring():
+    from app.monitoring.collector import collect_monitoring
+    db = SessionLocal()
+    try:
+        return collect_monitoring(db)
+    finally:
+        db.close()
