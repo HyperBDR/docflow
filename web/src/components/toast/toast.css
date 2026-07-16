@@ -1,0 +1,19 @@
+.toast-stack { position: fixed; z-index: 1000; top: 74px; right: 20px; width: min(380px, calc(100vw - 32px)); display: grid; gap: 10px; pointer-events: none; }
+.global-toast { --toast-color: #3a6fd8; --toast-soft: #edf4ff; position: relative; min-height: 74px; overflow: hidden; display: grid; grid-template-columns: 34px minmax(0,1fr) 26px; align-items: start; gap: 10px; padding: 14px 12px 13px 14px; border: 1px solid #dce3ee; border-radius: 14px; color: #263248; background: #fff; box-shadow: 0 18px 46px #1f29372e,0 3px 10px #1f293712; pointer-events: auto; animation: toast-enter .22s cubic-bezier(.2,.8,.2,1); }
+.global-toast.success { --toast-color: #1c9b5f; --toast-soft: #eaf8f1; }
+.global-toast.warning { --toast-color: #c47a19; --toast-soft: #fff5e5; }
+.global-toast.error { --toast-color: #cf4053; --toast-soft: #fff0f2; }
+.global-toast.task { --toast-color: #635bff; --toast-soft: #efedff; }
+.global-toast-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; color: var(--toast-color); background: var(--toast-soft); }
+.global-toast-copy { min-width: 0; padding-top: 1px; }
+.global-toast-copy strong { display: block; color: #263248; font-size: 13px; line-height: 1.4; }
+.global-toast-copy p { margin: 4px 0 0; color: #69758a; font-size: 11px; line-height: 1.5; }
+.global-toast-copy footer { margin-top: 8px; }
+.global-toast-copy footer a,.global-toast-copy footer button { width: auto; min-height: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; color: var(--toast-color); background: transparent; font-size: 11px; font-weight: 750; text-decoration: none; }
+.global-toast-close { width: 25px; height: 25px; padding: 0; border: 0; color: #8a94a5; background: transparent; font-size: 18px; line-height: 1; }
+.global-toast-close:hover { color: #344054; background: #f2f4f7; }
+.global-toast-timer { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--toast-color); transform-origin: left; animation: toast-timer linear forwards; opacity: .7; }
+@keyframes toast-enter { from { opacity: 0; transform: translateX(18px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes toast-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .global-toast,.global-toast-timer { animation: none; } }
+@media (max-width: 640px) { .toast-stack { top: auto; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); left: 16px; width: auto; } .global-toast { animation-name: toast-enter-mobile; } @keyframes toast-enter-mobile { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } } }

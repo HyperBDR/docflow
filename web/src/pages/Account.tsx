@@ -5,16 +5,17 @@ import { api } from '../api'
 import Icon from '../components/Icon'
 import UserAvatar from '../components/UserAvatar'
 import Brand from '../components/Brand'
+import { useToast } from '../components/toast'
 import { LAST_WORKSPACE_KEY } from '../components/AccountMenu'
 import { applyLocale } from '../i18n'
 import type { Locale, User } from '../types'
 
 export default function Account({ user, onUserChange, onPasswordChanged }: { user: User; onUserChange: (user: User) => void; onPasswordChanged: () => void }) {
   const { t } = useTranslation(['account', 'common'])
+  const toast = useToast()
   const [name, setName] = useState(user.name)
   const [locale, setLocale] = useState<Locale>(user.ui_locale)
   const [profileBusy, setProfileBusy] = useState(false)
-  const [profileMessage, setProfileMessage] = useState('')
   const [profileError, setProfileError] = useState('')
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -31,12 +32,12 @@ export default function Account({ user, onUserChange, onPasswordChanged }: { use
 
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault()
-    setProfileBusy(true); setProfileError(''); setProfileMessage('')
+    setProfileBusy(true); setProfileError('')
     try {
       const updated = await api.updateProfile({ name, ui_locale: locale })
       await applyLocale(updated.ui_locale)
       onUserChange(updated)
-      setProfileMessage(t('profile.saved'))
+      toast.success(t('profile.saved'))
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : t('common:errors.operationFailed'))
     } finally { setProfileBusy(false) }
@@ -68,8 +69,8 @@ export default function Account({ user, onUserChange, onPasswordChanged }: { use
           <NavLink to={`/account/preferences${suffix}`}><Icon name="globe" /><span>{t('preferences.title')}</span><Icon name="chevronRight" /></NavLink>
         </nav></aside>
         <section className="settings-card settings-content-card">
-          {tab === 'profile' && <><header><div><h2>{t('profile.title')}</h2><p>{t('profile.description')}</p></div><UserAvatar user={user} size={52} /></header><form onSubmit={saveProfile} className="settings-form"><label>{t('profile.name')}<input maxLength={100} value={name} onChange={event => setName(event.target.value)} placeholder={t('profile.namePlaceholder')} /></label><label>{t('profile.email')}<input value={user.email} disabled /></label><p className="field-help"><Icon name="lock" size={13} />{t('profile.emailHint')}</p>{profileError && <div className="error">{profileError}</div>}{profileMessage && <div className="success settings-message">{profileMessage}</div>}<div className="form-actions"><button className="primary icon-button" disabled={profileBusy}><Icon name="check" />{profileBusy ? t('saving') : t('common:actions.save')}</button></div></form></>}
-          {tab === 'preferences' && <><header><div className="settings-card-icon"><Icon name="globe" size={20} /></div><div><h2>{t('preferences.title')}</h2><p>{t('preferences.description')}</p></div></header><form onSubmit={saveProfile} className="settings-form"><label>{t('preferences.language')}<select value={locale} onChange={event => setLocale(event.target.value as Locale)}><option value="zh-CN">{t('common:language.zh-CN')}</option><option value="en">{t('common:language.en')}</option></select></label><p className="field-help">{t('preferences.languageHint')}</p>{profileError && <div className="error">{profileError}</div>}{profileMessage && <div className="success settings-message">{profileMessage}</div>}<div className="form-actions"><button className="primary icon-button" disabled={profileBusy}><Icon name="check" />{profileBusy ? t('saving') : t('common:actions.save')}</button></div></form></>}
+          {tab === 'profile' && <><header><div><h2>{t('profile.title')}</h2><p>{t('profile.description')}</p></div><UserAvatar user={user} size={52} /></header><form onSubmit={saveProfile} className="settings-form"><label>{t('profile.name')}<input maxLength={100} value={name} onChange={event => setName(event.target.value)} placeholder={t('profile.namePlaceholder')} /></label><label>{t('profile.email')}<input value={user.email} disabled /></label><p className="field-help"><Icon name="lock" size={13} />{t('profile.emailHint')}</p>{profileError && <div className="error">{profileError}</div>}<div className="form-actions"><button className="primary icon-button" disabled={profileBusy}><Icon name="check" />{profileBusy ? t('saving') : t('common:actions.save')}</button></div></form></>}
+          {tab === 'preferences' && <><header><div className="settings-card-icon"><Icon name="globe" size={20} /></div><div><h2>{t('preferences.title')}</h2><p>{t('preferences.description')}</p></div></header><form onSubmit={saveProfile} className="settings-form"><label>{t('preferences.language')}<select value={locale} onChange={event => setLocale(event.target.value as Locale)}><option value="zh-CN">{t('common:language.zh-CN')}</option><option value="en">{t('common:language.en')}</option></select></label><p className="field-help">{t('preferences.languageHint')}</p>{profileError && <div className="error">{profileError}</div>}<div className="form-actions"><button className="primary icon-button" disabled={profileBusy}><Icon name="check" />{profileBusy ? t('saving') : t('common:actions.save')}</button></div></form></>}
           {tab === 'security' && <><header><div className="settings-card-icon warm"><Icon name="lock" size={20} /></div><div><h2>{t('security.title')}</h2><p>{t('security.description')}</p></div></header><form onSubmit={changePassword} className="settings-form"><label>{t('security.currentPassword')}<input type="password" minLength={8} maxLength={128} required value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} autoComplete="current-password" /></label><label>{t('security.newPassword')}<input type="password" minLength={8} maxLength={128} required value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder={t('security.passwordHint')} autoComplete="new-password" /></label><label>{t('security.confirmPassword')}<input type="password" minLength={8} maxLength={128} required value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>{passwordError && <div className="error">{passwordError}</div>}<div className="form-actions"><button className="primary icon-button" disabled={passwordBusy}><Icon name="lock" />{passwordBusy ? t('changing') : t('security.change')}</button></div></form></>}
         </section>
       </div>

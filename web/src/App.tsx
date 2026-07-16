@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from './api'
 import { applyLocale, normalizeLocale } from './i18n'
-import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
 import Player from './pages/Player'
 import SnapshotFrame from './pages/SnapshotFrame'
@@ -14,9 +13,9 @@ import Invite from './pages/Invite'
 import TeamSpaceSettings from './pages/TeamSpaceSettings'
 import ExtensionConnect from './pages/ExtensionConnect'
 import Brand from './components/Brand'
-import AccountMenu, { LAST_WORKSPACE_KEY } from './components/AccountMenu'
+import { LAST_WORKSPACE_KEY } from './components/AccountMenu'
 import LanguageSwitcher from './components/LanguageSwitcher'
-import WorkspaceSwitcher from './components/WorkspaceSwitcher'
+import WorkspaceShell from './pages/workspace/WorkspaceShell'
 import type { User } from './types'
 
 function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
@@ -63,11 +62,6 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
   </main>
 }
 
-function WorkspaceShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
-  useEffect(() => { localStorage.setItem(LAST_WORKSPACE_KEY, 'user') }, [])
-  return <div className="app-shell"><header className="workspace-header"><Link className="brand" to="/"><Brand /></Link><div className="topbar-account-actions"><WorkspaceSwitcher user={user} onUserChange={onUserChange} /><LanguageSwitcher account /><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></div></header><Dashboard /></div>
-}
-
 function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
   return <Routes>
     <Route path="/admin/*" element={user.role === 'admin' ? <AdminShell user={user} onUserChange={onUserChange} logout={logout} /> : <Navigate to="/" />} />
@@ -76,8 +70,7 @@ function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserCh
     <Route path="/extension/connect" element={<ExtensionConnect />} />
     <Route path="/demos/:id/analytics" element={<Analytics />} />
     <Route path="/demos/:id" element={<Editor />} />
-    <Route path="/" element={<WorkspaceShell user={user} onUserChange={onUserChange} logout={logout} />} />
-    <Route path="*" element={<Navigate to="/" />} />
+    <Route path="/*" element={<WorkspaceShell user={user} onUserChange={onUserChange} logout={logout} />} />
   </Routes>
 }
 

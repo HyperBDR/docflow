@@ -16,6 +16,8 @@ import accountZh from './locales/zh-CN/account.json'
 import accountEn from './locales/en/account.json'
 import adminZh from './locales/zh-CN/admin.json'
 import adminEn from './locales/en/admin.json'
+import workspaceZh from './locales/zh-CN/workspace.json'
+import workspaceEn from './locales/en/workspace.json'
 
 export type Locale = 'zh-CN' | 'en'
 export const UI_LOCALE_KEY = 'docflow.uiLocale'
@@ -33,8 +35,8 @@ const initialLocale = detectedLocale()
 
 void i18n.use(initReactI18next).init({
   resources: {
-    'zh-CN': { common: commonZh, auth: authZh, dashboard: dashboardZh, analytics: analyticsZh, player: playerZh, editor: editorZh, account: accountZh, admin: adminZh },
-    en: { common: commonEn, auth: authEn, dashboard: dashboardEn, analytics: analyticsEn, player: playerEn, editor: editorEn, account: accountEn, admin: adminEn },
+    'zh-CN': { common: commonZh, auth: authZh, dashboard: dashboardZh, analytics: analyticsZh, player: playerZh, editor: editorZh, account: accountZh, admin: adminZh, workspace: workspaceZh },
+    en: { common: commonEn, auth: authEn, dashboard: dashboardEn, analytics: analyticsEn, player: playerEn, editor: editorEn, account: accountEn, admin: adminEn, workspace: workspaceEn },
   },
   lng: initialLocale,
   fallbackLng: 'en',

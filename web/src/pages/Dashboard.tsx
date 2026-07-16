@@ -5,6 +5,7 @@ import { api } from '../api'
 import { copyText } from '../clipboard'
 import { formatDate } from '../i18n'
 import Icon from '../components/Icon'
+import { useToast } from '../components/toast'
 import type { Category, Demo, Tag } from '../types'
 
 type Dialog = 'categories' | 'move' | 'tags' | 'merge' | null
@@ -23,12 +24,11 @@ export default function Dashboard() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [tagTargets, setTagTargets] = useState<Demo[] | null>(null)
   const [openMenu, setOpenMenu] = useState<string | null>(null)
-  const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
+  const toast = useToast()
 
-  useEffect(() => { Promise.all([api.demos(), api.categories(), api.tags()]).then(([demoItems, categoryItems, tagItems]) => { setDemos(demoItems); setCategories(categoryItems); setTags(tagItems) }).catch(value => setError(value.message)) }, [])
+  useEffect(() => { Promise.all([api.demos(), api.categories(), api.tags()]).then(([demoItems, categoryItems, tagItems]) => { setDemos(demoItems); setCategories(categoryItems); setTags(tagItems) }).catch(showError) }, [])
   useEffect(() => {
     if (!openMenu) return
     const close = () => setOpenMenu(null)
@@ -50,7 +50,7 @@ export default function Dashboard() {
       && text.includes(query.trim().toLowerCase())
   }), [demos, query, status, categoryFilter, categoryIds, tagFilter])
 
-  function showError(value: unknown) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
+  function showError(value: unknown) { toast.error(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
   function toggle(id: string) { setSelected(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next }) }
   function setDisplay(next: 'grid' | 'list') { setView(next); localStorage.setItem('docflow-library-view', next) }
   function categoryCount(id?: string) {
@@ -61,37 +61,36 @@ export default function Dashboard() {
 
   async function remove(ids: string[]) {
     if (!ids.length || !window.confirm(t('messages.deleteConfirm', { count: ids.length }))) return
-    setBusy(true); setError('')
-    try { await Promise.all(ids.map(id => api.deleteDemo(id))); setDemos(current => current.filter(item => !ids.includes(item.id))); setSelected(new Set()); setNotice(t('messages.deleted', { count: ids.length })) }
+    setBusy(true)
+    try { await Promise.all(ids.map(id => api.deleteDemo(id))); setDemos(current => current.filter(item => !ids.includes(item.id))); setSelected(new Set()); toast.success(t('messages.deleted', { count: ids.length })) }
     catch (value) { showError(value) } finally { setBusy(false) }
   }
   async function duplicate(items: Demo[]) {
     if (!items.length) return
-    setBusy(true); setError('')
-    try { const copied = await Promise.all(items.map(item => api.duplicateDemo(item.id))); setDemos(current => [...copied, ...current]); setSelected(new Set(copied.map(item => item.id))); setNotice(t('messages.duplicated', { count: copied.length })) }
+    setBusy(true)
+    try { const copied = await Promise.all(items.map(item => api.duplicateDemo(item.id))); setDemos(current => [...copied, ...current]); setSelected(new Set(copied.map(item => item.id))); toast.success(t('messages.duplicated', { count: copied.length })) }
     catch (value) { showError(value) } finally { setBusy(false) }
   }
   async function share(items: Demo[]) {
     if (!items.length) return
-    setBusy(true); setError('')
+    setBusy(true)
     try {
       const results = await Promise.allSettled(items.map(item => item.share_url ? Promise.resolve(item) : api.publish(item.id)))
       const published = results.flatMap(result => result.status === 'fulfilled' && result.value.share_url ? [result.value] : [])
       if (!published.length) throw new Error(t('messages.shareFailed'))
       await copyText(published.map(item => item.share_url).join('\n'))
-      const updates = new Map(published.map(item => [item.id, item])); setDemos(current => current.map(item => updates.has(item.id) ? { ...item, ...updates.get(item.id)! } : item)); setNotice(t('messages.linksCopied', { count: published.length }))
+      const updates = new Map(published.map(item => [item.id, item])); setDemos(current => current.map(item => updates.has(item.id) ? { ...item, ...updates.get(item.id)! } : item)); toast.success(t('messages.linksCopied', { count: published.length }))
     } catch (value) { showError(value) } finally { setBusy(false) }
   }
   async function revoke(demo: Demo) {
     if (!window.confirm(t('messages.revokeConfirm', { title: demo.title }))) return
     setBusy(true)
-    try { const updated = await api.revoke(demo.id); setDemos(current => current.map(item => item.id === updated.id ? { ...item, ...updated } : item)); setNotice(t('messages.revoked')) }
+    try { const updated = await api.revoke(demo.id); setDemos(current => current.map(item => item.id === updated.id ? { ...item, ...updated } : item)); toast.success(t('messages.revoked')) }
     catch (value) { showError(value) } finally { setBusy(false) }
   }
 
   return <main className={`page resource-page library-page ${selected.size ? 'has-bulk-selection' : ''}`}>
     <div className="page-title"><div><h1>{t('title')}</h1><p className="muted">{t('subtitle')}</p></div></div>
-    {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
 
     <div className="library-layout">
       <aside className="library-sidebar">
@@ -147,9 +146,9 @@ export default function Dashboard() {
       </section>
     </div>
     {dialog === 'categories' && <CategoryDialog categories={categories} onClose={() => { setDialog(null); api.demos().then(setDemos).catch(showError) }} onChange={setCategories} onError={showError} />}
-    {dialog === 'move' && <MoveDialog categories={categories} count={selected.size} onClose={() => setDialog(null)} onMove={async categoryId => { setBusy(true); try { const updates = await Promise.all(selectedDemos.map(item => api.updateDemo(item.id, { category_id: categoryId || null }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setNotice(t('messages.moved')) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
-    {dialog === 'tags' && <TagDialog tags={tags} demos={tagTargets ?? selectedDemos} onClose={() => { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError) }} onTags={setTags} onApply={async ids => { const targets = tagTargets ?? selectedDemos; if (!targets.length) { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError); return } setBusy(true); try { const updates = await Promise.all(targets.map(item => api.updateDemo(item.id, { tag_ids: ids }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setTagTargets(null); setNotice(targets.length === 1 ? t('messages.demoTagsUpdated', { title: targets[0].title }) : t('messages.tagsUpdated')) } catch (value) { showError(value) } finally { setBusy(false) } }} onError={showError} />}
-    {dialog === 'merge' && <MergeDialog demos={selectedDemos} categories={categories} onClose={() => setDialog(null)} onMerge={async (ids, name, categoryId) => { setBusy(true); try { const merged = await api.mergeDemos(ids, name, categoryId); setDemos(current => [merged, ...current]); setSelected(new Set([merged.id])); setDialog(null); setNotice(t('messages.merged', { title: merged.title })) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
+    {dialog === 'move' && <MoveDialog categories={categories} count={selected.size} onClose={() => setDialog(null)} onMove={async categoryId => { setBusy(true); try { const updates = await Promise.all(selectedDemos.map(item => api.updateDemo(item.id, { category_id: categoryId || null }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); toast.success(t('messages.moved')) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
+    {dialog === 'tags' && <TagDialog tags={tags} demos={tagTargets ?? selectedDemos} onClose={() => { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError) }} onTags={setTags} onApply={async ids => { const targets = tagTargets ?? selectedDemos; if (!targets.length) { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError); return } setBusy(true); try { const updates = await Promise.all(targets.map(item => api.updateDemo(item.id, { tag_ids: ids }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setTagTargets(null); toast.success(targets.length === 1 ? t('messages.demoTagsUpdated', { title: targets[0].title }) : t('messages.tagsUpdated')) } catch (value) { showError(value) } finally { setBusy(false) } }} onError={showError} />}
+    {dialog === 'merge' && <MergeDialog demos={selectedDemos} categories={categories} onClose={() => setDialog(null)} onMerge={async (ids, name, categoryId) => { setBusy(true); try { const merged = await api.mergeDemos(ids, name, categoryId); setDemos(current => [merged, ...current]); setSelected(new Set([merged.id])); setDialog(null); toast.success(t('messages.merged', { title: merged.title })) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
   </main>
 }
 

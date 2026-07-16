@@ -5,6 +5,7 @@ import { api } from '../api'
 import Icon from '../components/Icon'
 import AdminPagination from '../components/AdminPagination'
 import UserAvatar from '../components/UserAvatar'
+import { useToast } from '../components/toast'
 import { formatDate, formatNumber, normalizeLocale } from '../i18n'
 import type { AdminOrganization, AdminUser, Locale, OrganizationRole, User, UserRole } from '../types'
 
@@ -17,6 +18,7 @@ function formatBytes(bytes: number, locale: Locale) {
 
 export default function Admin({ currentUser, onCurrentUserChange }: { currentUser: User; onCurrentUserChange: (user: User) => void }) {
   const { t, i18n } = useTranslation(['admin', 'common'])
+  const toast = useToast()
   const locale = normalizeLocale(i18n.language)
   const [searchParams, setSearchParams] = useSearchParams()
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -30,7 +32,6 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
   const [draft, setDraft] = useState({ name: '', email: '', role: 'user' as UserRole, is_active: true, ui_locale: 'zh-CN' as Locale })
   const [password, setPassword] = useState('')
   const [passwordBusy, setPasswordBusy] = useState(false)
@@ -58,7 +59,7 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   useEffect(() => {
     if (!selected) return
     setDraft({ name: selected.name, email: selected.email, role: selected.role, is_active: selected.is_active, ui_locale: selected.ui_locale })
-    setPassword(''); setMembershipOrganization(''); setMembershipRole('viewer'); setMessage(''); setError('')
+    setPassword(''); setMembershipOrganization(''); setMembershipRole('viewer'); setError('')
   }, [selected?.id])
   useEffect(() => {
     const userId = searchParams.get('user')
@@ -74,13 +75,13 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   async function saveUser(event: React.FormEvent) {
     event.preventDefault()
     if (!selected) return
-    setBusy(true); setError(''); setMessage('')
+    setBusy(true); setError('')
     try {
       const updated = await api.updateAdminUser(selected.id, draft)
       setSelected(updated)
       setUsers(items => items.map(item => item.id === updated.id ? updated : item))
       if (updated.id === currentUser.id) onCurrentUserChange(updated)
-      setMessage(t('detail.saved'))
+      toast.success(t('detail.saved'))
     } catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setBusy(false) }
   }
@@ -88,10 +89,10 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   async function resetPassword(event: React.FormEvent) {
     event.preventDefault()
     if (!selected) return
-    setPasswordBusy(true); setError(''); setMessage('')
+    setPasswordBusy(true); setError('')
     try {
       await api.resetAdminPassword(selected.id, password)
-      setPassword(''); setMessage(t('security.resetDone'))
+      setPassword(''); toast.success(t('security.resetDone'))
     } catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setPasswordBusy(false) }
   }
@@ -113,26 +114,26 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
   async function addMembership(event: React.FormEvent) {
     event.preventDefault()
     if (!selected || !membershipOrganization) return
-    setMembershipBusy('add'); setError(''); setMessage('')
+    setMembershipBusy('add'); setError('')
     try {
       applyUserUpdate(await api.addAdminUserMembership(selected.id, membershipOrganization, membershipRole))
-      setMembershipOrganization(''); setMembershipRole('viewer'); setMessage(t('teams.added'))
+      setMembershipOrganization(''); setMembershipRole('viewer'); toast.success(t('teams.added'))
     } catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setMembershipBusy('') }
   }
 
   async function updateMembership(membershipId: string, role: OrganizationRole) {
     if (!selected) return
-    setMembershipBusy(membershipId); setError(''); setMessage('')
-    try { applyUserUpdate(await api.updateAdminUserMembership(selected.id, membershipId, role)); setMessage(t('teams.updated')) }
+    setMembershipBusy(membershipId); setError('')
+    try { applyUserUpdate(await api.updateAdminUserMembership(selected.id, membershipId, role)); toast.success(t('teams.updated')) }
     catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setMembershipBusy('') }
   }
 
   async function removeMembership(membershipId: string, organizationName: string) {
     if (!selected || !window.confirm(t('teams.removeConfirm', { organization: organizationName }))) return
-    setMembershipBusy(membershipId); setError(''); setMessage('')
-    try { applyUserUpdate(await api.deleteAdminUserMembership(selected.id, membershipId)); setMessage(t('teams.removed')) }
+    setMembershipBusy(membershipId); setError('')
+    try { applyUserUpdate(await api.deleteAdminUserMembership(selected.id, membershipId)); toast.success(t('teams.removed')) }
     catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setMembershipBusy('') }
   }
@@ -188,7 +189,6 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
           ] as const).map(([tab, icon, label]) => <button key={tab} className={detailTab === tab ? 'active' : ''} onClick={() => setDetailTab(tab)}><Icon name={icon} />{t(label)}</button>)}
         </nav>
         <div className="admin-user-drawer-body">
-          {message && <div className="success admin-user-feedback"><Icon name="check" />{message}</div>}
           {error && <div className="error admin-user-feedback">{error}</div>}
           {detailTab === 'account' && <section className="admin-user-section">
             <div className="admin-user-section-title"><span><Icon name="user" /></span><div><h3>{t('detail.account')}</h3><p>{t('detail.accountHelp')}</p></div></div>

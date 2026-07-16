@@ -1,6 +1,6 @@
 {
   "language": { "label": "语言", "zh-CN": "中文", "en": "English", "switchTo": "切换语言" },
-  "actions": { "close": "关闭", "cancel": "取消", "confirm": "确认", "save": "保存", "create": "创建", "edit": "编辑", "delete": "删除", "copy": "复制", "share": "共享", "open": "打开", "download": "下载", "back": "返回", "next": "下一步", "previous": "上一步", "retry": "重试", "more": "更多操作", "publish": "发布", "preview": "预览", "search": "搜索", "clear": "清除", "remove": "移除", "add": "添加", "apply": "应用", "logout": "退出" },
+  "actions": { "close": "关闭", "cancel": "取消", "confirm": "确认", "save": "保存", "create": "创建", "edit": "编辑", "delete": "删除", "copy": "复制", "share": "共享", "open": "打开", "view": "查看任务", "download": "下载", "back": "返回", "next": "下一步", "previous": "上一步", "retry": "重试", "more": "更多操作", "publish": "发布", "preview": "预览", "search": "搜索", "clear": "清除", "remove": "移除", "add": "添加", "apply": "应用", "logout": "退出" },
   "navigation": { "account": "个人设置", "admin": "后台管理" },
   "workspace": { "adminView": "管理员视图", "userView": "普通用户视图", "backToUser": "返回我的工作台", "enterAdmin": "进入管理后台" },
   "organization": { "label": "当前空间", "personalGroup": "个人空间", "teamGroup": "团队空间", "manage": "管理当前团队空间", "create": "创建团队空间", "createTitle": "创建团队空间", "createHelp": "团队空间用于隔离成员、资源和权限，由平台管理员创建并指定所有者。", "name": "团队空间名称", "placeholder": "例如：市场团队", "createAction": "创建并切换", "creating": "正在创建…" },

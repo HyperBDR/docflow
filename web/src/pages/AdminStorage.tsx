@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { API_URL, api } from '../api'
 import Icon from '../components/Icon'
+import { useToast } from '../components/toast'
 import { formatDate, normalizeLocale } from '../i18n'
 import type { StorageConfig, StorageConfigInput, StorageObject } from '../types'
 
@@ -17,10 +18,11 @@ function bytes(value: number) {
 
 export default function AdminStorage() {
   const { t, i18n } = useTranslation(['admin', 'common']); const locale = normalizeLocale(i18n.language)
+  const toast = useToast()
   const [items, setItems] = useState<StorageConfig[]>([]), [editing, setEditing] = useState<StorageConfig | null | undefined>(undefined)
   const [draft, setDraft] = useState<StorageConfigInput>(localDefault), [busy, setBusy] = useState(false), [testing, setTesting] = useState('')
   const [selected, setSelected] = useState<StorageConfig | null>(null), [objects, setObjects] = useState<StorageObject[]>([]), [prefix, setPrefix] = useState(''), [browserBusy, setBrowserBusy] = useState(false)
-  const [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
   const load = async () => { const value = await api.storageConfigs(); setItems(value); setSelected(current => current ? value.find(item => item.id === current.id) || null : current) }
   useEffect(() => { load().catch(value => setError(value.message)) }, [])
   async function browse(target: StorageConfig, nextPrefix = '') {
@@ -28,18 +30,18 @@ export default function AdminStorage() {
     try { setObjects(await api.storageObjects(target.id, nextPrefix)) } catch (value) { setError((value as Error).message) } finally { setBrowserBusy(false) }
   }
   function open(item?: StorageConfig, kind: 'local' | 's3' = 'local') {
-    setEditing(item || null); setError(''); setNotice('')
+    setEditing(item || null); setError('')
     if (!item) { setDraft({ ...(kind === 'local' ? localDefault : s3Default), is_default: !items.length }); return }
     setDraft({ name: item.name, kind: item.kind, enabled: item.enabled, is_default: item.is_default, local_path: item.local_path, endpoint_url: item.endpoint_url, region: item.region, bucket: item.bucket, prefix: item.prefix, force_path_style: item.force_path_style, direct_download: item.direct_download, public_base_url: item.public_base_url, access_key: '', secret_key: '' })
   }
   async function save(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError('')
-    try { editing ? await api.updateStorageConfig(editing.id, draft) : await api.createStorageConfig(draft); setEditing(undefined); await load(); setNotice(t('storage.saved')) }
+    try { editing ? await api.updateStorageConfig(editing.id, draft) : await api.createStorageConfig(draft); setEditing(undefined); await load(); toast.success(t('storage.saved')) }
     catch (value) { setError((value as Error).message) } finally { setBusy(false) }
   }
   async function test(target: StorageConfig) {
-    setTesting(target.id); setError(''); setNotice('')
-    try { const result = await api.testStorageConfig(target.id); const stats = await api.storageStats(target.id); setItems(current => current.map(item => item.id === target.id ? { ...item, ...stats } : item)); setNotice(t('storage.testSuccess', { value: result.latency_ms })) }
+    setTesting(target.id); setError('')
+    try { const result = await api.testStorageConfig(target.id); const stats = await api.storageStats(target.id); setItems(current => current.map(item => item.id === target.id ? { ...item, ...stats } : item)); toast.success(t('storage.testSuccess', { value: result.latency_ms })) }
     catch (value) { setError((value as Error).message) } finally { setTesting('') }
   }
   async function patch(target: StorageConfig, values: Partial<StorageConfigInput>) {
@@ -55,7 +57,7 @@ export default function AdminStorage() {
   }
   const crumbs = useMemo(() => prefix ? prefix.split('/').map((name, index, all) => ({ name, key: all.slice(0, index + 1).join('/') })) : [], [prefix])
   return <div className="admin-content-page storage-page"><div className="admin-page-intro"><div><h1>{t('storage.title')}</h1><p>{t('storage.subtitle')}</p></div><div className="storage-add-actions"><button className="icon-button" onClick={() => open(undefined, 'local')}><Icon name="database" />{t('storage.addLocal')}</button><button className="primary icon-button" onClick={() => open(undefined, 's3')}><Icon name="globe" />{t('storage.addObject')}</button></div></div>
-    {error && editing === undefined && <div className="error">{error}</div>}{notice && <div className="success settings-message">{notice}</div>}
+    {error && editing === undefined && <div className="error">{error}</div>}
     <div className="storage-deploy-note"><Icon name="warning" /><div><strong>{t('storage.deployTitle')}</strong><p>{t('storage.deployHint')}</p><code>DOCFLOW_HOST_STORAGE_DIR=/srv/docflow-data → /storage-data</code></div></div>
     <section className="admin-list-card storage-list"><table><thead><tr><th>{t('storage.columns.name')}</th><th>{t('storage.columns.location')}</th><th>{t('storage.columns.namespace')}</th><th>{t('storage.columns.usage')}</th><th>{t('storage.columns.status')}</th><th /></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><div className="storage-name"><span className={item.kind}><Icon name={item.kind === 'local' ? 'database' : 'globe'} /></span><div><strong>{item.name}</strong><small>{t(`storage.kinds.${item.kind}`)}</small></div>{item.is_default && <em>{t('storage.default')}</em>}</div></td><td><code>{item.kind === 'local' ? item.local_path : item.endpoint_url || 'Amazon S3'}</code>{item.kind === 's3' && <small>{item.bucket}</small>}</td><td><code>{item.prefix || '/'}</code><small>{item.kind === 's3' && item.direct_download ? t('storage.direct') : t('storage.proxy')}</small></td><td><strong>{bytes(item.total_bytes)}</strong><small>{item.object_count < 0 ? t('storage.usagePending') : t('storage.objects', { count: item.object_count })}</small></td><td><button className={`model-toggle ${item.enabled ? 'active' : ''}`} disabled={item.is_default} onClick={() => patch(item, { enabled: !item.enabled })}><i />{t(item.enabled ? 'storage.enabled' : 'storage.disabled')}</button></td><td><div className="table-actions"><button onClick={() => browse(item)}><Icon name="folder" />{t('storage.browse')}</button><button disabled={testing === item.id} onClick={() => test(item)}>{testing === item.id ? <span className="action-spinner" /> : <Icon name="link" />}{t('storage.test')}</button>{!item.is_default && <button onClick={() => patch(item, { is_default: true })}>{t('storage.setDefault')}</button>}<button onClick={() => open(item)}><Icon name="edit" /></button><button className="danger" onClick={() => remove(item)}><Icon name="delete" /></button></div></td></tr>)}</tbody></table></section>
     {selected && <section className="admin-list-card storage-browser"><header><div><span><Icon name={selected.kind === 'local' ? 'database' : 'globe'} /></span><div><strong>{selected.name}</strong><nav><button onClick={() => browse(selected, '')}>/</button>{crumbs.map(item => <button key={item.key} onClick={() => browse(selected, item.key)}>{item.name} /</button>)}</nav></div></div><button onClick={() => setSelected(null)}>×</button></header><div className="storage-object-list"><div className="storage-object-head"><span>{t('storage.browser.name')}</span><span>{t('storage.browser.size')}</span><span>{t('storage.browser.updated')}</span><span /></div>{objects.map(object => <div key={object.key}><span><Icon name={object.is_directory ? 'folder' : 'text'} /><button onClick={() => object.is_directory && browse(selected, object.key)}>{object.name}</button></span><span>{object.is_directory ? '—' : bytes(object.size)}</span><span>{object.updated_at ? formatDate(object.updated_at, locale) : '—'}</span><span>{!object.is_directory && <><a className="button" href={`${API_URL}/api/admin/storage/configs/${selected.id}/objects/download?${new URLSearchParams({ key: object.key })}`}><Icon name="download" /></a><button className="danger" onClick={() => removeObject(object)}><Icon name="delete" /></button></>}</span></div>)}{browserBusy && <div className="admin-table-state"><span className="action-spinner" />{t('loading')}</div>}{!browserBusy && !objects.length && <div className="storage-browser-empty">{t('storage.browser.empty')}</div>}</div></section>}

@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import Icon from '../components/Icon'
+import { useToast } from '../components/toast'
 import type { AIModelConfig, AIModelInput } from '../types'
 
 const emptyModel: AIModelInput = { name: '', base_url: 'https://api.openai.com/v1', api_key: '', model: 'gpt-4.1-mini', enabled: true, is_default: false, vision_enabled: true, timeout_seconds: 120, temperature: .2, extra_options: {} }
 
 export default function AdminAIModels() {
   const { t } = useTranslation(['admin', 'common'])
+  const toast = useToast()
   const [items, setItems] = useState<AIModelConfig[]>([]), [editing, setEditing] = useState<AIModelConfig | null | undefined>(undefined)
   const [draft, setDraft] = useState<AIModelInput>(emptyModel), [busy, setBusy] = useState(false), [error, setError] = useState('')
-  const [testing, setTesting] = useState(''), [notice, setNotice] = useState('')
+  const [testing, setTesting] = useState('')
   const load = () => api.aiModels().then(setItems).catch(value => setError(value.message))
   useEffect(() => { void load() }, [])
   function open(item?: AIModelConfig) {
@@ -33,12 +35,12 @@ export default function AdminAIModels() {
     try { await api.updateAIModel(item.id, { is_default: true }); await load() } catch (value) { setError((value as Error).message) }
   }
   async function testConnection(item: AIModelConfig) {
-    setTesting(item.id); setError(''); setNotice('')
-    try { const result = await api.testAIModel(item.id); setNotice(t('models.testSuccess', { value: result.latency_ms })) }
+    setTesting(item.id); setError('')
+    try { const result = await api.testAIModel(item.id); toast.success(t('models.testSuccess', { value: result.latency_ms })) }
     catch (value) { setError((value as Error).message) } finally { setTesting('') }
   }
   return <div className="admin-content-page"><div className="admin-page-intro"><div><h1>{t('models.title')}</h1><p>{t('models.subtitle')}</p></div><button className="primary icon-button" onClick={() => open()}><Icon name="plus" />{t('models.add')}</button></div>
-    {error && editing === undefined && <div className="error">{error}</div>}{notice && <div className="success settings-message">{notice}</div>}
+    {error && editing === undefined && <div className="error">{error}</div>}
     <section className="admin-list-card ai-model-list"><table><thead><tr><th>{t('models.columns.name')}</th><th>{t('models.columns.endpoint')}</th><th>{t('models.columns.model')}</th><th>{t('models.columns.capability')}</th><th>{t('models.columns.status')}</th><th /></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><div className="ai-model-name"><span><Icon name="ai" /></span><div><strong>{item.name}</strong><small>{item.provider}</small></div>{item.is_default && <em>{t('models.default')}</em>}</div></td><td><code>{item.base_url}</code></td><td><strong>{item.model}</strong></td><td><span>{item.vision_enabled ? t('models.vision') : t('models.textOnly')}</span><small>{t('models.timeout', { value: item.timeout_seconds })}</small></td><td><button className={`model-toggle ${item.enabled ? 'active' : ''}`} onClick={() => toggle(item)} disabled={item.is_default}><i />{t(item.enabled ? 'models.enabled' : 'models.disabled')}</button></td><td><div className="table-actions"><button disabled={testing === item.id} onClick={() => testConnection(item)}>{testing === item.id ? <span className="action-spinner" /> : <Icon name="link" />}{t('models.test')}</button>{!item.is_default && <button onClick={() => makeDefault(item)}>{t('models.setDefault')}</button>}<button title={t('common:actions.edit')} onClick={() => open(item)}><Icon name="edit" /></button><button className="danger" title={t('common:actions.delete')} onClick={() => remove(item)}><Icon name="delete" /></button></div></td></tr>)}</tbody></table>{!items.length && <div className="admin-table-empty"><Icon name="ai" size={30} /><strong>{t('models.empty')}</strong><p>{t('models.emptyHint')}</p></div>}</section>
     {editing !== undefined && <div className="admin-modal-layer" onMouseDown={() => setEditing(undefined)}><form className="ai-model-dialog" onSubmit={save} onMouseDown={event => event.stopPropagation()}><header><div><h2>{t(editing ? 'models.edit' : 'models.add')}</h2><p>{t('models.formHint')}</p></div><button type="button" onClick={() => setEditing(undefined)}>×</button></header><div className="ai-model-form">
       <label>{t('models.fields.name')}<input required value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>

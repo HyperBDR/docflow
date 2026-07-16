@@ -7,6 +7,7 @@ import { formatDate } from '../i18n'
 import Icon, { type IconName } from '../components/Icon'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import SlideStage from '../components/SlideStage'
+import { useToast } from '../components/toast'
 import { prepareExtensionRecording } from '../extensionBridge'
 import { prepareScreenshot, ScreenshotPreparationError } from '../screenshotUpload'
 import type { AIJob, Demo, ExportJob, HotspotData, Rect, SelectorInfo, Step } from '../types'
@@ -98,6 +99,7 @@ function eventId() {
 
 export default function Editor() {
   const { t } = useTranslation('editor')
+  const toast = useToast()
   const { id = '' } = useParams()
   const [demo, setDemo] = useState<Demo | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -122,8 +124,7 @@ export default function Editor() {
   const [aiJob, setAIJob] = useState<AIJob | null>(null)
   const [exportCenterOpen, setExportCenterOpen] = useState(false)
   const [exportAction, setExportAction] = useState<ExportCenterAction>(null)
-  const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [recorderBusy, setRecorderBusy] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
@@ -142,7 +143,7 @@ export default function Editor() {
   useEffect(() => {
     Promise.all([api.demo(id), api.latestAI(id), api.exports(id).catch(() => [])]).then(([value, latest, exportJobs]) => {
       setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null); setAIJob(latest); setJobs(exportJobs)
-    }).catch(value => setError(value.message))
+    }).catch(value => setLoadError(value.message))
   }, [id])
   useEffect(() => {
     const panel = inspectorPanelRef.current
@@ -169,9 +170,9 @@ export default function Editor() {
       const next = await api.aiJob(aiJob.id)
       setAIJob(next)
       if (next.status === 'complete') {
-        const fresh = await api.demo(id); setDemo(fresh); setNotice(t('messages.aiComplete'))
+        const fresh = await api.demo(id); setDemo(fresh); toast.success(t('messages.aiComplete'), { dedupeKey: next.id })
       }
-      if (next.status === 'failed' || next.status === 'cancelled') setError(next.error_code ? t(`common:errors.codes.${next.error_code}`) : t('messages.aiFailed'))
+      if (next.status === 'failed' || next.status === 'cancelled') toast.error(next.error_code ? t(`common:errors.codes.${next.error_code}`) : t('messages.aiFailed'), { dedupeKey: next.id, persistent: next.status === 'failed', action: { label: t('common:actions.view'), href: '/tasks' } })
     }, 1800)
     return () => clearInterval(timer)
   }, [aiJob?.id, aiJob?.status, id])
@@ -200,14 +201,14 @@ export default function Editor() {
 
   async function patchDemo(values: Partial<Demo>) {
     setDemo(current => current ? { ...current, ...values } : current)
-    try { setDemo(await api.updateDemo(id, values)) } catch (value) { setError((value as Error).message) }
+    try { setDemo(await api.updateDemo(id, values)) } catch (value) { toast.error((value as Error).message) }
   }
   async function patchStep(stepId: string, values: Partial<Step>) {
     setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === stepId ? { ...step, ...values } : step) } : current)
     try {
       const updated = await api.updateStep(id, stepId, values)
       setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === stepId ? updated : step) } : current)
-    } catch (value) { setError((value as Error).message) }
+    } catch (value) { toast.error((value as Error).message) }
   }
   function updateStepLocal(stepId: string, values: Partial<Step>) {
     setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === stepId ? { ...step, ...values } : step) } : current)
@@ -223,7 +224,7 @@ export default function Editor() {
       const updated = await api.updateHotspot(id, selected.id, target.id, values)
       setDemo(current => current ? { ...current, steps: current.steps.map(step => step.id === selected.id ? { ...step, hotspots: step.hotspots.map(item => item.id === target.id ? updated : item) } : step) } : current)
       setSelectedHotspotId(current => current === target.id ? updated.id : current)
-    } catch (value) { setError((value as Error).message) }
+    } catch (value) { toast.error((value as Error).message) }
   }
   async function chooseTarget(selection: { selector: SelectorInfo; rect: Rect }) {
     if (!selected) return
@@ -245,14 +246,13 @@ export default function Editor() {
   async function deleteSelectedHotspot() {
     if (!selected || !selectedHotspot) return
     const stepId = selected.id
-    setError('')
     try {
       await api.deleteHotspot(id, stepId, selectedHotspot.id)
       const fresh = await api.demo(id)
       setDemo(fresh)
       setSelectedHotspotId(fresh.steps.find(step => step.id === stepId)?.hotspots[0]?.id || null)
     } catch (value) {
-      setError(value instanceof Error ? value.message : t('common:errors.operationFailed'))
+      toast.error(value instanceof Error ? value.message : t('common:errors.operationFailed'))
     }
   }
   async function move(stepId: string, offset: number) {
@@ -264,69 +264,69 @@ export default function Editor() {
   }
   async function upload(file: File) {
     if (uploadBusy) return
-    setUploadBusy(true); setError(''); setNotice('')
+    setUploadBusy(true)
     try {
       const screenshot = await prepareScreenshot(file)
       const meta = { event_id: eventId(), title: t('steps.step', { index: (demo?.steps.length || 0) + 1 }), body: '', viewport_width: screenshot.width, viewport_height: screenshot.height, hotspot: { x: .5, y: .5, w: .04, h: .04 }, duration: 3 }
       const form = new FormData(); form.append('meta', JSON.stringify(meta)); form.append('screenshot', screenshot.file)
       const step = await api.uploadStep(id, form)
       setDemo(current => current ? { ...current, steps: [...current.steps, step] } : current); setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null)
-      setNotice(t(screenshot.compressed ? 'messages.screenshotCompressed' : 'messages.screenshotAdded'))
+      toast.success(t(screenshot.compressed ? 'messages.screenshotCompressed' : 'messages.screenshotAdded'))
     } catch (value) {
-      if (value instanceof ScreenshotPreparationError) setError(t(value.code === 'too_large' ? 'messages.screenshotTooLarge' : 'messages.screenshotInvalid'))
-      else if (value instanceof ApiError && value.status === 413) setError(t('messages.screenshotTooLarge'))
-      else setError(t('messages.screenshotUploadFailed'))
+      if (value instanceof ScreenshotPreparationError) toast.error(t(value.code === 'too_large' ? 'messages.screenshotTooLarge' : 'messages.screenshotInvalid'))
+      else if (value instanceof ApiError && value.status === 413) toast.error(t('messages.screenshotTooLarge'))
+      else toast.error(t('messages.screenshotUploadFailed'))
     } finally {
       setUploadBusy(false)
     }
   }
   async function publish() {
     if (exportAction) return
-    setExportAction('publish'); setError(''); setNotice('')
-    try { setDemo(await api.publish(id)); setNotice(t('messages.published')) }
-    catch (value) { setError((value as Error).message) }
+    setExportAction('publish')
+    try { setDemo(await api.publish(id)); toast.success(t('messages.published')) }
+    catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
   async function copyMarkdown() {
     if (!demo?.share_url || exportAction) return
-    setExportAction('copy-markdown'); setError(''); setNotice('')
+    setExportAction('copy-markdown')
     try {
       const token = demo.share_url.split('/').pop(), response = await fetch(`${API_URL}/public/${token}/markdown`)
       if (!response.ok) throw new Error(t('messages.markdownFailed', { status: response.status }))
-      await copyText(await response.text()); setNotice(t('messages.markdownCopied'))
-    } catch (value) { setError((value as Error).message) }
+      await copyText(await response.text()); toast.success(t('messages.markdownCopied'))
+    } catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
   async function copyShareLink() {
     if (!demo?.share_url || exportAction) return
-    setExportAction('copy-share'); setError(''); setNotice('')
+    setExportAction('copy-share')
     try {
       await copyText(demo.share_url)
-      setNotice(t('messages.shareCopied'))
-    } catch (value) { setError((value as Error).message) }
+      toast.success(t('messages.shareCopied'))
+    } catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
   async function startExport(kind: ExportJob['kind']) {
     if (exportAction) return
-    setExportAction(kind); setError(''); setNotice('')
+    setExportAction(kind)
     try {
       // Export the current editor state instead of a potentially stale
       // published revision, so timing/Zoom changes take effect immediately.
       setDemo(await api.publish(id))
       const job = await api.createExport(id, kind)
       setJobs(current => [job, ...current.filter(item => item.kind !== kind)])
-      setNotice(t('messages.exportCreated'))
-    } catch (value) { setError((value as Error).message) }
+      toast.task(t('messages.exportCreated'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } })
+    } catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
   async function generateAI(stepId?: string) {
-    try { setAIJob(await api.generateAI(id, stepId)); setTab('ai') } catch (value) { setError((value as Error).message) }
+    try { const job = await api.generateAI(id, stepId); setAIJob(job); setTab('ai'); toast.task(t('workspace:toast.aiSubmitted'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } }) } catch (value) { toast.error((value as Error).message) }
   }
   async function prepareRecorder() {
     if (!demo || recorderBusy) return
-    setRecorderBusy(true); setError(''); setNotice('')
-    try { await prepareExtensionRecording(demo.id); setNotice(t('messages.recorderReady')) }
-    catch (value) { setError((value as Error).message === 'extension_not_detected' ? t('messages.extensionNotDetected') : t('messages.recorderFailed')) }
+    setRecorderBusy(true)
+    try { await prepareExtensionRecording(demo.id); toast.success(t('messages.recorderReady')) }
+    catch (value) { toast.error((value as Error).message === 'extension_not_detected' ? t('messages.extensionNotDetected') : t('messages.recorderFailed')) }
     finally { setRecorderBusy(false) }
   }
 
@@ -446,7 +446,7 @@ export default function Editor() {
     }
   }
 
-  if (!demo) return <main className="page"><Link to="/">{t('common:actions.back')}</Link><div className="center-page">{error || t('common:status.loading')}</div></main>
+  if (!demo) return <main className="page"><Link to="/">{t('common:actions.back')}</Link><div className="center-page">{loadError || t('common:status.loading')}</div></main>
   const presentationIndex = Math.max(0, demo.steps.findIndex(step => step.id === selected?.id))
   const actionBusy = exportAction !== null
   const pendingExportKind = exportAction === 'pdf' || exportAction === 'mp4' || exportAction === 'markdown' ? exportAction : null
@@ -476,7 +476,6 @@ export default function Editor() {
         <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''} ${actionBusy ? 'action-pending' : ''}`} aria-busy={actionBusy} disabled={actionBusy} onClick={() => setExportCenterOpen(value => !value)}>{actionBusy ? <span className="action-spinner" /> : <Icon name="share" />}{actionBusy ? t('top.processing') : t('top.shareExport')}</button>
       </div>
     </div>
-    {error && <div className="toast error" onClick={() => setError('')}>{error}</div>}{notice && <div className="toast success" onClick={() => setNotice('')}>{notice}</div>}
     {exportCenterOpen && <div className="export-center-layer" onMouseDown={() => setExportCenterOpen(false)}>
       <aside className="export-center" onMouseDown={event => event.stopPropagation()}>
         <header className="export-center-header">
