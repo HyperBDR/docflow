@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { API_URL, ApiError, api } from './api'
-import { applyLocale, normalizeLocale } from './i18n'
+import { ApiError, api } from './api'
+import { applyLocale } from './i18n'
 import Editor from './pages/Editor'
 import Player from './pages/Player'
 import SnapshotFrame from './pages/SnapshotFrame'
@@ -12,85 +12,9 @@ import AdminShell from './pages/AdminShell'
 import Invite from './pages/Invite'
 import TeamSpaceSettings from './pages/TeamSpaceSettings'
 import ExtensionConnect from './pages/ExtensionConnect'
-import Brand from './components/Brand'
-import { LAST_WORKSPACE_KEY } from './components/AccountMenu'
-import LanguageSwitcher from './components/LanguageSwitcher'
+import AuthPage from './components/auth/AuthPage'
 import WorkspaceShell from './pages/workspace/WorkspaceShell'
 import type { User } from './types'
-
-function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
-  const { t, i18n } = useTranslation('auth')
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [googleEnabled, setGoogleEnabled] = useState(false)
-  const [googleRegistration, setGoogleRegistration] = useState(false)
-  const navigate = useNavigate()
-  const location = useLocation()
-
-  useEffect(() => {
-    api.googleAuthConfig().then(value => {
-      setGoogleEnabled(value.enabled)
-      setGoogleRegistration(value.allow_registration)
-    }).catch(() => undefined)
-  }, [])
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search)
-    const oauthError = params.get('oauth_error')
-    if (!oauthError) return
-    const key = `google.errors.${oauthError}`
-    setError(i18n.exists(key, { ns: 'auth' }) ? t(key) : t('google.errors.google_login_failed'))
-    params.delete('oauth_error'); params.delete('oauth')
-    window.history.replaceState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`)
-  }, [i18n, location.hash, location.pathname, location.search, t])
-
-  function startGoogle() {
-    const params = new URLSearchParams(location.search)
-    params.delete('oauth'); params.delete('oauth_error')
-    const returnTo = `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`
-    window.location.assign(`${API_URL}/api/auth/google/start?${new URLSearchParams({ return_to: returnTo })}`)
-  }
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true); setError('')
-    try {
-      await api.auth(mode, email, password, normalizeLocale(i18n.language))
-      const user = await api.me()
-      await applyLocale(user.ui_locale)
-      onAuthenticated(user)
-      const resumeExtensionConnect = location.pathname === '/extension/connect'
-      navigate(resumeExtensionConnect ? `${location.pathname}${location.search}` : user.role === 'admin' && localStorage.getItem(LAST_WORKSPACE_KEY) === 'admin' ? '/admin' : '/')
-    } catch (value) {
-      setError(value instanceof Error ? value.message : t('loginFailed'))
-    } finally { setBusy(false) }
-  }
-
-  return <main className="auth-shell">
-    <div className="auth-language"><LanguageSwitcher /></div>
-    <section className="auth-card">
-      <div className="brand brand-large"><Brand large /></div>
-      <h1>{mode === 'login' ? t('loginTitle') : t('registerTitle')}</h1>
-      <p className="muted">{t('tagline')}</p>
-      {googleEnabled && (mode === 'login' || googleRegistration) && <>
-        <button type="button" className="google-auth-button" onClick={startGoogle}><span>G</span>{t(mode === 'login' ? 'google.signIn' : 'google.register')}</button>
-        <div className="auth-divider"><span>{t('google.or')}</span></div>
-      </>}
-      <form onSubmit={submit} className="stack">
-        <label>{t('email')}<input type="email" required value={email} onChange={event => setEmail(event.target.value)} placeholder="you@company.com" /></label>
-        <label>{t('password')}<input type="password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} placeholder={t('passwordHint')} /></label>
-        {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? t('waiting') : mode === 'login' ? t('login') : t('register')}</button>
-      </form>
-      <button className="link-button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-        {mode === 'login' ? t('toRegister') : t('toLogin')}
-      </button>
-    </section>
-  </main>
-}
 
 function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
   return <Routes>
@@ -125,6 +49,6 @@ export default function App() {
     <Route path="/p/:token" element={<Player />} />
     <Route path="/snapshot-frame" element={<SnapshotFrame />} />
     <Route path="/invite/:token" element={<Invite user={user || null} onAuthenticated={setUser} />} />
-    <Route path="/*" element={user ? <AuthenticatedApp user={user} onUserChange={setUser} logout={async () => { try { await api.logout() } finally { setUser(null) } }} /> : <Auth onAuthenticated={setUser} />} />
+    <Route path="/*" element={user ? <AuthenticatedApp user={user} onUserChange={setUser} logout={async () => { try { await api.logout() } finally { setUser(null) } }} /> : <AuthPage onAuthenticated={setUser} />} />
   </Routes>
 }

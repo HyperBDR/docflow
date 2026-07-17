@@ -6,6 +6,7 @@ import AccountSecurity from '../components/account/AccountSecurity'
 import Icon from '../components/Icon'
 import UserAvatar from '../components/UserAvatar'
 import Brand from '../components/Brand'
+import HelpLink from '../components/HelpLink'
 import { useToast } from '../components/toast'
 import { LAST_WORKSPACE_KEY } from '../components/AccountMenu'
 import { applyLocale } from '../i18n'
@@ -42,7 +43,7 @@ export default function Account({ user, onUserChange, onPasswordChanged }: { use
 
   if (location.pathname === '/account' || !['profile', 'security', 'preferences'].includes(tab)) return <Navigate to={`/account/profile${suffix}`} replace />
   return <div className="settings-shell">
-    <header className="settings-topbar"><Link to={source === 'admin' ? '/admin' : '/'} className="brand"><Brand /></Link><Link className="settings-back" to={source === 'admin' ? '/admin' : '/'}><Icon name="chevronLeft" />{source === 'admin' ? t('backToAdmin') : t('backToWorkspace')}</Link></header>
+    <header className="settings-topbar"><Link to={source === 'admin' ? '/admin' : '/'} className="brand"><Brand /></Link><div className="topbar-account-actions"><HelpLink/><Link className="settings-back" to={source === 'admin' ? '/admin' : '/'}><Icon name="chevronLeft" />{source === 'admin' ? t('backToAdmin') : t('backToWorkspace')}</Link></div></header>
     <main className="settings-center">
       <div className="settings-heading"><div className="settings-heading-icon"><Icon name="settings" size={22} /></div><div><h1>{t('title')}</h1><p>{t('subtitle')}</p></div></div>
       <div className="settings-layout">

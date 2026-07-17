@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import { formatDate, formatNumber } from '../i18n'
 import Icon from '../components/Icon'
+import HelpLink from '../components/HelpLink'
 import type { Analytics as AnalyticsData, Demo, Tag } from '../types'
 
 type Tab = 'general' | 'devices' | 'leads'
@@ -29,7 +30,7 @@ export default function Analytics() {
   if (!demo) return <main className="analytics-page center-page">{error || t('loading')}</main>
 
   return <main className="analytics-page">
-    <header className="analytics-topbar"><div><Link to="/">{t('back')}</Link><span>/</span><strong>{demo.title}</strong></div><div><Link className="button" to={`/demos/${demo.id}`}>{t('preview')}</Link><Link className="button primary" to={`/demos/${demo.id}?mode=edit`}>{t('common:actions.edit')}</Link></div></header>
+    <header className="analytics-topbar"><div><Link to="/">{t('back')}</Link><span>/</span><strong>{demo.title}</strong></div><div><HelpLink/><Link className="button" to={`/demos/${demo.id}`}>{t('preview')}</Link><Link className="button primary" to={`/demos/${demo.id}?mode=edit`}>{t('common:actions.edit')}</Link></div></header>
     <section className="analytics-hero"><div><span className="analytics-icon"><Icon name="analytics" size={22} /></span><div><h1>{t('title')}</h1><p>{t('subtitle')}</p></div></div><div className="analytics-filters"><label>{t('from')}<input type="date" value={from} max={to} onChange={event => setFrom(event.target.value)} /></label><label>{t('to')}<input type="date" value={to} min={from} onChange={event => setTo(event.target.value)} /></label><label>{t('tagFilter')}<select value={tag} onChange={event => setTag(event.target.value)}><option value="">{t('allTags')}</option>{tags.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div></section>
     <nav className="analytics-tabs"><button className={tab === 'general' ? 'active' : ''} onClick={() => setTab('general')}><Icon name="analytics" />{t('tabs.general')}</button><button className={tab === 'devices' ? 'active' : ''} onClick={() => setTab('devices')}><Icon name="device" />{t('tabs.devices')}</button><button className={tab === 'leads' ? 'active' : ''} onClick={() => setTab('leads')}><Icon name="users" />{t('tabs.leads')}</button></nav>
     {error && <div className="analytics-message error">{error}</div>}{loading && <div className="analytics-loading">{t('aggregating')}</div>}

@@ -6,6 +6,7 @@ import { copyText } from '../clipboard'
 import { formatDate } from '../i18n'
 import Icon, { type IconName } from '../components/Icon'
 import LanguageSwitcher from '../components/LanguageSwitcher'
+import HelpLink from '../components/HelpLink'
 import SlideStage from '../components/SlideStage'
 import { useToast } from '../components/toast'
 import { prepareExtensionRecording } from '../extensionBridge'
@@ -472,7 +473,7 @@ export default function Editor() {
         {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title={t('top.publicLink')}><Icon name="share" /></a>}
         {detailMode === 'edit' && <button className="topbar-action icon-button" disabled={recorderBusy} onClick={prepareRecorder}>{recorderBusy ? <span className="action-spinner" /> : <Icon name="record" />}{t(recorderBusy ? 'top.preparingRecorder' : 'top.continueRecording')}</button>}
         {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />{t('top.aiOptimize')}</button>}
-        <LanguageSwitcher account />
+        <LanguageSwitcher account /><HelpLink/>
         <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''} ${actionBusy ? 'action-pending' : ''}`} aria-busy={actionBusy} disabled={actionBusy} onClick={() => setExportCenterOpen(value => !value)}>{actionBusy ? <span className="action-spinner" /> : <Icon name="share" />}{actionBusy ? t('top.processing') : t('top.shareExport')}</button>
       </div>
     </div>

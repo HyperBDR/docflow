@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import AccountMenu, { LAST_WORKSPACE_KEY } from '../components/AccountMenu'
-import Brand from '../components/Brand'
 import Icon from '../components/Icon'
 import LanguageSwitcher from '../components/LanguageSwitcher'
+import HelpLink from '../components/HelpLink'
+import AdminSidebar from '../components/admin/AdminSidebar'
 import type { User } from '../types'
 import AdminUsers from './Admin'
 import AdminOverview from './AdminOverview'
@@ -46,34 +47,10 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
             : location.pathname.startsWith('/admin/recycle') ? t('nav.recycle') : t('nav.overview')
   const toggle = () => setCollapsed(value => { localStorage.setItem('docflow.adminSidebar', value ? 'expanded' : 'collapsed'); return !value })
   return <div className={`admin-shell ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
-    <aside className="admin-sidebar">
-      <div className="admin-sidebar-brand"><Brand /><button onClick={toggle} aria-label={t('nav.collapse')}><Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} /></button></div>
-      <div className="admin-sidebar-label">{t('nav.platform')}</div>
-      <nav aria-label={t('nav.platform')}>
-        <NavLink end to="/admin" title={t('nav.overview')}><Icon name="grid" /><span>{t('nav.overview')}</span></NavLink>
-        <NavLink to="/admin/jobs" title={t('nav.jobs')}><Icon name="list" /><span>{t('nav.jobs')}</span></NavLink>
-        <NavLink to="/admin/monitoring" title={t('nav.monitoring')}><Icon name="analytics" /><span>{t('nav.monitoring')}</span></NavLink>
-        <div className="admin-nav-separator"><span>{t('nav.accounts')}</span></div>
-        <NavLink to="/admin/organizations" title={t('nav.organizations')}><Icon name="users" /><span>{t('nav.organizations')}</span></NavLink>
-        <NavLink to="/admin/users" title={t('nav.users')}><Icon name="user" /><span>{t('nav.users')}</span></NavLink>
-        <div className="admin-nav-separator"><span>{t('nav.content')}</span></div>
-        <NavLink to="/admin/resources" title={t('nav.resources')}><Icon name="folder" /><span>{t('nav.resources')}</span></NavLink>
-        <NavLink to="/admin/storage" title={t('nav.storage')}><Icon name="database" /><span>{t('nav.storage')}</span></NavLink>
-        <NavLink to="/admin/recycle" title={t('nav.recycle')}><Icon name="delete" /><span>{t('nav.recycle')}</span></NavLink>
-        <div className="admin-nav-separator"><span>{t('nav.ai')}</span></div>
-        <NavLink to="/admin/ai/settings" title={t('nav.aiSettings')}><Icon name="settings" /><span>{t('nav.aiSettings')}</span></NavLink>
-        <NavLink to="/admin/ai/models" title={t('nav.aiModels')}><Icon name="ai" /><span>{t('nav.aiModels')}</span></NavLink>
-        <NavLink to="/admin/ai/usage" title={t('nav.aiUsage')}><Icon name="analytics" /><span>{t('nav.aiUsage')}</span></NavLink>
-        <div className="admin-nav-separator"><span>{t('nav.system')}</span></div>
-        <NavLink to="/admin/settings" title={t('nav.settings')}><Icon name="settings" /><span>{t('nav.settings')}</span></NavLink>
-        <div className="admin-nav-separator"><span>{t('nav.security')}</span></div>
-        <NavLink to="/admin/audit" title={t('nav.audit')}><Icon name="clock" /><span>{t('nav.audit')}</span></NavLink>
-      </nav>
-      <div className="admin-sidebar-foot"><Icon name="shield" /><span><strong>DocFlow Admin</strong><small>{t('nav.secure')}</small></span></div>
-    </aside>
+    <AdminSidebar collapsed={collapsed} onToggle={toggle} />
     <button className="admin-sidebar-scrim" aria-label={t('common:actions.close')} onClick={() => setMobileOpen(false)} />
     <div className="admin-shell-main">
-      <header className="admin-topbar"><div><button className="admin-mobile-menu" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button><span><small>DocFlow Admin</small><strong>{title}</strong></span></div><div className="topbar-account-actions"><LanguageSwitcher account /><AccountMenu user={user} view="admin" onUserChange={onUserChange} logout={logout} /></div></header>
+      <header className="admin-topbar"><div><button className="admin-mobile-menu" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button><span><small>DocFlow Admin</small><strong>{title}</strong></span></div><div className="topbar-account-actions"><HelpLink/><LanguageSwitcher account /><AccountMenu user={user} view="admin" onUserChange={onUserChange} logout={logout} /></div></header>
       <div className="admin-route-content"><Routes>
         <Route index element={<AdminOverview />} />
         <Route path="jobs" element={<AdminJobs />} />

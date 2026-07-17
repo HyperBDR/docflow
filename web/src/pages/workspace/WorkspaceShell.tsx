@@ -6,6 +6,7 @@ import Brand from '../../components/Brand'
 import Icon from '../../components/Icon'
 import LanguageSwitcher from '../../components/LanguageSwitcher'
 import WorkspaceSwitcher from '../../components/WorkspaceSwitcher'
+import HelpLink from '../../components/HelpLink'
 import type { User } from '../../types'
 import Dashboard from '../Dashboard'
 import WorkspaceOverview from './WorkspaceOverview'
@@ -26,11 +27,10 @@ export default function WorkspaceShell({ user, onUserChange, logout }: { user: U
         <NavLink to="/overview"><Icon name="analytics" /><span>{t('nav.overview')}</span></NavLink>
         <NavLink to="/tasks"><Icon name="clock" /><span>{t('nav.tasks')}</span></NavLink>
       </nav>
-      <footer><small>{t('nav.workspace')}</small><WorkspaceSwitcher user={user} onUserChange={onUserChange} /></footer>
     </aside>
     <button className="workspace-nav-backdrop" aria-label={t('nav.close')} onClick={() => setMobileOpen(false)} />
     <div className="workspace-shell-main">
-      <header className="workspace-header"><button className="workspace-mobile-menu" onClick={() => setMobileOpen(true)} aria-label={t('nav.open')}><Icon name="menu" /></button><div className="workspace-mobile-brand"><Brand /></div><div className="topbar-account-actions"><LanguageSwitcher account /><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></div></header>
+      <header className="workspace-header"><button className="workspace-mobile-menu" onClick={() => setMobileOpen(true)} aria-label={t('nav.open')}><Icon name="menu" /></button><div className="workspace-mobile-brand"><Brand /></div><div className="topbar-account-actions"><WorkspaceSwitcher user={user} onUserChange={onUserChange} /><LanguageSwitcher account /><HelpLink/><AccountMenu user={user} view="user" onUserChange={onUserChange} logout={logout} /></div></header>
       <div key={organizationKey} className="workspace-route-content"><Routes>
         <Route index element={<Dashboard />} />
         <Route path="overview" element={<WorkspaceOverview />} />
