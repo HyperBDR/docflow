@@ -62,3 +62,5 @@ export type WorkspaceJobPage = {
   page_size: number
   summary: Record<WorkspaceJobStatus, number>
 }
+export type WorkspaceQuotaItem={key:string;used:number;limit:number|null;percent:number;status:'normal'|'warning'|'exceeded';enforcement:'hard'|'soft'}
+export type WorkspaceQuota={organization_id:string;plan:{id:string;name:string;description:string};items:WorkspaceQuotaItem[];period:{starts_at:string;resets_at:string};has_overrides:boolean}

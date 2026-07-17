@@ -11,6 +11,7 @@ import type { User } from '../../types'
 import Dashboard from '../Dashboard'
 import WorkspaceOverview from './WorkspaceOverview'
 import WorkspaceTasks from './WorkspaceTasks'
+import WorkspaceQuotas from './WorkspaceQuotas'
 import '../../styles/workspace.css'
 
 export default function WorkspaceShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
@@ -26,6 +27,7 @@ export default function WorkspaceShell({ user, onUserChange, logout }: { user: U
         <NavLink end to="/"><Icon name="folder" /><span>{t('nav.library')}</span></NavLink>
         <NavLink to="/overview"><Icon name="analytics" /><span>{t('nav.overview')}</span></NavLink>
         <NavLink to="/tasks"><Icon name="clock" /><span>{t('nav.tasks')}</span></NavLink>
+        <NavLink to="/quotas"><Icon name="database" /><span>{t('nav.quotas')}</span></NavLink>
       </nav>
     </aside>
     <button className="workspace-nav-backdrop" aria-label={t('nav.close')} onClick={() => setMobileOpen(false)} />
@@ -35,6 +37,7 @@ export default function WorkspaceShell({ user, onUserChange, logout }: { user: U
         <Route index element={<Dashboard />} />
         <Route path="overview" element={<WorkspaceOverview />} />
         <Route path="tasks" element={<WorkspaceTasks />} />
+        <Route path="quotas" element={<WorkspaceQuotas />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes></div>
     </div>

@@ -1,6 +1,6 @@
 {
   "loading": "Loading workspace data…",
-  "nav": { "label": "Workspace navigation", "workspace": "Current workspace", "library": "Library", "overview": "Usage overview", "tasks": "Task center", "open": "Open navigation", "close": "Close navigation" },
+  "nav": { "label": "Workspace navigation", "workspace": "Current workspace", "library": "Library", "overview": "Usage overview", "tasks": "Task center", "quotas":"Usage & quotas", "open": "Open navigation", "close": "Close navigation" },
   "overview": { "title": "Usage overview", "subtitle": "Resources, traffic, and tasks for {{name}}", "team": "Team space · {{count}} members", "personal": "Personal space" },
   "metrics": {
     "resources": "Resources", "resourceDetail": "{{draft}} drafts · {{published}} published",
@@ -14,6 +14,7 @@
   "resources": { "recent": "Recent resources", "recentHint": "Your most recently updated demos", "empty": "No resources yet. New recordings will appear here.", "untitled": "Untitled resource", "steps_one": "{{count}} step", "steps_other": "{{count}} steps" },
   "jobs": { "recent": "Recent tasks", "recentHint": "Latest export and AI task status", "empty": "No task history", "types": { "ai": "AI optimization", "export": "Content export" }, "download": "Download", "allTypes": "All task types", "allStatuses": "All statuses", "total_one": "{{count}} task", "total_other": "{{count}} tasks", "page": "Page {{page}} of {{pages}}" },
   "tasks": { "title": "Task center", "subtitle": "Track exports and AI tasks, inspect failures, and download completed results" },
+  "quotas":{"title":"Usage & quotas","subtitle":"Review capacity, monthly usage, and effective limits for this workspace","currentPlan":"Current plan","reset":"Period resets","defaultDescription":"This workspace uses the platform default quota plan.","overridden":"An administrator has applied workspace overrides","standard":"Using standard plan limits","hard":"New usage is blocked at the limit","soft":"Overage warns without interrupting public access","available":"Capacity available","warning":"Approaching limit","exceeded":"Limit reached or exceeded","noteTitle":"How quotas work","note":"Storage, resources, members, shares, AI, and exports only block new usage at the limit. Existing content remains available to view, download, or delete. Public views and download traffic are currently warning-only.","metrics":{"storage_bytes":"Storage","resources":"Resources","max_steps_per_resource":"Max steps per resource","members":"Team members","active_shares":"Active share links","monthly_ai_tokens":"Monthly AI tokens","monthly_exports":"Monthly exports","monthly_video_minutes":"Monthly video minutes","monthly_public_views":"Monthly public views","monthly_download_bytes":"Monthly download traffic"}},
   "actions": { "allResources": "All resources", "allTasks": "All tasks", "refresh": "Refresh", "previous": "Previous", "next": "Next" },
   "toast": { "aiSubmitted": "The AI optimization task was submitted. Track it in the task center." }
 }

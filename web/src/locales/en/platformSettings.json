@@ -1,7 +1,7 @@
 {
   "title": "System settings",
   "subtitle": "Manage platform-wide services. Changes take effect immediately and are audited.",
-  "tabs": { "general": "General", "generalHint": "Help center and product links", "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention" },
+  "tabs": { "general": "General", "generalHint": "Help center and product links", "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention", "quota":"Quota management", "quotaHint":"Plan templates and default limits" },
   "status": { "ready": "Configured", "inactive": "Not configured", "enabled": "Enabled", "disabled": "Disabled", "running": "Running automatically" },
   "general": {
     "statusTitle": "General platform configuration", "configured": "The help center is available to users", "notConfigured": "No external help center is configured",
@@ -32,5 +32,6 @@
     "retention": "Raw data retention", "days": "{{count}} days", "retentionHint": "Expired minute snapshots are removed by the collector.",
     "ranges": "Available ranges", "rangesHint": "Detail charts automatically downsample longer time ranges.",
     "privacy": "Privacy and security", "privacyHint": "Only normalized routes, status codes, latency, and aggregate counts are stored—never request parameters, bodies, or responses."
-  }
+  },
+  "quota":{"plans":"Quota plans","plansHint":"Manage plan templates that can be assigned to workspaces.","add":"Add plan","default":"Platform default","edit":"Edit quota plan","editHint":"Leave a value blank for unlimited; changes apply to assigned workspaces.","name":"Plan name","description":"Description","setDefault":"Use as platform default","save":"Save plan","saved":"Quota plan saved","newName":"New quota plan","metrics":{"storage_bytes":"Storage (bytes)","resources":"Resources","max_steps_per_resource":"Max steps per resource","members":"Team members","active_shares":"Active share links","monthly_ai_tokens":"Monthly AI tokens","monthly_exports":"Monthly exports","monthly_video_minutes":"Monthly video minutes","monthly_public_views":"Monthly public views","monthly_download_bytes":"Monthly download traffic (bytes)"}}
 }
