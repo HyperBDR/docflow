@@ -30,16 +30,20 @@ function ToastCard({ item, dismiss }: { item: ToastEntry; dismiss: (id: string) 
   const action = item.action
   const actionContent = action && (action.href
     ? <a href={action.href} onClick={() => dismiss(item.id)}>{action.label}<Icon name="chevronRight" size={13} /></a>
-    : <button onClick={() => { action.onClick?.(); dismiss(item.id) }}>{action.label}<Icon name="chevronRight" size={13} /></button>)
+    : <button type="button" onClick={() => { action.onClick?.(); dismiss(item.id) }}>{action.label}<Icon name="chevronRight" size={13} /></button>)
   return <article
-    className={`global-toast ${item.kind}`}
+    className={`global-toast ${item.kind} ${item.description || actionContent ? 'expanded' : 'compact'}`}
     role={item.kind === 'error' || item.kind === 'warning' ? 'alert' : 'status'}
     aria-live={item.kind === 'error' ? 'assertive' : 'polite'}
+    aria-atomic="true"
     onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
   >
-    <span className="global-toast-icon"><Icon name={ICON[item.kind]} size={17} /></span>
-    <div className="global-toast-copy"><strong>{item.title}</strong>{item.description && <p>{item.description}</p>}{actionContent && <footer>{actionContent}</footer>}</div>
-    <button className="global-toast-close" aria-label={t('actions.close')} onClick={() => dismiss(item.id)}>×</button>
+    <header className="global-toast-header">
+      <span className="global-toast-icon"><Icon name={ICON[item.kind]} size={14} /></span>
+      <strong>{item.title}</strong>
+      <button type="button" className="global-toast-close" aria-label={t('actions.close')} onClick={() => dismiss(item.id)}><Icon name="close" size={16} /></button>
+    </header>
+    {(item.description || actionContent) && <div className="global-toast-body">{item.description && <p>{item.description}</p>}{actionContent && <footer>{actionContent}</footer>}</div>}
     {!item.persistent && <i key={item.revision} className="global-toast-timer" style={{ animationDuration: `${item.duration ?? DEFAULT_DURATION[item.kind]}ms`, animationPlayState: paused ? 'paused' : 'running' }} />}
   </article>
 }

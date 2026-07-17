@@ -85,7 +85,10 @@ export default function GoogleAuthSettingsTab() {
         <label className="platform-settings-wide">{t('google.fields.domains')}<textarea rows={3} value={domains} onChange={event => setDomains(event.target.value)} placeholder="oneprocloud.com"/><small>{t('google.domainsHint')}</small></label>
       </div>
       <div className="platform-settings-options">
-        <label><input type="checkbox" checked={draft.allow_registration} onChange={event => field('allow_registration', event.target.checked)}/><span><strong>{t('google.allowRegistration')}</strong><small>{t('google.allowRegistrationHint')}</small></span></label>
+        <label className="platform-switch platform-registration-switch">
+          <input type="checkbox" checked={draft.allow_registration} onChange={event => field('allow_registration', event.target.checked)}/><span/>
+          <div><strong>{t('google.allowRegistration')}</strong><small>{t('google.allowRegistrationHint')}</small></div>
+        </label>
       </div>
       <footer><span>{t('google.footerHint')}</span><button className="primary icon-button" disabled={busy === 'save'}><Icon name="check"/>{t(busy === 'save' ? 'common:status.loading' : 'common:actions.save')}</button></footer>
     </form>
