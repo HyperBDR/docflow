@@ -7,11 +7,14 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 import io
 
+from app.config import settings
 from app.database import get_db
 from app.defaults import navigation_defaults
 from app.dependencies import current_user
 from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, Tag, User
-from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, StepOut, StepUpdate
+from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, ShareLinkCreate, ShareLinkUpdate, StepOut, StepUpdate
+from app.security import hash_password
+from app.quota import enforce
 from app.services import active_share, current_organization_id, demo_out, next_revision_number, owned_demo, require_organization_role, step_out, viewable_demo, write_audit
 from app.storage import storage
 
@@ -30,6 +33,7 @@ def list_demos(db: Session = Depends(get_db), user: User = Depends(current_user)
 @router.post("", response_model=DemoOut, status_code=201)
 def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User = Depends(current_user)):
     organization_id = current_organization_id(db, user)
+    enforce(db, organization_id, "resources")
     require_organization_role(db, user, organization_id, {"owner", "admin", "editor"})
     manual_fields = []
     if payload.title != "未命名演示" and not payload.auto_title:
@@ -272,7 +276,7 @@ def step_snapshot(demo_id: str, step_id: str, db: Session = Depends(get_db), use
 
 
 @router.post("/{demo_id}/publish", response_model=DemoOut)
-def publish_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def publish_demo(demo_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
     if not demo.steps:
         raise HTTPException(status_code=400, detail="cannot publish an empty demo")
@@ -312,24 +316,87 @@ def publish_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depen
     )
     db.add(revision)
     db.flush()
-    share = active_share(db, demo.id)
-    if share:
+    shares = db.scalars(select(ShareToken).where(ShareToken.demo_id == demo.id, ShareToken.revoked.is_(False))).all()
+    for share in shares:
         share.revision_id = revision.id
-    else:
-        share = ShareToken(demo_id=demo.id, revision_id=revision.id, token=secrets.token_urlsafe(24))
+    if not active_share(db, demo.id):
+        share = ShareToken(
+            demo_id=demo.id, revision_id=revision.id, token=secrets.token_urlsafe(24),
+            name="Default link", created_by_id=user.id,
+        )
         db.add(share)
     demo.current_revision_id = revision.id
     demo.status = DemoStatus.published
+    write_audit(db, user, "resource.published", "resource", demo.id, demo.title, demo.organization_id,
+                after={"revision_id": revision.id, "share_count": max(1, len(shares))}, request=request)
     db.commit()
     return demo_out(db, demo)
 
 
 @router.post("/{demo_id}/revoke", response_model=DemoOut)
-def revoke_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def revoke_demo(demo_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
-    share = active_share(db, demo.id)
-    if share:
-        share.revoked = True
+    db.execute(update(ShareToken).where(ShareToken.demo_id == demo.id).values(revoked=True))
     demo.status = DemoStatus.draft
+    write_audit(db, user, "resource.unpublished", "resource", demo.id, demo.title, demo.organization_id, request=request)
     db.commit()
     return demo_out(db, demo)
+
+
+def share_link_out(db: Session, share: ShareToken) -> dict:
+    creator = db.get(User, share.created_by_id) if share.created_by_id else None
+    expired = bool(share.expires_at and share.expires_at <= datetime.now(timezone.utc))
+    return {
+        "id": share.id, "name": share.name or "", "url": f"{settings.web_origin.rstrip('/')}/p/{share.token}",
+        "token": share.token, "revoked": share.revoked, "expired": expired,
+        "password_protected": bool(share.password_hash), "expires_at": share.expires_at,
+        "access_count": share.access_count, "last_accessed_at": share.last_accessed_at,
+        "created_by": ({"id": creator.id, "name": creator.name or "", "email": creator.email} if creator else None),
+        "created_at": share.created_at,
+    }
+
+
+@router.get("/{demo_id}/shares")
+def list_share_links(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    demo = viewable_demo(db, demo_id, user)
+    return [share_link_out(db, item) for item in db.scalars(select(ShareToken).where(
+        ShareToken.demo_id == demo.id
+    ).order_by(ShareToken.created_at.desc())).all()]
+
+
+@router.post("/{demo_id}/shares", status_code=201)
+def create_share_link(payload: ShareLinkCreate, demo_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    demo = owned_demo(db, demo_id, user)
+    enforce(db, demo.organization_id, "active_shares")
+    if not demo.current_revision_id:
+        raise HTTPException(status_code=400, detail="publish the demo before creating a share link")
+    if payload.expires_at and payload.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="expiration must be in the future")
+    share = ShareToken(
+        demo_id=demo.id, revision_id=demo.current_revision_id, token=secrets.token_urlsafe(24),
+        name=payload.name.strip(), created_by_id=user.id, expires_at=payload.expires_at,
+        password_hash=hash_password(payload.password) if payload.password else None,
+    )
+    db.add(share); db.flush()
+    write_audit(db, user, "share.created", "share", share.id, share.name or demo.title, demo.organization_id,
+                after={"demo_id": demo.id, "expires_at": payload.expires_at.isoformat() if payload.expires_at else None, "password_protected": bool(payload.password)}, request=request)
+    db.commit(); db.refresh(share)
+    return share_link_out(db, share)
+
+
+@router.patch("/{demo_id}/shares/{share_id}")
+def update_share_link(payload: ShareLinkUpdate, demo_id: str, share_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    demo = owned_demo(db, demo_id, user)
+    share = db.scalar(select(ShareToken).where(ShareToken.id == share_id, ShareToken.demo_id == demo.id))
+    if not share:
+        raise HTTPException(status_code=404, detail="share link not found")
+    before = {"name": share.name, "expires_at": share.expires_at.isoformat() if share.expires_at else None, "revoked": share.revoked, "password_protected": bool(share.password_hash)}
+    values = payload.model_dump(exclude_unset=True)
+    if "name" in values: share.name = (values["name"] or "").strip()
+    if "expires_at" in values: share.expires_at = values["expires_at"]
+    if "password" in values: share.password_hash = hash_password(values["password"]) if values["password"] else None
+    if "revoked" in values: share.revoked = values["revoked"]
+    write_audit(db, user, "share.updated", "share", share.id, share.name or demo.title, demo.organization_id,
+                before=before, after={"name": share.name, "expires_at": share.expires_at.isoformat() if share.expires_at else None, "revoked": share.revoked, "password_protected": bool(share.password_hash)}, request=request)
+    db.commit(); db.refresh(share)
+    return share_link_out(db, share)

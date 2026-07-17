@@ -63,6 +63,8 @@ DETAIL_CODES = {
 
 
 async def http_exception_response(_: Request, exc: HTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict):
+        return JSONResponse(status_code=exc.status_code,content={"detail":exc.detail.get("message","request failed"),"code":exc.detail.get("code","request.failed"),**({"quota":exc.detail["quota"]} if "quota" in exc.detail else {})},headers=exc.headers)
     detail = str(exc.detail)
     return JSONResponse(
         status_code=exc.status_code,

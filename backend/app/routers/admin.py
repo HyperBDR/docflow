@@ -24,6 +24,7 @@ from app.models import (
     Demo,
     DemoStatus,
     ExportJob,
+    ExportDownloadEvent,
     JobStatus,
     ExtensionPair,
     ExtensionToken,
@@ -73,6 +74,7 @@ from app.schemas import (
     AdminResourceDetail,
     AdminResourceOut,
     AdminResourceOwner,
+    AdminResourceOrganization,
     AdminResourcePage,
     AdminUserOut,
     AdminUserPage,
@@ -1203,7 +1205,7 @@ def resource_usage_map(db: Session, demo_ids: list[str]) -> dict[str, dict]:
     return result
 
 
-def resource_out(demo: Demo, owner: User, usage: dict) -> AdminResourceOut:
+def resource_out(demo: Demo, owner: User, usage: dict, organization: Organization | None = None) -> AdminResourceOut:
     first_step = min(demo.steps, key=lambda item: item.position, default=None)
     return AdminResourceOut(
         id=demo.id,
@@ -1212,6 +1214,9 @@ def resource_out(demo: Demo, owner: User, usage: dict) -> AdminResourceOut:
         status=demo.status.value,
         content_locale=demo.content_locale,
         owner=AdminResourceOwner(id=owner.id, name=owner.name or "", email=owner.email),
+        organization=(AdminResourceOrganization(
+            id=organization.id, name=organization.name, kind=organization.kind,
+        ) if organization else None),
         step_count=usage["steps"],
         views=usage["views"],
         unique_viewers=usage["viewers"],
@@ -1238,6 +1243,7 @@ def get_resource_or_404(db: Session, demo_id: str) -> tuple[Demo, User]:
 def list_resources(
     query: str = Query(default="", max_length=200),
     owner_id: str | None = None,
+    organization_id: str | None = None,
     resource_status: str | None = Query(default=None, alias="status", pattern="^(draft|published)$"),
     content_locale: str | None = Query(default=None, pattern="^(zh-CN|en)$"),
     page: int = Query(default=1, ge=1),
@@ -1255,6 +1261,8 @@ def list_resources(
         ))
     if owner_id:
         filters.append(Demo.owner_id == owner_id)
+    if organization_id:
+        filters.append(Demo.organization_id == organization_id)
     if resource_status:
         filters.append(Demo.status == resource_status)
     if content_locale:
@@ -1264,8 +1272,11 @@ def list_resources(
         Demo.updated_at.desc()
     ).offset((page - 1) * page_size).limit(page_size)).all()
     usage = resource_usage_map(db, [demo.id for demo, _owner in rows])
+    organizations = {item.id: item for item in db.scalars(select(Organization).where(
+        Organization.id.in_([demo.organization_id for demo, _owner in rows if demo.organization_id])
+    )).all()}
     return AdminResourcePage(
-        items=[resource_out(demo, owner, usage[demo.id]) for demo, owner in rows],
+        items=[resource_out(demo, owner, usage[demo.id], organizations.get(demo.organization_id)) for demo, owner in rows],
         total=total, page=page, page_size=page_size,
     )
 
@@ -1285,7 +1296,7 @@ def get_resource(demo_id: str, db: Session = Depends(get_db), _: User = Depends(
         f"{settings.public_base_url}/api/admin/resources/{demo.id}/steps/{detail.steps[0].id}/image"
         if detail.steps else None
     )
-    return AdminResourceDetail(**resource_out(demo, owner, usage).model_dump(), demo=detail)
+    return AdminResourceDetail(**resource_out(demo, owner, usage, db.get(Organization, demo.organization_id)).model_dump(), demo=detail)
 
 
 @router.get("/resources/{demo_id}/steps/{step_id}/image")
@@ -1517,7 +1528,7 @@ def restore_resource(demo_id: str, request: Request, db: Session = Depends(get_d
     for step in detail.steps:
         step.image_url = f"{settings.public_base_url}/api/admin/resources/{demo.id}/steps/{step.id}/image"
         step.snapshot_url = f"{settings.public_base_url}/api/admin/resources/{demo.id}/steps/{step.id}/snapshot" if step.snapshot_url else None
-    return AdminResourceDetail(**resource_out(demo, owner, usage).model_dump(), demo=detail)
+    return AdminResourceDetail(**resource_out(demo, owner, usage, db.get(Organization, demo.organization_id)).model_dump(), demo=detail)
 
 
 @router.post("/recycle-bin/team-spaces/{organization_id}/restore", status_code=204)
@@ -1543,6 +1554,7 @@ def purge_demo(db: Session, demo: Demo) -> set[str]:
     )).all() if key)
     db.execute(delete(AnalyticsEvent).where(AnalyticsEvent.demo_id == demo.id))
     db.execute(delete(StepComment).where(StepComment.demo_id == demo.id))
+    db.execute(delete(ExportDownloadEvent).where(ExportDownloadEvent.demo_id == demo.id))
     db.execute(delete(ExportJob).where(ExportJob.demo_id == demo.id))
     db.execute(delete(AIJob).where(AIJob.demo_id == demo.id))
     db.execute(delete(ShareToken).where(ShareToken.demo_id == demo.id))

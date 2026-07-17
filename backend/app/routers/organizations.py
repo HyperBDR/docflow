@@ -17,6 +17,7 @@ from app.schemas import (
 )
 from app.security import expires_in, hash_password, hash_token, random_token, utcnow
 from app.services import create_personal_organization, organization_membership, require_organization_role, write_audit
+from app.quota import enforce
 
 router = APIRouter(prefix="/api", tags=["organizations"])
 
@@ -288,6 +289,7 @@ def accept_for_user(db: Session, invitation: OrganizationInvitation, user: User)
     if user.email.lower() != invitation.email.lower():
         raise HTTPException(status_code=403, detail="invitation email does not match account")
     if not organization_membership(db, user, invitation.organization_id):
+        enforce(db,invitation.organization_id,"members")
         db.add(OrganizationMember(organization_id=invitation.organization_id, user_id=user.id, role=invitation.role))
     user.current_organization_id = invitation.organization_id
     invitation.accepted_at = utcnow()

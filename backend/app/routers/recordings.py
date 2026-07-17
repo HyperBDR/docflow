@@ -16,6 +16,7 @@ from app.schemas import RecordingAuditInput, RecordingDomMeta, RecordingStepMeta
 from app.services import owned_demo, step_out, write_audit
 from app.snapshots import SnapshotError, decode_snapshot, sanitize_page_context, sanitize_snapshot, store_snapshot
 from app.storage import storage
+from app.quota import effective_plan, enforce
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 
@@ -38,9 +39,9 @@ async def upload_step(
     if existing:
         return step_out(existing, demo.id)
     count = db.scalar(select(func.count()).select_from(Step).where(Step.demo_id == demo.id)) or 0
-    if count >= 100:
-        raise HTTPException(status_code=400, detail="demo step limit reached")
+    if count >= int(effective_plan(db,demo.organization_id)[1]["max_steps_per_resource"]): enforce(db,demo.organization_id,"max_steps_per_resource")
     content = await screenshot.read(10 * 1024 * 1024 + 1)
+    enforce(db,demo.organization_id,"storage_bytes",len(content))
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="screenshot exceeds 10 MB")
     try:
@@ -111,8 +112,7 @@ async def upload_dom_slide(
     if existing:
         return step_out(existing, demo.id)
     count = db.scalar(select(func.count()).select_from(Step).where(Step.demo_id == demo.id)) or 0
-    if count >= 100:
-        raise HTTPException(status_code=400, detail="demo step limit reached")
+    if count >= int(effective_plan(db,demo.organization_id)[1]["max_steps_per_resource"]): enforce(db,demo.organization_id,"max_steps_per_resource")
 
     screenshot_content = await screenshot.read(10 * 1024 * 1024 + 1)
     if len(screenshot_content) > 10 * 1024 * 1024:

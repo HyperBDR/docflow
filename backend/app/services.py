@@ -1,9 +1,10 @@
 import re
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -109,7 +110,10 @@ def owned_demo(db: Session, demo_id: str, user: User) -> Demo:
 def active_share(db: Session, demo_id: str) -> ShareToken | None:
     return db.scalar(
         select(ShareToken)
-        .where(ShareToken.demo_id == demo_id, ShareToken.revoked.is_(False))
+        .where(
+            ShareToken.demo_id == demo_id, ShareToken.revoked.is_(False),
+            or_(ShareToken.expires_at.is_(None), ShareToken.expires_at > datetime.now(timezone.utc)),
+        )
         .order_by(ShareToken.created_at.desc())
     )
 

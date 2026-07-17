@@ -500,6 +500,12 @@ class AdminResourceOwner(BaseModel):
     email: str
 
 
+class AdminResourceOrganization(BaseModel):
+    id: str
+    name: str
+    kind: str
+
+
 class AdminResourceOut(BaseModel):
     id: str
     title: str
@@ -507,6 +513,7 @@ class AdminResourceOut(BaseModel):
     status: Literal["draft", "published"]
     content_locale: Locale
     owner: AdminResourceOwner
+    organization: AdminResourceOrganization | None = None
     step_count: int
     views: int
     unique_viewers: int
@@ -715,6 +722,29 @@ class AnalyticsEventCreate(BaseModel):
     visitor_id: str = Field(min_length=1, max_length=80)
     session_id: str = Field(min_length=1, max_length=80)
     step_id: str | None = None
+    referrer: str = Field(default="", max_length=1000)
+    utm_source: str = Field(default="", max_length=160)
+    utm_medium: str = Field(default="", max_length=160)
+    utm_campaign: str = Field(default="", max_length=200)
+    utm_content: str = Field(default="", max_length=200)
+    utm_term: str = Field(default="", max_length=200)
+
+
+class ShareLinkCreate(BaseModel):
+    name: str = Field(default="", max_length=160)
+    expires_at: datetime | None = None
+    password: str = Field(default="", max_length=128)
+
+
+class ShareLinkUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=160)
+    expires_at: datetime | None = None
+    password: str | None = Field(default=None, max_length=128)
+    revoked: bool | None = None
+
+
+class ShareUnlock(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
 
 
 class CommentCreate(BaseModel):

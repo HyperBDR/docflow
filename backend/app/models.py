@@ -1,8 +1,8 @@
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Table, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -92,6 +92,44 @@ class OrganizationInvitation(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class QuotaPlan(Base):
+    __tablename__ = "quota_plans"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    description: Mapped[str] = mapped_column(String(500), default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    limits: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class OrganizationQuotaAssignment(Base):
+    __tablename__ = "organization_quota_assignments"
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("quota_plans.id", ondelete="RESTRICT"), index=True)
+    overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class QuotaUsageSnapshot(Base):
+    __tablename__ = "quota_usage_snapshots"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "metric_key", "snapshot_date", name="uq_quota_usage_snapshot_daily"),
+        Index("ix_quota_usage_snapshot_metric_date", "metric_key", "snapshot_date"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    metric_key: Mapped[str] = mapped_column(String(60), index=True)
+    used: Mapped[int] = mapped_column(BigInteger, default=0)
+    limit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    usage_percent: Mapped[float] = mapped_column(Float, default=0)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
 class AuditLog(Base):
@@ -259,7 +297,13 @@ class ShareToken(Base):
     demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
     revision_id: Mapped[str] = mapped_column(ForeignKey("published_revisions.id", ondelete="CASCADE"), index=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), default="")
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -279,6 +323,13 @@ class AnalyticsEvent(Base):
     country: Mapped[str] = mapped_column(String(100), default="")
     region: Mapped[str] = mapped_column(String(100), default="")
     city: Mapped[str] = mapped_column(String(100), default="")
+    referrer: Mapped[str] = mapped_column(String(1000), default="")
+    referrer_host: Mapped[str] = mapped_column(String(255), default="", index=True)
+    utm_source: Mapped[str] = mapped_column(String(160), default="", index=True)
+    utm_medium: Mapped[str] = mapped_column(String(160), default="")
+    utm_campaign: Mapped[str] = mapped_column(String(200), default="")
+    utm_content: Mapped[str] = mapped_column(String(200), default="")
+    utm_term: Mapped[str] = mapped_column(String(200), default="")
     user_agent: Mapped[str] = mapped_column(String(1000), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
@@ -309,6 +360,7 @@ class ExportJob(Base):
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.queued)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     result_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    result_size: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     retry_of_id: Mapped[str | None] = mapped_column(ForeignKey("export_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -318,6 +370,31 @@ class ExportJob(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class ExportDownloadEvent(Base):
+    __tablename__ = "export_download_events"
+    __table_args__ = (
+        Index("ix_export_download_demo_created", "demo_id", "created_at"),
+        Index("ix_export_download_job_created", "export_job_id", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    export_job_id: Mapped[str] = mapped_column(ForeignKey("export_jobs.id", ondelete="CASCADE"), index=True)
+    demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    requested_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    request_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, default=uid)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    source: Mapped[str] = mapped_column(String(30), default="proxy", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="requested", index=True)
+    bytes_transferred: Mapped[int] = mapped_column(Integer, default=0)
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    user_agent: Mapped[str] = mapped_column(String(1000), default="")
+    referrer: Mapped[str] = mapped_column(String(1000), default="")
+    country: Mapped[str] = mapped_column(String(100), default="")
+    event_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AIJob(Base):

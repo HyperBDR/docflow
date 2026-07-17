@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_tls: bool = True
+    download_log_ingest_token: str = ""
 
 
 @lru_cache

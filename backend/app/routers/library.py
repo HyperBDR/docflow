@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import current_user
-from app.models import AnalyticsEvent, Category, Demo, StepComment, Tag, User
+from app.models import AnalyticsEvent, Category, Demo, ShareToken, StepComment, Tag, User
 from app.schemas import CategoryCreate, CategoryOut, CategoryUpdate, CommentOut, TagCreate, TagOut, TagUpdate
 from app.services import current_organization_id, owned_demo, require_organization_role
 
@@ -141,6 +141,7 @@ def demo_analytics(
     date_from: str | None = Query(default=None, alias="from"),
     date_to: str | None = Query(default=None, alias="to"),
     tag: list[str] = Query(default=[]),
+    share_id: str | None = None,
     db: Session = Depends(get_db), user: User = Depends(current_user),
 ):
     demo = owned_demo(db, demo_id, user)
@@ -148,9 +149,12 @@ def demo_analytics(
         return {"filtered_out": True, "summary": {"total_views": 0, "unique_viewers": 0, "engagement": 0, "completion": 0}, "steps": [], "devices": {}, "leads": []}
     start = parse_date(date_from, datetime.now(timezone.utc) - timedelta(days=30))
     end = parse_date(date_to, datetime.now(timezone.utc), end=True)
-    events = db.scalars(select(AnalyticsEvent).where(
-        AnalyticsEvent.demo_id == demo.id, AnalyticsEvent.created_at >= start, AnalyticsEvent.created_at < end
-    ).order_by(AnalyticsEvent.created_at)).all()
+    event_filters = [AnalyticsEvent.demo_id == demo.id, AnalyticsEvent.created_at >= start, AnalyticsEvent.created_at < end]
+    if share_id:
+        share = db.scalar(select(ShareToken).where(ShareToken.id == share_id, ShareToken.demo_id == demo.id))
+        if not share: raise HTTPException(status_code=404, detail="share link not found")
+        event_filters.append(AnalyticsEvent.share_id == share.id)
+    events = db.scalars(select(AnalyticsEvent).where(*event_filters).order_by(AnalyticsEvent.created_at)).all()
     comments = db.scalars(select(StepComment).where(
         StepComment.demo_id == demo.id, StepComment.created_at >= start, StepComment.created_at < end
     ).order_by(StepComment.created_at.desc())).all()
@@ -186,6 +190,7 @@ def demo_analytics(
             "operating_systems": distribution(events, "operating_system"),
             "browsers": distribution(events, "browser"), "device_types": distribution(events, "device"),
             "locations": [{"name": name, "value": value} for name, value in locations.most_common() if name],
+            "sources": distribution(events, "referrer_host"), "utm_sources": distribution(events, "utm_source"),
         },
         "leads": [{
             "name": item.author_name, "email": item.author_email, "comment": item.content,

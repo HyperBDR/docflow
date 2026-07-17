@@ -1,4 +1,6 @@
 import io
+from datetime import datetime, timezone
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from sqlalchemy import select
@@ -7,16 +9,28 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import AnalyticsEvent, PublishedRevision, ShareToken, StepComment
-from app.schemas import AnalyticsEventCreate, CommentCreate
+from app.schemas import AnalyticsEventCreate, CommentCreate, ShareUnlock
+from app.security import hash_token, verify_password
 from app.storage import storage
 
 router = APIRouter(prefix="/public", tags=["public"])
 
 
-def published(db: Session, token: str) -> tuple[ShareToken, PublishedRevision]:
+def share_cookie_name(token: str) -> str:
+    return f"docflow_share_{hash_token(token)[:16]}"
+
+
+def published(db: Session, token: str, request: Request | None = None) -> tuple[ShareToken, PublishedRevision]:
     share = db.scalar(select(ShareToken).where(ShareToken.token == token, ShareToken.revoked.is_(False)))
     if not share:
         raise HTTPException(status_code=404, detail="published demo not found")
+    expires_at = share.expires_at
+    if expires_at and (expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="share link expired")
+    if share.password_hash:
+        expected = hash_token(f"{share.id}:{share.password_hash}")
+        if not request or request.cookies.get(share_cookie_name(token)) != expected:
+            raise HTTPException(status_code=401, detail="share password required", headers={"X-DocFlow-Share-Locked": "1"})
     revision = db.get(PublishedRevision, share.revision_id)
     if not revision:
         raise HTTPException(status_code=404, detail="published demo not found")
@@ -42,7 +56,7 @@ def user_agent_info(value: str) -> tuple[str, str, str]:
 
 @router.post("/{token}/events", status_code=204)
 def collect_event(token: str, payload: AnalyticsEventCreate, request: Request, db: Session = Depends(get_db)):
-    share, revision = published(db, token)
+    share, revision = published(db, token, request)
     step_ids = {item["id"] for item in revision.snapshot.get("steps", [])}
     if payload.step_id and payload.step_id not in step_ids:
         raise HTTPException(status_code=400, detail="step not found")
@@ -54,19 +68,23 @@ def collect_event(token: str, payload: AnalyticsEventCreate, request: Request, d
         return
     ua = request.headers.get("user-agent", "")[:1000]
     operating_system, browser, device = user_agent_info(ua)
+    referrer = payload.referrer.strip()[:1000]
     event = AnalyticsEvent(
         share_id=share.id, demo_id=share.demo_id, revision_id=revision.id, step_id=payload.step_id,
         visitor_id=payload.visitor_id, session_id=payload.session_id, event_type=payload.event_type,
         operating_system=operating_system, browser=browser, device=device, user_agent=ua,
         country=(request.headers.get("cf-ipcountry") or request.headers.get("x-country") or "")[:100],
         region=(request.headers.get("x-region") or "")[:100], city=(request.headers.get("x-city") or "")[:100],
+        referrer=referrer, referrer_host=(urlparse(referrer).hostname or "")[:255],
+        utm_source=payload.utm_source.strip(), utm_medium=payload.utm_medium.strip(),
+        utm_campaign=payload.utm_campaign.strip(), utm_content=payload.utm_content.strip(), utm_term=payload.utm_term.strip(),
     )
     db.add(event); db.commit()
 
 
 @router.get("/{token}/comments")
-def public_comments(token: str, step_id: str, db: Session = Depends(get_db)):
-    share, revision = published(db, token)
+def public_comments(token: str, step_id: str, request: Request, db: Session = Depends(get_db)):
+    share, revision = published(db, token, request)
     if step_id not in {item["id"] for item in revision.snapshot.get("steps", [])}:
         raise HTTPException(status_code=404, detail="step not found")
     comments = db.scalars(select(StepComment).where(
@@ -79,8 +97,8 @@ def public_comments(token: str, step_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{token}/comments", status_code=201)
-def create_comment(token: str, payload: CommentCreate, db: Session = Depends(get_db)):
-    share, revision = published(db, token)
+def create_comment(token: str, payload: CommentCreate, request: Request, db: Session = Depends(get_db)):
+    share, revision = published(db, token, request)
     if payload.step_id not in {item["id"] for item in revision.snapshot.get("steps", [])}:
         raise HTTPException(status_code=400, detail="step not found")
     comment = StepComment(
@@ -94,8 +112,11 @@ def create_comment(token: str, payload: CommentCreate, db: Session = Depends(get
 
 
 @router.get("/{token}")
-def public_demo(token: str, db: Session = Depends(get_db)):
-    _, revision = published(db, token)
+def public_demo(token: str, request: Request, db: Session = Depends(get_db)):
+    share, revision = published(db, token, request)
+    share.access_count += 1
+    share.last_accessed_at = datetime.now(timezone.utc)
+    db.commit()
     snapshot = dict(revision.snapshot)
     snapshot["steps"] = [
         {
@@ -118,8 +139,8 @@ def public_demo(token: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{token}/assets/{step_id}.webp")
-def public_asset(token: str, step_id: str, db: Session = Depends(get_db)):
-    _, revision = published(db, token)
+def public_asset(token: str, step_id: str, request: Request, db: Session = Depends(get_db)):
+    _, revision = published(db, token, request)
     step = next((item for item in revision.snapshot["steps"] if item["id"] == step_id), None)
     if not step or not storage.exists(step["asset_key"]):
         raise HTTPException(status_code=404, detail="asset not found")
@@ -129,8 +150,8 @@ def public_asset(token: str, step_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{token}/slides/{step_id}/snapshot")
-def public_snapshot(token: str, step_id: str, v: str | None = None, db: Session = Depends(get_db)):
-    _, revision = published(db, token)
+def public_snapshot(token: str, step_id: str, request: Request, v: str | None = None, db: Session = Depends(get_db)):
+    _, revision = published(db, token, request)
     step = next((item for item in revision.snapshot["steps"] if item["id"] == step_id), None)
     if not step or not step.get("dom_snapshot_key"):
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
@@ -151,8 +172,8 @@ def public_snapshot(token: str, step_id: str, v: str | None = None, db: Session 
 
 
 @router.get("/{token}/markdown", response_class=PlainTextResponse)
-def public_markdown(token: str, db: Session = Depends(get_db)):
-    _, revision = published(db, token)
+def public_markdown(token: str, request: Request, db: Session = Depends(get_db)):
+    _, revision = published(db, token, request)
     snapshot = revision.snapshot
     lines = [f"# {snapshot['title']}", ""]
     if snapshot.get("description"):
@@ -161,3 +182,16 @@ def public_markdown(token: str, db: Session = Depends(get_db)):
         fallback = f"Step {index}" if snapshot.get("content_locale") == "en" else f"步骤 {index}"
         lines += [f"## {index}. {step['title'] or fallback}", "", step.get("body", ""), "", f"![{step['title'] or fallback}]({settings.public_base_url}/public/{token}/assets/{step['id']}.webp)", ""]
     return "\n".join(lines)
+
+
+@router.post("/{token}/unlock", status_code=204)
+def unlock_share(token: str, payload: ShareUnlock, response: Response, db: Session = Depends(get_db)):
+    share = db.scalar(select(ShareToken).where(ShareToken.token == token, ShareToken.revoked.is_(False)))
+    if not share or not share.password_hash:
+        raise HTTPException(status_code=404, detail="protected share link not found")
+    if not verify_password(share.password_hash, payload.password):
+        raise HTTPException(status_code=401, detail="incorrect share password")
+    response.set_cookie(
+        share_cookie_name(token), hash_token(f"{share.id}:{share.password_hash}"), max_age=86400,
+        httponly=True, secure=settings.cookie_secure, samesite="lax", path=f"/public/{token}",
+    )

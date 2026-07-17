@@ -1,6 +1,7 @@
 import io
 import traceback
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 from app.database import SessionLocal
@@ -16,6 +17,10 @@ celery.conf.update(
         "collect-platform-monitoring": {
             "task": "docflow.collect_monitoring",
             "schedule": max(30, settings.monitoring_interval_seconds),
+        },
+        "collect-daily-quota-usage": {
+            "task": "docflow.collect_quota_usage",
+            "schedule": crontab(hour=0, minute=10),
         },
     },
 )
@@ -60,6 +65,7 @@ def render_export(job_id: str):
             storage.delete(result_key)
             return
         job.result_key = result_key
+        job.result_size = len(data)
         job.status = JobStatus.complete
         job.progress = 100
         job.completed_at = now()
@@ -92,5 +98,15 @@ def collect_platform_monitoring():
     db = SessionLocal()
     try:
         return collect_monitoring(db)
+    finally:
+        db.close()
+
+
+@celery.task(name="docflow.collect_quota_usage")
+def collect_daily_quota_usage():
+    from app.quota_analytics import collect_quota_usage
+    db = SessionLocal()
+    try:
+        return collect_quota_usage(db)
     finally:
         db.close()

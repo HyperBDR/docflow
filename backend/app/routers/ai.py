@@ -9,6 +9,7 @@ from app.ai_jobs import enqueue_ai_job
 from app.models import AIJob, Demo, Hotspot, Step, User
 from app.schemas import AIJobOut
 from app.services import owned_demo
+from app.quota import enforce
 
 router = APIRouter(prefix="/api", tags=["ai"])
 
@@ -78,6 +79,7 @@ def ensure_ai(db: Session) -> None:
 def generate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     ensure_ai(db)
     demo = owned_demo(db, demo_id, user)
+    enforce(db, demo.organization_id, "monthly_ai_tokens")
     if not demo.steps:
         raise HTTPException(status_code=400, detail="record at least one slide first")
     return job_out(enqueue_ai_job(db, demo, user), db)
@@ -87,6 +89,7 @@ def generate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depe
 def generate_step(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     ensure_ai(db)
     demo = owned_demo(db, demo_id, user)
+    enforce(db, demo.organization_id, "monthly_ai_tokens")
     step = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.id == step_id))
     if not step:
         raise HTTPException(status_code=404, detail="step not found")
