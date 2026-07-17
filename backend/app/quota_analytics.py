@@ -206,12 +206,19 @@ def operations_overview(
 def plan_statistics(db: Session) -> list[dict]:
     rows = live_space_rows(db)
     plans = db.scalars(select(QuotaPlan).order_by(QuotaPlan.is_default.desc(), QuotaPlan.name)).all()
+    assignment_counts = dict(db.execute(select(
+        OrganizationQuotaAssignment.plan_id,
+        func.count(OrganizationQuotaAssignment.organization_id),
+    ).group_by(OrganizationQuotaAssignment.plan_id)).all())
     result = []
     for plan in plans:
         applied = [row for row in rows if row["plan"]["id"] == plan.id]
+        assigned = int(assignment_counts.get(plan.id, 0))
         result.append({
             "id": plan.id, "name": plan.name, "description": plan.description, "is_default": plan.is_default,
             "limits": {**DEFAULT_LIMITS, **(plan.limits or {})}, "created_at": plan.created_at, "updated_at": plan.updated_at,
+            "can_delete": not plan.is_default and assigned == 0,
+            "delete_blocker": "default" if plan.is_default else "in_use" if assigned else None,
             "statistics": {
                 "spaces": len(applied), "team_spaces": sum(row["kind"] == "team" for row in applied),
                 "personal_spaces": sum(row["kind"] == "personal" for row in applied),

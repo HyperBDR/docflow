@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import Icon, { type IconName } from '../components/Icon'
+import ProductDonut from '../components/charts/InteractiveDonut'
+import ProductLineChart from '../components/charts/InteractiveLineChart'
 import { formatDate, formatNumber, normalizeLocale } from '../i18n'
 import type { AdminOverview as Overview, Locale } from '../types'
 
@@ -25,29 +27,9 @@ function compact(value: number, locale: string) {
 
 type TrendKey = 'demos' | 'views' | 'ai_tokens' | 'users'
 function OverviewTrend({ value, metric, label, locale }: { value: Overview; metric: TrendKey; label: string; locale: Locale }) {
-  const [hover, setHover] = useState<number | null>(null)
-  const points = Array.isArray(value.trend) ? value.trend : [], width = 900, height = 240, pad = 30
-  const max = Math.max(1, ...points.map(item => Number(item[metric]) || 0))
-  const coordinate = (item: Overview['trend'][number], index: number) => ({
-    x: pad + index * (width - pad * 2) / Math.max(1, points.length - 1),
-    y: height - pad - (Number(item[metric]) || 0) / max * (height - pad * 2),
-  })
-  const polyline = points.map((item, index) => { const point = coordinate(item, index); return `${point.x},${point.y}` }).join(' ')
-  const hoverPoint = hover === null || !points[hover] ? null : coordinate(points[hover], hover)
-  return <div className="overview-trend">
-    <div className="chart-y-axis">{[1, .75, .5, .25, 0].map(value => <span key={value}>{compact(max * value, locale)}</span>)}</div>
-    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
-      {[0, .25, .5, .75, 1].map(line => <line className="chart-grid-line" key={line} x1={pad} x2={width-pad} y1={pad + line * (height-pad*2)} y2={pad + line * (height-pad*2)} />)}
-      <defs><linearGradient id="overview-area" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#635bff" stopOpacity=".26"/><stop offset="1" stopColor="#635bff" stopOpacity="0"/></linearGradient></defs>
-      {points.length > 1 && <path d={`M ${pad} ${height-pad} L ${polyline.replaceAll(' ', ' L ')} L ${width-pad} ${height-pad} Z`} fill="url(#overview-area)" />}
-      <polyline points={polyline} fill="none" stroke="#635bff" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-      {hoverPoint && <line className="chart-hover-line" x1={hoverPoint.x} x2={hoverPoint.x} y1={pad} y2={height-pad} />}
-      {hoverPoint && <circle className="chart-hover-dot" cx={hoverPoint.x} cy={hoverPoint.y} r="6" />}
-      {points.map((item, index) => { const point = coordinate(item, index), hitWidth = (width-pad*2)/Math.max(1,points.length); return <rect key={item.date} x={point.x-Math.max(6,hitWidth/2)} y="0" width={Math.max(12,hitWidth)} height={height} fill="transparent" onMouseEnter={() => setHover(index)} onMouseLeave={() => setHover(null)} /> })}
-    </svg>
-    {hover !== null && points[hover] && <div className="chart-tooltip usage-tooltip" style={{ left: `${Math.min(88, Math.max(12, hover/Math.max(1,points.length-1)*100))}%` }}><strong>{points[hover].date}</strong><span><i style={{background:'#635bff'}} />{label}<b>{formatNumber(points[hover][metric], locale)}</b></span></div>}
-    <div className="chart-axis"><span>{points[0]?.date || '—'}</span><span>{points.at(-1)?.date || '—'}</span></div>
-  </div>
+  const points = Array.isArray(value.trend) ? value.trend : []
+  const axisDate=(date:string)=>{const parts=date.split('-');return parts.length===3?`${parts[1]}/${parts[2]}`:date}
+  return <ProductLineChart className="overview-standard-chart" ariaLabel={label} points={points.map(point=>({key:point.date,label:axisDate(point.date),values:{[metric]:Number(point[metric])||0}}))} series={[{key:metric,label,color:'#635bff'}]} formatValue={number=>compact(number,locale)} />
 }
 
 function OrganizationRanking({ title, items, viewsLabel }: { title: string; items: Overview['top_organizations']; viewsLabel: string }) {
@@ -56,11 +38,9 @@ function OrganizationRanking({ title, items, viewsLabel }: { title: string; item
 }
 
 function StatusDonut({ title, items, labelFor, unit }: { title: string; items: Overview['demo_status']; labelFor: (key: string, fallback: string) => string; unit: string }) {
-  const safeItems = Array.isArray(items) ? items : [], total = safeItems.reduce((sum, item) => sum + item.value, 0)
+  const safeItems = Array.isArray(items) ? items : []
   const colors = ['#635bff', '#22a660', '#ef8b3b', '#e05294']
-  let angle = 0
-  const stops = safeItems.map((item, index) => { const start = angle; angle += total ? item.value / total * 360 : 0; return `${colors[index % colors.length]} ${start}deg ${angle}deg` })
-  return <section className="overview-insight-card overview-status-card"><header><strong>{title}</strong></header><div><div className="overview-donut" style={{ background: total ? `conic-gradient(${stops.join(',')})` : '#eef0f4' }}><span><b>{total}</b><small>{unit}</small></span></div><ul>{safeItems.map((item,index)=><li key={item.key}><i style={{background:colors[index%colors.length]}}/><span>{labelFor(item.key,item.label)}</span><b>{item.value}</b></li>)}</ul></div></section>
+  return <section className="overview-insight-card overview-status-card"><header><strong>{title}</strong></header><ProductDonut ariaLabel={title} centerLabel={unit} items={safeItems.map((item,index)=>({key:item.key,label:labelFor(item.key,item.label),value:item.value,color:colors[index%colors.length]}))}/></section>
 }
 
 function LocaleDistribution({ title, items, labelFor }: { title: string; items: Overview['content_locales']; labelFor: (key: string) => string }) {

@@ -116,6 +116,7 @@ export const api = {
   quotaPlans:()=>request<QuotaPlan[]>('/api/admin/quota-plans'),
   createQuotaPlan:(values:Partial<QuotaPlan>)=>request<QuotaPlan>('/api/admin/quota-plans',{method:'POST',body:JSON.stringify(values)}),
   updateQuotaPlan:(id:string,values:Partial<QuotaPlan>)=>request<QuotaPlan>(`/api/admin/quota-plans/${id}`,{method:'PATCH',body:JSON.stringify(values)}),
+  deleteQuotaPlan:(id:string)=>request<void>(`/api/admin/quota-plans/${id}`,{method:'DELETE'}),
   organizationQuota:(id:string)=>request<QuotaSummary>(`/api/admin/organizations/${id}/quota`),
   updateOrganizationQuota:(id:string,plan_id:string,overrides:Record<string,number|null>)=>request<QuotaSummary>(`/api/admin/organizations/${id}/quota`,{method:'PUT',body:JSON.stringify({plan_id,overrides})}),
   quotaOperations:(filters:{days?:number;metric?:QuotaMetricKey;kind?:string;plan_id?:string;health?:string}={})=>request<QuotaOverview>(`/api/admin/quotas/overview?${new URLSearchParams(Object.entries(filters).filter(([,value])=>value!==''&&value!==undefined).map(([key,value])=>[key,String(value)])).toString()}`),

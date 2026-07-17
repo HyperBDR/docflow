@@ -1,8 +1,12 @@
 import type { IconName } from '../components/Icon'
 import type { QuotaMetricKey } from './types'
 
-export const QUOTA_METRICS: { key: QuotaMetricKey; icon: IconName; tone: string; byte?: boolean }[] = [
-  { key: 'storage_bytes', icon: 'database', tone: 'violet', byte: true },
+export type QuotaMetricDefinition = { key: QuotaMetricKey; icon: IconName; tone: string; byte?: boolean; inputUnit?: 'MB' }
+
+const MEGABYTE = 1024 ** 2
+
+export const QUOTA_METRICS: QuotaMetricDefinition[] = [
+  { key: 'storage_bytes', icon: 'database', tone: 'violet', byte: true, inputUnit: 'MB' },
   { key: 'resources', icon: 'folder', tone: 'blue' },
   { key: 'max_steps_per_resource', icon: 'list', tone: 'cyan' },
   { key: 'members', icon: 'users', tone: 'green' },
@@ -11,7 +15,7 @@ export const QUOTA_METRICS: { key: QuotaMetricKey; icon: IconName; tone: string;
   { key: 'monthly_exports', icon: 'publish', tone: 'orange' },
   { key: 'monthly_video_minutes', icon: 'play', tone: 'red' },
   { key: 'monthly_public_views', icon: 'eye', tone: 'teal' },
-  { key: 'monthly_download_bytes', icon: 'download', tone: 'gold', byte: true },
+  { key: 'monthly_download_bytes', icon: 'download', tone: 'gold', byte: true, inputUnit: 'MB' },
 ]
 
 export function quotaMetric(key: string) { return QUOTA_METRICS.find(item => item.key === key) || QUOTA_METRICS[0] }
@@ -24,4 +28,16 @@ export function formatQuotaValue(key: string, value: number | null | undefined, 
     return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value / 1024 ** index)} ${units[index]}`
   }
   return new Intl.NumberFormat(locale, { notation: value >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value)
+}
+
+export function quotaLimitInputValue(key: string, value: number | null | undefined): number | '' {
+  if (value == null) return ''
+  return quotaMetric(key).inputUnit === 'MB' ? Number((value / MEGABYTE).toFixed(2)) : value
+}
+
+export function quotaLimitStorageValue(key: string, value: string): number | null {
+  if (value === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return quotaMetric(key).inputUnit === 'MB' ? Math.round(parsed * MEGABYTE) : parsed
 }

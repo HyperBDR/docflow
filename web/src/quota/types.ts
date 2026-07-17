@@ -11,6 +11,7 @@ export type QuotaSpace = {
 }
 export type QuotaPlanStatistics = {
   id: string; name: string; description: string; is_default: boolean; limits: QuotaLimits; created_at: string; updated_at: string
+  can_delete: boolean; delete_blocker: 'default' | 'in_use' | null
   statistics: { spaces: number; team_spaces: number; personal_spaces: number; normal: number; warning: number; exceeded: number; overrides: number }
 }
 export type QuotaOverview = {

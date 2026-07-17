@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import AdminPagination from '../components/AdminPagination'
 import Icon from '../components/Icon'
+import ProductDonut from '../components/charts/InteractiveDonut'
+import ProductLineChart from '../components/charts/InteractiveLineChart'
 import { formatDate, formatNumber, normalizeLocale } from '../i18n'
 import type { AdminOrganization, AdminUser, AIModelConfig, AIUsagePoint, AIUsageRecord, AIUsageSummary } from '../types'
 
@@ -11,18 +13,8 @@ const emptySummary: AIUsageSummary = { totals: point, trend: [], by_user: [], by
 type Series = { key: keyof AIUsagePoint; label: string; color: string }
 
 function InteractiveLineChart({ points = [], series, locale }: { points?: AIUsagePoint[]; series: Series[]; locale: string }) {
-  const [hover, setHover] = useState<number | null>(null), width = 900, height = 240, pad = 30
-  const max = Math.max(1, ...points.flatMap(item => series.map(value => Number(item[value.key]) || 0)))
-  const xy = (item: AIUsagePoint, index: number, value: Series) => ({ x: pad + index * (width-pad*2)/Math.max(1, points.length-1), y: height-pad-(Number(item[value.key]) || 0)/max*(height-pad*2) })
-  const hoverX = hover === null || !points[hover] ? null : pad + hover * (width-pad*2)/Math.max(1,points.length-1)
-  const compact = (value:number) => new Intl.NumberFormat(locale,{notation:'compact',maximumFractionDigits:1}).format(value)
-  return <div className="interactive-line-chart"><div className="chart-y-axis">{[1,.75,.5,.25,0].map(value=><span key={value}>{compact(max*value)}</span>)}</div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-    {[0,.25,.5,.75,1].map(line => <line className="chart-grid-line" key={line} x1={pad} x2={width-pad} y1={pad+line*(height-pad*2)} y2={pad+line*(height-pad*2)} />)}
-    {series.map(value => <polyline key={value.label} points={points.map((item,index) => { const p=xy(item,index,value); return `${p.x},${p.y}` }).join(' ')} fill="none" stroke={value.color} strokeWidth="3" vectorEffect="non-scaling-stroke" />)}
-    {hoverX !== null && <line className="chart-hover-line" x1={hoverX} x2={hoverX} y1={pad} y2={height-pad} />}
-    {points.map((item,index) => { const x=pad+index*(width-pad*2)/Math.max(1,points.length-1); return <rect key={item.key} x={x-Math.max(5,(width-pad*2)/Math.max(1,points.length)/2)} y={0} width={Math.max(10,(width-pad*2)/Math.max(1,points.length))} height={height} fill="transparent" onMouseEnter={()=>setHover(index)} onMouseLeave={()=>setHover(null)} /> })}
-    {hover !== null && points[hover] && series.map(value => { const p=xy(points[hover],hover,value); return <circle key={value.label} cx={p.x} cy={p.y} r="6" fill="#fff" stroke={value.color} strokeWidth="3" /> })}
-  </svg>{hover !== null && points[hover] && <div className="chart-tooltip usage-tooltip" style={{ left: `${Math.min(88, Math.max(12, hover/Math.max(1,points.length-1)*100))}%` }}><strong>{points[hover].label}</strong>{series.map(value => <span key={value.label}><i style={{background:value.color}} />{value.label}<b>{Number(points[hover][value.key] || 0).toLocaleString()}</b></span>)}</div>}<div className="chart-axis"><span>{points[0]?.label || '—'}</span><span>{points.at(-1)?.label || '—'}</span></div><div className="chart-legend">{series.map(value => <span key={value.label}><i style={{background:value.color}} />{value.label}</span>)}</div></div>
+  const axisLabel=(value:string)=>{const parts=value.split('-');return parts.length===3?`${parts[1]}/${parts[2]}`:value}
+  return <ProductLineChart className="ai-usage-standard-chart" ariaLabel={series.map(item=>item.label).join(' / ')} points={points.map(point=>({key:point.key,label:point.label,axisLabel:axisLabel(point.label),values:Object.fromEntries(series.map(item=>[String(item.key),Number(point[item.key])||0]))}))} series={series.map(item=>({key:String(item.key),label:item.label,color:item.color}))} formatValue={value=>new Intl.NumberFormat(locale,{notation:'compact',maximumFractionDigits:1}).format(value)}/>
 }
 
 function VerticalBars({ title, items = [], onSelect }: { title: string; items?: AIUsagePoint[]; onSelect?: (item: AIUsagePoint) => void }) {
@@ -31,8 +23,9 @@ function VerticalBars({ title, items = [], onSelect }: { title: string; items?: 
 }
 
 function StatusDonut({ items = [], title }: { items?: AIUsagePoint[]; title: string }) {
-  const success = items.find(item => item.key === 'success')?.requests || 0, failed = items.find(item => item.key === 'failed')?.requests || 0, total = Math.max(1, success + failed), angle = success/total*360
-  return <section className="usage-donut-card"><header><strong>{title}</strong></header><div><div className="usage-donut" style={{background:`conic-gradient(#22a660 0 ${angle}deg,#e05260 ${angle}deg 360deg)`}}><span><b>{success+failed}</b><small>requests</small></span></div><ul><li><i className="success"/><span>Success</span><b>{success}</b></li><li><i className="failed"/><span>Failed</span><b>{failed}</b></li></ul></div></section>
+  const {t}=useTranslation('admin')
+  const success = items.find(item => item.key === 'success')?.requests || 0, failed = items.find(item => item.key === 'failed')?.requests || 0
+  return <section className="usage-donut-card"><header><strong>{title}</strong></header><ProductDonut ariaLabel={title} centerLabel={t('usage.requestUnit')} items={[{key:'success',label:t('usage.success'),value:success,color:'#22a660'},{key:'failed',label:t('usage.failed'),value:failed,color:'#e05260'}]}/></section>
 }
 
 export default function AdminAIUsage() {

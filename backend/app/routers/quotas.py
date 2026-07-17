@@ -1,5 +1,5 @@
 from fastapi import APIRouter,Depends,HTTPException,Query,Request
-from sqlalchemy import select,update
+from sqlalchemy import func,select,update
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import admin_user,current_user
@@ -34,6 +34,16 @@ def update_plan(plan_id:str,payload:dict,request:Request,db:Session=Depends(get_
     if "limits" in payload:p.limits={**DEFAULT_LIMITS,**payload["limits"]}
     if payload.get("is_default"):db.execute(update(QuotaPlan).values(is_default=False));p.is_default=True
     write_audit(db,actor,"quota_plan.updated","quota_plan",p.id,p.name,request=request);db.commit();db.refresh(p);return plan_out(p)
+
+@router.delete("/api/admin/quota-plans/{plan_id}",status_code=204)
+def delete_plan(plan_id:str,request:Request,db:Session=Depends(get_db),actor:User=Depends(admin_user)):
+    p=db.get(QuotaPlan,plan_id)
+    if not p:raise HTTPException(404,{"message":"quota plan not found","code":"quota.plan_not_found"})
+    if p.is_default:raise HTTPException(409,{"message":"the default quota plan cannot be deleted","code":"quota.plan_default"})
+    assigned=db.scalar(select(func.count(OrganizationQuotaAssignment.organization_id)).where(OrganizationQuotaAssignment.plan_id==p.id)) or 0
+    if assigned:raise HTTPException(409,{"message":"quota plan is assigned to workspaces","code":"quota.plan_in_use"})
+    write_audit(db,actor,"quota_plan.deleted","quota_plan",p.id,p.name,before={"name":p.name,"description":p.description,"limits":p.limits or {}},request=request)
+    db.delete(p);db.commit()
 
 @router.get("/api/admin/organizations/{organization_id}/quota")
 def admin_org_quota(organization_id:str,db:Session=Depends(get_db),_:User=Depends(admin_user)):

@@ -1,0 +1,22 @@
+.quota-limit-input {
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+
+.quota-limit-input > input { display: block; }
+
+.quota-limit-input.quota-limit-input--unit > input { padding-right: 45px; }
+
+.quota-limit-input > em {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  color: #8a94a6;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-50%);
+  pointer-events: none;
+}

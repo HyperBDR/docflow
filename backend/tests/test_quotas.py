@@ -20,6 +20,24 @@ def test_quota_plan_lifecycle(authenticated):
     assert updated.status_code==200
     assert updated.json()['is_default'] is True
 
+    default_delete=authenticated.delete(f"/api/admin/quota-plans/{created.json()['id']}")
+    assert default_delete.status_code==409
+    assert default_delete.json()['code']=='quota.plan_default'
+
+    removable=authenticated.post('/api/admin/quota-plans',json={'name':'Temporary','limits':{'resources':10}})
+    assert removable.status_code==201
+    removable_id=removable.json()['id']
+    statistics=authenticated.get('/api/admin/quotas/plans').json()
+    assert next(item for item in statistics if item['id']==removable_id)['can_delete'] is True
+    assert authenticated.delete(f'/api/admin/quota-plans/{removable_id}').status_code==204
+
+    assigned=authenticated.post('/api/admin/quota-plans',json={'name':'Assigned','limits':{'resources':10}})
+    organization_id=authenticated.get('/api/workspace/quotas').json()['organization_id']
+    assert authenticated.put(f'/api/admin/organizations/{organization_id}/quota',json={'plan_id':assigned.json()['id'],'overrides':{}}).status_code==200
+    assigned_delete=authenticated.delete(f"/api/admin/quota-plans/{assigned.json()['id']}")
+    assert assigned_delete.status_code==409
+    assert assigned_delete.json()['code']=='quota.plan_in_use'
+
 def test_quota_operations_snapshots_and_personal_spaces(authenticated):
     collected=authenticated.post('/api/admin/quotas/collect')
     assert collected.status_code==200,collected.text

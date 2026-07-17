@@ -33,5 +33,5 @@
     "ranges": "可查询范围", "rangesHint": "详情图表会根据时间范围自动降采样。",
     "privacy": "隐私与安全", "privacyHint": "仅保存规范化接口路径、状态码、耗时和聚合数量，不保存请求参数、正文或响应内容。"
   },
-  "quota":{"plans":"配额方案","plansHint":"管理平台可以分配给空间的方案模板。","add":"新增方案","default":"平台默认","edit":"编辑配额方案","editHint":"留空表示无限额；修改后应用于绑定该方案的空间。","name":"方案名称","description":"方案说明","setDefault":"设为平台默认方案","save":"保存方案","saved":"配额方案已保存","newName":"新配额方案","metrics":{"storage_bytes":"存储空间（字节）","resources":"资源数量","max_steps_per_resource":"单资源最大步骤","members":"团队成员","active_shares":"有效分享链接","monthly_ai_tokens":"每月 AI Token","monthly_exports":"每月导出次数","monthly_video_minutes":"每月视频分钟","monthly_public_views":"每月公开访问","monthly_download_bytes":"每月下载流量（字节）"}}
+  "quota":{"plans":"配额方案","plansHint":"管理平台可以分配给空间的方案模板。","add":"新增方案","default":"平台默认","edit":"编辑配额方案","editHint":"留空表示无限额；修改后应用于绑定该方案的空间。","name":"方案名称","description":"方案说明","setDefault":"设为平台默认方案","save":"保存方案","saved":"配额方案已保存","newName":"新配额方案","metrics":{"storage_bytes":"存储空间","resources":"资源数量","max_steps_per_resource":"单资源最大步骤","members":"团队成员","active_shares":"有效分享链接","monthly_ai_tokens":"每月 AI Token","monthly_exports":"每月导出次数","monthly_video_minutes":"每月视频分钟","monthly_public_views":"每月公开访问","monthly_download_bytes":"每月下载流量"}}
 }

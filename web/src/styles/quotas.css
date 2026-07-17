@@ -16,3 +16,237 @@
 @media(max-width:1150px){.quota-summary-grid{grid-template-columns:repeat(2,1fr)}.quota-overview-charts,.quota-analysis-grid{grid-template-columns:1fr}.quota-analysis-current>div{grid-template-columns:repeat(2,1fr)}.quota-analysis-current article:nth-child(n){border-right:1px solid #edf0f4;border-bottom:1px solid #edf0f4}.quota-analysis-current article:nth-child(2n){border-right:0}.quota-plan-metrics{grid-template-columns:1fr}}
 @media(max-width:850px){.quota-plan-layout{grid-template-columns:1fr}.quota-analysis-filters{grid-template-columns:1fr 1fr}.quota-space-list>header{align-items:stretch;flex-direction:column}.quota-space-list>header>div:last-child{display:grid;grid-template-columns:1fr 1fr}.quota-space-list .admin-search{width:100%;grid-column:1/-1}.quota-collection-state{grid-template-columns:1fr}.quota-collection-state>button{grid-column:auto;grid-row:auto}.quota-space-summary{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.quota-summary-grid{grid-template-columns:1fr}.quota-analysis-filters{grid-template-columns:1fr}.quota-analysis-current>div{grid-template-columns:1fr}.quota-analysis-current article:nth-child(n){border-right:0}.quota-plan-basics{grid-template-columns:1fr}.quota-plan-metrics label{grid-template-columns:38px minmax(0,1fr)}.quota-plan-metrics input{grid-column:1/-1}.quota-drawer-metrics{grid-template-columns:1fr}.quota-space-summary{grid-template-columns:1fr}.quota-space-drawer>nav button{flex:1;justify-content:center}.quota-space-history>header{align-items:stretch;flex-direction:column}.quota-ranking-card article{grid-template-columns:25px minmax(0,1fr) 55px}.quota-ranking-card article>div{grid-column:2/-1}.quota-distribution-card>div{grid-template-columns:110px minmax(0,1fr)}.quota-donut{width:105px;height:105px}}
+
+/* Keep quota operations aligned with the admin typography and viewport rules. */
+.admin-route-content:has(.quota-operations-page) {
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+.quota-operations-page {
+  width: 100%;
+  min-width: 0;
+  max-width: 1500px;
+  overflow-x: clip;
+  font-size: var(--admin-font-body);
+}
+.quota-operations-page > *,
+.quota-plan-layout,
+.quota-plan-sidebar,
+.quota-plan-editor,
+.quota-plan-basics,
+.quota-plan-metrics,
+.quota-space-list,
+.quota-space-list > header,
+.quota-space-table-wrap,
+.quota-analysis-current,
+.quota-analysis-grid,
+.quota-overview-charts {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Standard admin controls: quiet at rest, clear only on focus. */
+.quota-operations-page select,
+.quota-plan-basics input:not([type="checkbox"]),
+.quota-plan-metrics input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 32px 0 11px;
+  border: 1px solid #e1e5eb;
+  border-radius: 9px;
+  outline: none;
+  color: #4f5c70;
+  background-color: #fbfcfd;
+  box-shadow: none;
+  font: inherit;
+  font-size: var(--admin-font-body);
+  transition: border-color .15s, background-color .15s, box-shadow .15s;
+}
+.quota-plan-basics input:not([type="checkbox"]),
+.quota-plan-metrics input { padding-right: 11px; }
+.quota-operations-page select:hover,
+.quota-plan-basics input:not([type="checkbox"]):hover,
+.quota-plan-metrics input:hover {
+  border-color: #d5dae3;
+  background-color: #fff;
+}
+.quota-operations-page select:focus,
+.quota-plan-basics input:not([type="checkbox"]):focus,
+.quota-plan-metrics input:focus {
+  border-color: #8f88ec;
+  background-color: #fff;
+  box-shadow: 0 0 0 3px #635bff12;
+}
+.quota-chart-card header select,
+.quota-space-history header select {
+  width: auto;
+  min-width: 190px;
+  height: 36px;
+  border-color: transparent;
+  background-color: #f3f5f8;
+}
+.quota-chart-card header select:hover,
+.quota-space-history header select:hover { border-color: #e1e5eb; }
+.quota-space-list .admin-search { min-width: 220px; }
+.quota-space-list .admin-search input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px 0 35px;
+  border-color: #e1e5eb;
+  background: #fbfcfd;
+  font-size: var(--admin-font-body);
+}
+.quota-space-list .admin-search svg { top: 12px; }
+.quota-analysis-filters {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+  border-color: #e5e8ee;
+  background: #fbfcfd;
+}
+.quota-analysis-filters select { height: 40px; background-color: #fff; }
+
+/* Admin typography tokens replace the original compact one-off sizes. */
+.quota-page-tabs button,
+.quota-collection-state > span,
+.quota-collection-state > button,
+.quota-space-drawer > nav button { font-size: var(--admin-font-body); }
+.quota-collection-state > small,
+.quota-summary-grid small,
+.quota-summary-grid p,
+.quota-chart-card header small,
+.quota-ranking-card header small,
+.quota-analysis-current header small,
+.quota-plan-sidebar header small,
+.quota-plan-editor header small,
+.quota-plan-sidebar button small,
+.quota-plan-sidebar button > div,
+.quota-plan-sidebar button em,
+.quota-plan-stats span,
+.quota-default-switch small,
+.quota-plan-metrics small,
+.quota-space-list > header small,
+.quota-space-name small,
+.quota-highest small,
+.quota-space-table-wrap td > small,
+.quota-analysis-current article small,
+.quota-health,
+.quota-space-summary small,
+.quota-space-drawer header p,
+.quota-space-drawer header small,
+.quota-drawer-metrics small,
+.quota-drawer-metrics em,
+.quota-space-history header small {
+  font-size: var(--admin-font-caption);
+}
+.quota-chart-card header strong,
+.quota-ranking-card header strong,
+.quota-analysis-current header strong,
+.quota-distribution-card header,
+.quota-plan-sidebar header strong,
+.quota-plan-editor header strong,
+.quota-space-list > header strong,
+.quota-space-history header strong { font-size: var(--admin-font-card-title); }
+.quota-distribution-card li,
+.quota-ranking-card article > span strong,
+.quota-ranking-card article > strong,
+.quota-plan-sidebar button strong,
+.quota-plan-sidebar header button,
+.quota-default-switch strong,
+.quota-plan-metrics strong,
+.quota-space-table-wrap td,
+.quota-space-name strong,
+.quota-highest strong,
+.quota-highest > b,
+.quota-empty,
+.quota-space-summary strong,
+.quota-drawer-metrics strong { font-size: var(--admin-font-body); }
+.quota-space-table-wrap th { font-size: var(--admin-font-caption); }
+.quota-plan-basics > label:not(.quota-default-switch) { font-size: var(--admin-font-label); }
+.quota-analysis-current article strong { font-size: var(--admin-font-card-title); }
+.quota-chart-y-axis { font-size: 10px; }
+.quota-chart-axis,
+.quota-chart-legend,
+.quota-ranking-card article > div small { font-size: 11px; }
+.quota-chart-tooltip { font-size: var(--admin-font-caption); }
+.quota-donut small { font-size: 11px; }
+
+/* Prevent intrinsic form widths from escaping the plan editor grid. */
+.quota-plan-layout { width: 100%; grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); }
+.quota-plan-editor > header { min-width: 0; flex-wrap: wrap; }
+.quota-plan-editor > header > div,
+.quota-plan-sidebar > header > div,
+.quota-plan-basics label,
+.quota-plan-metrics label,
+.quota-plan-metrics label > span:nth-child(2) { min-width: 0; }
+.quota-plan-stats { min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.quota-plan-basics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.quota-plan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.quota-plan-metrics label { min-width: 0; grid-template-columns: 40px minmax(0, 1fr) minmax(100px, 130px); }
+.quota-plan-metrics strong,
+.quota-plan-metrics small { overflow-wrap: anywhere; }
+.quota-default-switch input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  min-width: 0;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+}
+.quota-space-list > header > div:last-child { min-width: 0; flex-wrap: wrap; }
+.quota-space-list > header select { width: auto; min-width: 145px; }
+
+@media (max-width: 1320px) {
+  .quota-plan-layout { grid-template-columns: 1fr; }
+  .quota-plan-sidebar > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quota-plan-sidebar > div > button { border-right: 1px solid #edf0f4; }
+}
+@media (max-width: 900px) {
+  .quota-plan-metrics { grid-template-columns: 1fr; }
+  .quota-analysis-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .quota-plan-sidebar > div,
+  .quota-plan-basics,
+  .quota-analysis-filters { grid-template-columns: 1fr; }
+  .quota-plan-metrics label { grid-template-columns: 38px minmax(0, 1fr); }
+  .quota-plan-metrics .quota-limit-input { grid-column: 1 / -1; }
+  .quota-space-list > header select { width: 100%; }
+}
+
+/* Quota plan actions and friendly unit controls. */
+.quota-plan-editor > footer {
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.quota-plan-editor > footer > small {
+  color: #8490a3;
+  font-size: var(--admin-font-caption);
+  line-height: 1.45;
+}
+.quota-plan-editor > footer > div { display: flex; gap: 8px; }
+.quota-plan-editor > footer .danger:disabled { color: #a8b0bd; background: #f2f4f7; opacity: 1; }
+
+/* Analytics uses a full-width trend with three balanced distributions below. */
+.quota-analysis-grid {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+.quota-analysis-grid > .quota-distribution-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.quota-analysis-grid > .quota-chart-card { align-self: start; }
+
+@media (max-width: 900px) {
+  .quota-analysis-grid > .quota-distribution-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .quota-plan-editor > footer { align-items: stretch; flex-direction: column; }
+  .quota-plan-editor > footer > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .quota-plan-editor > footer button { justify-content: center; }
+}
