@@ -15,10 +15,12 @@ def hash_password(password: str) -> str:
     return password_hasher.hash(password)
 
 
-def verify_password(password_hash: str, password: str) -> bool:
+def verify_password(password_hash: str | None, password: str) -> bool:
+    if not password_hash:
+        return False
     try:
         return password_hasher.verify(password_hash, password)
-    except VerifyMismatchError:
+    except (VerifyMismatchError, TypeError):
         return False
 
 
@@ -36,4 +38,3 @@ def expires_in(days: int = 0, minutes: int = 0) -> datetime:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
-

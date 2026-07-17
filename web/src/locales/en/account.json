@@ -20,14 +20,23 @@
   },
   "security": {
     "title": "Password & security",
-    "description": "Changing your password signs out all web and browser extension sessions.",
+    "description": "Manage passwords and external sign-in methods that protect access to your account.",
+    "passwordTitle": "Password sign-in",
+    "passwordConfigured": "A password is configured. Changing it signs out every web and browser extension session.",
+    "passwordUnavailable": "This account signs in with Google and does not have a password.",
+    "passwordGoogleOnly": "Google is currently your only sign-in method, so it cannot be disconnected.",
     "currentPassword": "Current password",
     "newPassword": "New password",
     "confirmPassword": "Confirm new password",
     "passwordHint": "At least 8 characters",
     "mismatch": "The new passwords do not match",
     "changed": "Password changed. Please sign in again.",
-    "change": "Change password"
+    "change": "Change password",
+    "google": {
+      "title": "Google sign-in", "connected": "Connected to your Google identity", "available": "Available as an additional sign-in method", "disabled": "Google sign-in has not been enabled by an administrator",
+      "connectHint": "The Google email must exactly match your current DocFlow sign-in email.", "connect": "Connect Google", "linked": "Google account connected", "linkFailed": "Could not connect the Google account.",
+      "unlink": "Disconnect", "unlinkConfirm": "Disconnect this Google account? You will only be able to sign in with your password.", "unlinked": "Google account disconnected", "lastMethod": "This is your only sign-in method and cannot be disconnected."
+    }
   },
   "saving": "Saving…",
   "changing": "Changing…",

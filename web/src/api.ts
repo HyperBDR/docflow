@@ -1,5 +1,5 @@
 import i18n from './i18n'
-import type { AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
+import type { AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -33,6 +33,9 @@ export const api = {
   updateLocale: (ui_locale: Locale) => request<User>('/api/auth/me', { method: 'PATCH', body: JSON.stringify({ ui_locale }) }),
   updateProfile: (values: { name?: string; ui_locale?: Locale }) => request<User>('/api/auth/me', { method: 'PATCH', body: JSON.stringify(values) }),
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/api/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
+  googleAuthConfig: () => request<GoogleAuthPublicConfig>('/api/auth/google/config'),
+  googleIdentity: () => request<GoogleIdentity | null>('/api/auth/google/identity'),
+  unlinkGoogle: () => request<void>('/api/auth/google/identity', { method: 'DELETE' }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
   adminJobs: (filters: { query?: string; job_type?: string; status?: string; user_id?: string; organization_id?: string; from_at?: string; to_at?: string; page?: number; page_size?: number } = {}) => request<AdminJobPage>(`/api/admin/jobs?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),

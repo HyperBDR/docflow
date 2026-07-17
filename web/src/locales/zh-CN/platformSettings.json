@@ -1,7 +1,7 @@
 {
   "title": "系统设置",
   "subtitle": "统一管理平台级服务配置，修改后立即生效并记录审计日志。",
-  "tabs": { "email": "邮件服务", "emailHint": "SMTP 与发件身份", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略" },
+  "tabs": { "email": "邮件服务", "emailHint": "SMTP 与发件身份", "login": "登录与注册", "loginHint": "Google 登录与账号策略", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略" },
   "status": { "ready": "配置正常", "inactive": "尚未配置", "enabled": "已启用", "disabled": "已停用", "running": "自动运行中" },
   "email": {
     "statusTitle": "平台邮件服务", "configured": "邮件通知可以正常发送", "notConfigured": "完成 SMTP 配置后可启用邮件通知渠道",
@@ -9,6 +9,16 @@
     "fields": { "host": "SMTP Host", "port": "端口", "security": "连接安全", "timeout": "超时（秒）", "username": "用户名", "password": "密码", "fromName": "发件人名称", "fromEmail": "发件邮箱" },
     "securityNone": "无加密", "passwordRetained": "已配置，留空保持不变", "passwordHint": "密码使用平台密钥加密保存，永远不会返回浏览器。",
     "testTitle": "发送测试邮件", "testHint": "保存配置后，向指定邮箱发送连接和投递测试。", "testRecipient": "测试收件人", "sendTest": "发送测试", "testing": "正在发送…", "testSent": "测试邮件已发送"
+  },
+  "google": {
+    "statusTitle": "Google 登录", "configured": "Google OpenID Connect 已配置并启用", "notConfigured": "配置 OAuth 客户端后可开放 Google 登录",
+    "configuration": "Google OAuth 配置", "configurationHint": "使用授权码、PKCE、state 与 nonce 完成安全登录。", "saved": "Google 登录配置已保存",
+    "fields": { "clientId": "OAuth Client ID", "clientSecret": "OAuth Client Secret", "redirectUri": "授权回调地址", "domains": "允许注册的邮箱域名" },
+    "secretRetained": "已配置，留空保持不变", "secretHint": "密钥加密保存且不会返回浏览器。", "redirectHint": "请将此地址原样加入 Google Cloud 的“已获授权的重定向 URI”。",
+    "domainsHint": "一行一个，也可用逗号分隔；留空表示不限制域名。域名限制同时适用于登录和注册。",
+    "allowRegistration": "允许 Google 用户自动注册", "allowRegistrationHint": "关闭后，只有已绑定 Google 的现有账号能够登录。",
+    "footerHint": "配置更改会立即生效并写入审计日志。", "testTitle": "验证 Google 服务", "testHint": "检查 Google OpenID 配置服务是否可访问；完整客户端验证将在实际登录授权时完成。", "test": "检查连接", "testing": "正在检查…", "testPassed": "Google OpenID 服务连接正常",
+    "linkPolicy": "现有账号需要主动绑定", "linkPolicyHint": "Google 邮箱与已有密码账号相同时不会自动合并。用户需先使用密码登录，再到个人设置的“密码与安全”中绑定，以避免账号被错误接管。"
   },
   "monitoring": {
     "statusTitle": "自动监控采集", "statusHint": "独立 Monitor 调度器定时下发任务，由 Worker 完成采集和告警判断。",

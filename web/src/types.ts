@@ -10,7 +10,13 @@ export type User = {
   ui_locale: Locale
   current_organization_id?: string | null
   active_organization_id?: string | null
+  password_configured?: boolean
   created_at: string
+}
+export type GoogleAuthPublicConfig = { enabled: boolean; allow_registration: boolean }
+export type GoogleIdentity = {
+  provider: 'google'; email: string; display_name: string; avatar_url: string
+  created_at: string; last_login_at?: string | null; can_unlink: boolean
 }
 export type OrganizationRole = 'owner' | 'admin' | 'editor' | 'viewer'
 export type Organization = { id: string; name: string; slug: string; kind: 'personal' | 'team'; status: 'active' | 'archived'; role: OrganizationRole; access_source: 'membership' | 'platform_admin'; member_count: number; demo_count: number; created_at: string }

@@ -15,6 +15,7 @@ class UserOut(BaseModel):
     ui_locale: Locale = "zh-CN"
     current_organization_id: str | None = None
     active_organization_id: str | None = None
+    password_configured: bool = True
     created_at: datetime
 
 

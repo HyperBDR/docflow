@@ -1,7 +1,7 @@
 {
   "title": "System settings",
   "subtitle": "Manage platform-wide services. Changes take effect immediately and are audited.",
-  "tabs": { "email": "Email service", "emailHint": "SMTP and sender identity", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention" },
+  "tabs": { "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention" },
   "status": { "ready": "Configured", "inactive": "Not configured", "enabled": "Enabled", "disabled": "Disabled", "running": "Running automatically" },
   "email": {
     "statusTitle": "Platform email service", "configured": "Email notifications are ready to send", "notConfigured": "Configure SMTP to enable email notification channels",
@@ -9,6 +9,16 @@
     "fields": { "host": "SMTP host", "port": "Port", "security": "Connection security", "timeout": "Timeout (seconds)", "username": "Username", "password": "Password", "fromName": "Sender name", "fromEmail": "Sender email" },
     "securityNone": "No encryption", "passwordRetained": "Configured; leave blank to retain", "passwordHint": "The password is encrypted with the platform key and is never returned to the browser.",
     "testTitle": "Send a test email", "testHint": "Save settings, then verify connection and delivery to an address.", "testRecipient": "Test recipient", "sendTest": "Send test", "testing": "Sending…", "testSent": "Test email sent"
+  },
+  "google": {
+    "statusTitle": "Google sign-in", "configured": "Google OpenID Connect is configured and enabled", "notConfigured": "Configure an OAuth client to offer Google sign-in",
+    "configuration": "Google OAuth configuration", "configurationHint": "Uses Authorization Code, PKCE, state, and nonce for secure sign-in.", "saved": "Google sign-in settings saved",
+    "fields": { "clientId": "OAuth client ID", "clientSecret": "OAuth client secret", "redirectUri": "Authorization callback URL", "domains": "Allowed registration email domains" },
+    "secretRetained": "Configured; leave blank to retain", "secretHint": "The secret is encrypted and never returned to the browser.", "redirectHint": "Add this exact URL to Authorized redirect URIs in Google Cloud.",
+    "domainsHint": "Enter one per line or separate with commas. Leave blank for any domain. The restriction applies to sign-in and registration.",
+    "allowRegistration": "Allow automatic Google registration", "allowRegistrationHint": "When disabled, only existing accounts already linked to Google can sign in.",
+    "footerHint": "Changes take effect immediately and are written to the audit log.", "testTitle": "Validate Google service", "testHint": "Checks access to Google's OpenID configuration. Full client validation occurs during an actual authorization flow.", "test": "Check connection", "testing": "Checking…", "testPassed": "Google OpenID service is reachable",
+    "linkPolicy": "Existing accounts require explicit linking", "linkPolicyHint": "A matching Google email is never merged automatically with an existing password account. The user must sign in with their password and connect Google under Password & security, preventing accidental account takeover."
   },
   "monitoring": {
     "statusTitle": "Automatic monitoring collection", "statusHint": "The Monitor scheduler dispatches tasks and the Worker collects metrics and evaluates alerts.",

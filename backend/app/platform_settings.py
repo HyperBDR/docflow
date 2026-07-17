@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import EmailPlatformSettings
+from app.models import EmailPlatformSettings, GoogleAuthSettings
 from app.secrets import decrypt_secret
 
 
@@ -43,4 +43,31 @@ def email_runtime_config(db: Session) -> EmailRuntimeConfig:
         from_email=settings.smtp_from, from_name="DocFlow",
         security="starttls" if settings.smtp_tls else "none", timeout_seconds=10,
         source="environment" if configured else "none",
+    )
+
+
+@dataclass(frozen=True)
+class GoogleRuntimeConfig:
+    enabled: bool
+    client_id: str
+    client_secret: str
+    allow_registration: bool
+    allowed_domains: list[str]
+    updated_at: object | None = None
+
+    @property
+    def configured(self) -> bool:
+        return self.enabled and bool(self.client_id and self.client_secret)
+
+
+def google_runtime_config(db: Session) -> GoogleRuntimeConfig:
+    value = db.get(GoogleAuthSettings, "default")
+    if not value:
+        return GoogleRuntimeConfig(False, "", "", False, [])
+    return GoogleRuntimeConfig(
+        enabled=value.enabled, client_id=value.client_id,
+        client_secret=decrypt_secret(value.client_secret_encrypted),
+        allow_registration=value.allow_registration,
+        allowed_domains=[str(domain).lower() for domain in (value.allowed_domains or [])],
+        updated_at=value.updated_at,
     )

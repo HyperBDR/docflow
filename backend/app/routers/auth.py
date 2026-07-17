@@ -110,6 +110,8 @@ def update_preferences(payload: UserPreferenceUpdate, request: Request, db: Sess
 
 @router.post("/me/password", status_code=204)
 def change_password(payload: PasswordChange, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if not user.password_hash:
+        raise HTTPException(status_code=409, detail="this account does not have a password")
     if not verify_password(user.password_hash, payload.current_password):
         raise HTTPException(status_code=400, detail="current password is incorrect")
     if verify_password(user.password_hash, payload.new_password):

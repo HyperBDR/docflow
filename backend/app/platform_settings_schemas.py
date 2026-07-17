@@ -40,3 +40,37 @@ class MonitoringSettingsOut(BaseModel):
     interval_seconds: int
     retention_days: int
     raw_ranges: list[str] = Field(default_factory=lambda: ["1h", "6h", "24h", "7d"])
+
+
+class GoogleAuthSettingsUpdate(BaseModel):
+    enabled: bool
+    client_id: str = Field(default="", max_length=500)
+    client_secret: str = Field(default="", max_length=1000)
+    allow_registration: bool = False
+    allowed_domains: list[str] = Field(default_factory=list, max_length=100)
+
+
+class GoogleAuthSettingsOut(BaseModel):
+    enabled: bool
+    client_id: str
+    client_secret_configured: bool
+    allow_registration: bool
+    allowed_domains: list[str]
+    configured: bool
+    redirect_uri: str
+    updated_at: datetime | None = None
+
+
+class GoogleAuthPublicConfig(BaseModel):
+    enabled: bool
+    allow_registration: bool = False
+
+
+class OAuthIdentityOut(BaseModel):
+    provider: Literal["google"]
+    email: str
+    display_name: str = ""
+    avatar_url: str = ""
+    created_at: datetime
+    last_login_at: datetime | None = None
+    can_unlink: bool = False

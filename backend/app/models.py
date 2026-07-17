@@ -34,7 +34,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100), default="")
-    password_hash: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     role: Mapped[str] = mapped_column(String(20), default="user", index=True)
     ui_locale: Mapped[str] = mapped_column(String(10), default="zh-CN")
@@ -48,6 +48,10 @@ class User(Base):
     @property
     def active_organization_id(self) -> str | None:
         return getattr(self, "_active_organization_id", None) or self.current_organization_id
+
+    @property
+    def password_configured(self) -> bool:
+        return bool(self.password_hash)
 
 
 class Organization(Base):
@@ -517,3 +521,49 @@ class EmailPlatformSettings(Base):
     updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class GoogleAuthSettings(Base):
+    """Singleton Google OpenID Connect configuration."""
+    __tablename__ = "google_auth_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    client_id: Mapped[str] = mapped_column(String(500), default="")
+    client_secret_encrypted: Mapped[str] = mapped_column(Text, default="")
+    allow_registration: Mapped[bool] = mapped_column(Boolean, default=False)
+    allowed_domains: Mapped[list] = mapped_column(JSON, default=list)
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class OAuthIdentity(Base):
+    __tablename__ = "oauth_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_subject", name="uq_oauth_provider_subject"),
+        UniqueConstraint("provider", "user_id", name="uq_oauth_provider_user"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    provider: Mapped[str] = mapped_column(String(30), index=True)
+    provider_subject: Mapped[str] = mapped_column(String(255), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    email: Mapped[str] = mapped_column(String(320), default="")
+    display_name: Mapped[str] = mapped_column(String(160), default="")
+    avatar_url: Mapped[str] = mapped_column(String(1000), default="")
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class OAuthLoginState(Base):
+    __tablename__ = "oauth_login_states"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30), default="google", index=True)
+    mode: Mapped[str] = mapped_column(String(20), default="login")
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    nonce: Mapped[str] = mapped_column(String(255))
+    code_verifier_encrypted: Mapped[str] = mapped_column(Text)
+    return_to: Mapped[str] = mapped_column(String(1000), default="/")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

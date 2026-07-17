@@ -4,10 +4,11 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import admin_user
-from app.models import EmailPlatformSettings, User
+from app.models import EmailPlatformSettings, GoogleAuthSettings, User
 from app.monitoring.notifications import send_test_email
-from app.platform_settings import email_runtime_config
-from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, MonitoringSettingsOut
+from app.oauth.google import redirect_uri, validate_connectivity
+from app.platform_settings import email_runtime_config, google_runtime_config
+from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut
 from app.secrets import encrypt_secret
 from app.services import write_audit
 
@@ -77,3 +78,57 @@ def test_email_settings(payload: EmailTestInput, db: Session = Depends(get_db), 
 @router.get("/monitoring", response_model=MonitoringSettingsOut)
 def get_monitoring_settings(_: User = Depends(admin_user)):
     return MonitoringSettingsOut(interval_seconds=max(30, settings.monitoring_interval_seconds), retention_days=settings.monitoring_retention_days)
+
+
+def _google_out(db: Session) -> GoogleAuthSettingsOut:
+    config = google_runtime_config(db)
+    return GoogleAuthSettingsOut(
+        enabled=config.enabled, client_id=config.client_id,
+        client_secret_configured=bool(config.client_secret),
+        allow_registration=config.allow_registration, allowed_domains=config.allowed_domains,
+        configured=config.configured, redirect_uri=redirect_uri(), updated_at=config.updated_at,
+    )
+
+
+@router.get("/google", response_model=GoogleAuthSettingsOut)
+def get_google_settings(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return _google_out(db)
+
+
+@router.patch("/google", response_model=GoogleAuthSettingsOut)
+def update_google_settings(payload: GoogleAuthSettingsUpdate, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    domains = sorted({domain.strip().lower().lstrip("@") for domain in payload.allowed_domains if domain.strip()})
+    if any("@" in domain or "." not in domain or " " in domain for domain in domains):
+        raise HTTPException(status_code=422, detail="invalid allowed email domain")
+    value = db.get(GoogleAuthSettings, "default")
+    if not value:
+        value = GoogleAuthSettings(id="default")
+        db.add(value)
+    if payload.enabled and (not payload.client_id or not (payload.client_secret or value.client_secret_encrypted)):
+        raise HTTPException(status_code=422, detail="Google client ID and client secret are required")
+    before = {"enabled": value.enabled, "client_id": value.client_id, "client_secret_configured": bool(value.client_secret_encrypted),
+              "allow_registration": value.allow_registration, "allowed_domains": value.allowed_domains}
+    value.enabled, value.client_id = payload.enabled, payload.client_id.strip()
+    value.allow_registration, value.allowed_domains = payload.allow_registration, domains
+    if payload.client_secret:
+        value.client_secret_encrypted = encrypt_secret(payload.client_secret)
+    value.updated_by_id = actor.id
+    db.flush()
+    after = {"enabled": value.enabled, "client_id": value.client_id, "client_secret_configured": bool(value.client_secret_encrypted),
+             "allow_registration": value.allow_registration, "allowed_domains": domains}
+    write_audit(db, actor, "platform_google_auth.updated", "platform_settings", value.id, "Google sign-in",
+                before=before, after=after, request=request)
+    db.commit()
+    return _google_out(db)
+
+
+@router.post("/google/test")
+def test_google_settings(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    config = google_runtime_config(db)
+    if not config.configured:
+        raise HTTPException(status_code=422, detail="Google sign-in is not configured")
+    try:
+        validate_connectivity()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:500]) from exc
+    return {"status": "ok"}

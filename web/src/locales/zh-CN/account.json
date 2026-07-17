@@ -20,14 +20,23 @@
   },
   "security": {
     "title": "密码与安全",
-    "description": "修改密码后，所有网页和浏览器插件会话都会退出。",
+    "description": "管理密码和第三方登录方式，保护账号访问安全。",
+    "passwordTitle": "密码登录",
+    "passwordConfigured": "已设置密码；修改后所有网页和浏览器插件会话都会退出。",
+    "passwordUnavailable": "此账号使用 Google 登录，尚未设置密码。",
+    "passwordGoogleOnly": "当前 Google 账号是唯一登录方式，因此不能解除绑定。",
     "currentPassword": "当前密码",
     "newPassword": "新密码",
     "confirmPassword": "确认新密码",
     "passwordHint": "至少 8 个字符",
     "mismatch": "两次输入的新密码不一致",
     "changed": "密码已修改，请重新登录。",
-    "change": "修改密码"
+    "change": "修改密码",
+    "google": {
+      "title": "Google 登录", "connected": "已连接到你的 Google 身份", "available": "可绑定为额外登录方式", "disabled": "平台管理员尚未启用 Google 登录",
+      "connectHint": "绑定时 Google 邮箱必须与当前 DocFlow 登录邮箱完全一致。", "connect": "绑定 Google", "linked": "Google 账号已成功绑定", "linkFailed": "Google 账号绑定失败。",
+      "unlink": "解除绑定", "unlinkConfirm": "确定解除 Google 账号绑定吗？之后将只能使用密码登录。", "unlinked": "Google 账号已解除绑定", "lastMethod": "这是当前账号唯一的登录方式，无法解除绑定。"
+    }
   },
   "saving": "正在保存…",
   "changing": "正在修改…",

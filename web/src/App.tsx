@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ApiError, api } from './api'
+import { API_URL, ApiError, api } from './api'
 import { applyLocale, normalizeLocale } from './i18n'
 import Editor from './pages/Editor'
 import Player from './pages/Player'
@@ -25,8 +25,34 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [googleEnabled, setGoogleEnabled] = useState(false)
+  const [googleRegistration, setGoogleRegistration] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
+
+  useEffect(() => {
+    api.googleAuthConfig().then(value => {
+      setGoogleEnabled(value.enabled)
+      setGoogleRegistration(value.allow_registration)
+    }).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const oauthError = params.get('oauth_error')
+    if (!oauthError) return
+    const key = `google.errors.${oauthError}`
+    setError(i18n.exists(key, { ns: 'auth' }) ? t(key) : t('google.errors.google_login_failed'))
+    params.delete('oauth_error'); params.delete('oauth')
+    window.history.replaceState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`)
+  }, [i18n, location.hash, location.pathname, location.search, t])
+
+  function startGoogle() {
+    const params = new URLSearchParams(location.search)
+    params.delete('oauth'); params.delete('oauth_error')
+    const returnTo = `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`
+    window.location.assign(`${API_URL}/api/auth/google/start?${new URLSearchParams({ return_to: returnTo })}`)
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -49,6 +75,10 @@ function Auth({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
       <div className="brand brand-large"><Brand large /></div>
       <h1>{mode === 'login' ? t('loginTitle') : t('registerTitle')}</h1>
       <p className="muted">{t('tagline')}</p>
+      {googleEnabled && (mode === 'login' || googleRegistration) && <>
+        <button type="button" className="google-auth-button" onClick={startGoogle}><span>G</span>{t(mode === 'login' ? 'google.signIn' : 'google.register')}</button>
+        <div className="auth-divider"><span>{t('google.or')}</span></div>
+      </>}
       <form onSubmit={submit} className="stack">
         <label>{t('email')}<input type="email" required value={email} onChange={event => setEmail(event.target.value)} placeholder="you@company.com" /></label>
         <label>{t('password')}<input type="password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} placeholder={t('passwordHint')} /></label>
