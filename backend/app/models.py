@@ -523,6 +523,16 @@ class EmailPlatformSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class GeneralPlatformSettings(Base):
+    """Public, non-secret platform-wide product settings."""
+    __tablename__ = "general_platform_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    help_url: Mapped[str] = mapped_column(String(1000), default="")
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class GoogleAuthSettings(Base):
     """Singleton Google OpenID Connect configuration."""
     __tablename__ = "google_auth_settings"

@@ -1,8 +1,14 @@
 {
   "title": "系统设置",
   "subtitle": "统一管理平台级服务配置，修改后立即生效并记录审计日志。",
-  "tabs": { "email": "邮件服务", "emailHint": "SMTP 与发件身份", "login": "登录与注册", "loginHint": "Google 登录与账号策略", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略" },
+  "tabs": { "general": "通用设置", "generalHint": "帮助中心与产品入口", "email": "邮件服务", "emailHint": "SMTP 与发件身份", "login": "登录与注册", "loginHint": "Google 登录与账号策略", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略" },
   "status": { "ready": "配置正常", "inactive": "尚未配置", "enabled": "已启用", "disabled": "已停用", "running": "自动运行中" },
+  "general": {
+    "statusTitle": "平台通用配置", "configured": "帮助中心入口已对用户开放", "notConfigured": "尚未配置外部帮助中心",
+    "helpTitle": "帮助中心", "helpHint": "连接内部知识库、公开文档站或任意外部帮助网站。", "helpUrl": "帮助网站地址", "helpUrlHint": "仅支持完整的 HTTP 或 HTTPS 地址；留空并保存即可隐藏所有帮助入口。",
+    "previewTitle": "入口展示预览", "previewEnabled": "登录注册页和登录后的右上角将显示帮助入口。", "previewDisabled": "未配置时，用户界面不会显示帮助入口。", "openPreview": "打开预览",
+    "footerHint": "保存后会立即应用到所有用户界面。", "saved": "通用设置已保存"
+  },
   "email": {
     "statusTitle": "平台邮件服务", "configured": "邮件通知可以正常发送", "notConfigured": "完成 SMTP 配置后可启用邮件通知渠道",
     "transport": "SMTP 服务配置", "transportHint": "此配置供告警通知及后续平台邮件统一使用。", "saved": "邮件服务配置已保存", "source": "当前配置来源：{{value}}", "sources": { "database": "后台配置", "environment": "环境变量", "none": "未配置" },

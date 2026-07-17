@@ -14,6 +14,26 @@ from app.secrets import decrypt_secret
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
+def smtp_error_detail(exc: Exception) -> str:
+    """Return a safe, stable detail used to localize SMTP failures in the UI."""
+    text = str(exc).lower()
+    if "main account unavailable" in text or "@ud010102" in text:
+        return "SMTP account unavailable"
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return "SMTP authentication failed"
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return "SMTP sender rejected"
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return "SMTP recipient rejected"
+    if isinstance(exc, (smtplib.SMTPConnectError, TimeoutError, OSError)):
+        return "SMTP connection failed"
+    if isinstance(exc, smtplib.SMTPDataError):
+        return "SMTP delivery rejected"
+    if text == "smtp is not configured":
+        return "SMTP is not configured"
+    return "SMTP delivery failed"
+
+
 def _payload(event: AlertEvent, recovered: bool) -> dict:
     return {
         "source": "DocFlow",

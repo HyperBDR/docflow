@@ -42,6 +42,19 @@ class MonitoringSettingsOut(BaseModel):
     raw_ranges: list[str] = Field(default_factory=lambda: ["1h", "6h", "24h", "7d"])
 
 
+class GeneralSettingsUpdate(BaseModel):
+    help_url: str = Field(default="", max_length=1000)
+
+
+class GeneralSettingsOut(BaseModel):
+    help_url: str
+    updated_at: datetime | None = None
+
+
+class PublicPlatformConfig(BaseModel):
+    help_url: str = ""
+
+
 class GoogleAuthSettingsUpdate(BaseModel):
     enabled: bool
     client_id: str = Field(default="", max_length=500)

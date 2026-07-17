@@ -14,6 +14,7 @@ export type User = {
   created_at: string
 }
 export type GoogleAuthPublicConfig = { enabled: boolean; allow_registration: boolean }
+export type PublicPlatformConfig = { help_url: string }
 export type GoogleIdentity = {
   provider: 'google'; email: string; display_name: string; avatar_url: string
   created_at: string; last_login_at?: string | null; can_unlink: boolean

@@ -1,3 +1,4 @@
+import smtplib
 from unittest.mock import patch
 
 from app.database import SessionLocal
@@ -144,4 +145,11 @@ def test_platform_email_settings_are_encrypted_and_used(client):
         assert response.status_code == 200
         smtp.return_value.__enter__.return_value.starttls.assert_called_once()
         smtp.return_value.__enter__.return_value.send_message.assert_called_once()
+    with patch("app.monitoring.notifications.smtplib.SMTP") as smtp:
+        smtp.return_value.__enter__.return_value.send_message.side_effect = smtplib.SMTPDataError(
+            551, b"Main account unavailable [@ud010102]"
+        )
+        response = client.post("/api/admin/settings/email/test", json={"recipient": "ops@example.com"})
+        assert response.status_code == 422
+        assert response.json() == {"detail": "SMTP account unavailable", "code": "smtp.account_unavailable"}
     assert client.get("/api/admin/settings/monitoring").json()["automatic_collection"] is True

@@ -1,5 +1,6 @@
 {
   "language": { "label": "Language", "zh-CN": "中文", "en": "English", "switchTo": "Change language" },
+  "help": { "open": "Open help center" },
   "actions": { "close": "Close", "cancel": "Cancel", "confirm": "Confirm", "save": "Save", "create": "Create", "edit": "Edit", "delete": "Delete", "copy": "Copy", "share": "Share", "open": "Open", "view": "View task", "download": "Download", "back": "Back", "next": "Next", "previous": "Previous", "retry": "Retry", "more": "More actions", "publish": "Publish", "preview": "Preview", "search": "Search", "clear": "Clear", "remove": "Remove", "add": "Add", "apply": "Apply", "logout": "Log out" },
   "navigation": { "account": "Personal settings", "admin": "Admin console" },
   "workspace": { "adminView": "Administrator view", "userView": "User view", "backToUser": "Back to dashboard", "enterAdmin": "Open admin console" },
@@ -25,6 +26,7 @@
       "public": { "not_found": "This demo does not exist or is no longer shared." },
       "asset": { "not_found": "This asset does not exist." },
       "snapshot": { "not_found": "This page snapshot does not exist." },
+      "smtp": { "not_configured": "The email service is not fully configured.", "account_unavailable": "The Alibaba Cloud DirectMail main account is unavailable. Check service activation, billing or suspension status, and whether the sender belongs to this account.", "authentication_failed": "SMTP authentication failed. Check the username and SMTP password (not the account sign-in password).", "connection_failed": "The SMTP service could not be reached. Check the host, port, and connection security.", "sender_rejected": "The SMTP service rejected the sender. Confirm that the sender is verified and belongs to this account.", "recipient_rejected": "The SMTP service rejected the recipient. Check that the test address is valid.", "delivery_rejected": "The SMTP service rejected delivery. Check sending permissions, quota, and provider restrictions.", "delivery_failed": "The test email could not be sent. Check the SMTP configuration and provider status." },
       "request": { "validation": "Some submitted values are invalid.", "failed": "The request failed. Please try again." }
     }
   },

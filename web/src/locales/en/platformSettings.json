@@ -1,8 +1,14 @@
 {
   "title": "System settings",
   "subtitle": "Manage platform-wide services. Changes take effect immediately and are audited.",
-  "tabs": { "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention" },
+  "tabs": { "general": "General", "generalHint": "Help center and product links", "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention" },
   "status": { "ready": "Configured", "inactive": "Not configured", "enabled": "Enabled", "disabled": "Disabled", "running": "Running automatically" },
+  "general": {
+    "statusTitle": "General platform configuration", "configured": "The help center is available to users", "notConfigured": "No external help center is configured",
+    "helpTitle": "Help center", "helpHint": "Link an internal knowledge base, public documentation site, or any external help website.", "helpUrl": "Help website URL", "helpUrlHint": "Only complete HTTP or HTTPS URLs are supported. Save an empty value to hide every help entry point.",
+    "previewTitle": "Entry point preview", "previewEnabled": "Help appears on sign-in pages and in the top-right area after sign-in.", "previewDisabled": "No help entry point is shown when this field is empty.", "openPreview": "Open preview",
+    "footerHint": "Changes apply to all user interfaces immediately.", "saved": "General settings saved"
+  },
   "email": {
     "statusTitle": "Platform email service", "configured": "Email notifications are ready to send", "notConfigured": "Configure SMTP to enable email notification channels",
     "transport": "SMTP service configuration", "transportHint": "Shared by alert notifications and future platform emails.", "saved": "Email service settings saved", "source": "Current source: {{value}}", "sources": { "database": "Admin settings", "environment": "Environment variables", "none": "Not configured" },

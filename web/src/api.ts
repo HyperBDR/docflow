@@ -1,5 +1,5 @@
 import i18n from './i18n'
-import type { AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
+import type { AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, PublicPlatformConfig, RecycleItem, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -34,6 +34,7 @@ export const api = {
   updateProfile: (values: { name?: string; ui_locale?: Locale }) => request<User>('/api/auth/me', { method: 'PATCH', body: JSON.stringify(values) }),
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/api/auth/me/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   googleAuthConfig: () => request<GoogleAuthPublicConfig>('/api/auth/google/config'),
+  platformConfig: () => request<PublicPlatformConfig>('/api/platform/config'),
   googleIdentity: () => request<GoogleIdentity | null>('/api/auth/google/identity'),
   unlinkGoogle: () => request<void>('/api/auth/google/identity', { method: 'DELETE' }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),

@@ -1,6 +1,6 @@
 import type React from 'react'
 
-export type IconName = 'ai' | 'analytics' | 'animation' | 'arrowDown' | 'arrowUp' | 'check' | 'chevronLeft' | 'chevronRight' | 'clock' | 'copy' | 'cursor' | 'database' | 'delete' | 'device' | 'download' | 'edit' | 'eye' | 'folder' | 'globe' | 'grid' | 'home' | 'image' | 'layout' | 'link' | 'list' | 'lock' | 'logout' | 'menu' | 'message' | 'more' | 'move' | 'palette' | 'play' | 'plus' | 'publish' | 'record' | 'search' | 'settings' | 'share' | 'shield' | 'tag' | 'target' | 'text' | 'unlink' | 'user' | 'users' | 'warning'
+export type IconName = 'ai' | 'analytics' | 'animation' | 'arrowDown' | 'arrowRight' | 'arrowUp' | 'book' | 'check' | 'chevronLeft' | 'chevronRight' | 'clock' | 'close' | 'copy' | 'cursor' | 'database' | 'delete' | 'device' | 'download' | 'edit' | 'eye' | 'eyeOff' | 'folder' | 'globe' | 'grid' | 'help' | 'home' | 'image' | 'layout' | 'link' | 'list' | 'lock' | 'logout' | 'menu' | 'message' | 'more' | 'move' | 'palette' | 'play' | 'plus' | 'publish' | 'record' | 'search' | 'settings' | 'share' | 'shield' | 'support' | 'tag' | 'target' | 'text' | 'unlink' | 'user' | 'users' | 'warning'
 
 export default function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
@@ -9,11 +9,14 @@ export default function Icon({ name, size = 16 }: { name: IconName; size?: numbe
     analytics: <><path d="M4 20V10m6 10V4m6 16v-7m4 7H2"/><path d="m3 7 6-4 6 6 6-5"/></>,
     animation: <><rect x="4" y="5" width="11" height="11" rx="2"/><path d="M9 19h10V9M12 12l7-7m-4 0h4v4"/></>,
     arrowDown: <><path d="M12 4v16"/><path d="m6 14 6 6 6-6"/></>,
+    arrowRight: <><path d="M4 12h16"/><path d="m14 6 6 6-6 6"/></>,
     arrowUp: <><path d="M12 20V4"/><path d="m6 10 6-6 6 6"/></>,
+    book: <><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5Z"/><path d="M20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     chevronLeft: <path d="m15 18-6-6 6-6"/>,
     chevronRight: <path d="m9 18 6-6-6-6"/>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    close: <path d="M6 6l12 12M18 6 6 18"/>,
     copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></>,
     cursor: <><path d="m5 3 13 9-6 1.5L9 19 5 3Z"/><path d="m13 14 4 5"/></>,
     database: <><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></>,
@@ -22,9 +25,11 @@ export default function Icon({ name, size = 16 }: { name: IconName; size?: numbe
     download: <><path d="M12 3v12m-4-4 4 4 4-4"/><path d="M5 20h14"/></>,
     edit: <><path d="m4 20 4.2-1 10.6-10.6a2.1 2.1 0 0 0-3-3L5.2 16 4 20Z"/><path d="m14.5 6.5 3 3"/></>,
     eye: <><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></>,
+    eyeOff: <><path d="m3 3 18 18"/><path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a13 13 0 0 1-2.1 2.8M6.3 6.4C3.8 8.1 2.5 12 2.5 12s3.5 6 9.5 6a9.7 9.7 0 0 0 3-.5"/><path d="M10 10a2.8 2.8 0 0 0 4 4"/></>,
     folder: <path d="M3 6h7l2 2h9v11H3V6Z"/>,
     globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.3 2.5 3.5 5.5 3.5 9S14.3 18.5 12 21c-2.3-2.5-3.5-5.5-3.5-9S9.7 5.5 12 3Z"/></>,
     grid: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+    help: <><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 3.4 2.3c-.8.4-1.1.9-1.1 1.7"/><path d="M12 17h.01"/></>,
     home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/></>,
     layout: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></>,
@@ -45,6 +50,7 @@ export default function Icon({ name, size = 16 }: { name: IconName; size?: numbe
     settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></>,
     share: <><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4m-6.8 7 6.8 4"/></>,
     shield: <><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></>,
+    support: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="m5.6 5.6 3.9 3.9m5 5 3.9 3.9m0-12.8-3.9 3.9m-5 5-3.9 3.9"/></>,
     tag: <><path d="M20 13 13 20 4 11V4h7l9 9Z"/><circle cx="8" cy="8" r="1" fill="currentColor"/></>,
     target: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></>,
     text: <><path d="M5 6V4h14v2M12 4v16m-4 0h8"/></>,

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import EmailPlatformSettings, GoogleAuthSettings
+from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings
 from app.secrets import decrypt_secret
 
 
@@ -44,6 +44,17 @@ def email_runtime_config(db: Session) -> EmailRuntimeConfig:
         security="starttls" if settings.smtp_tls else "none", timeout_seconds=10,
         source="environment" if configured else "none",
     )
+
+
+@dataclass(frozen=True)
+class GeneralRuntimeConfig:
+    help_url: str
+    updated_at: object | None = None
+
+
+def general_runtime_config(db: Session) -> GeneralRuntimeConfig:
+    value = db.get(GeneralPlatformSettings, "default")
+    return GeneralRuntimeConfig(help_url=value.help_url, updated_at=value.updated_at) if value else GeneralRuntimeConfig(help_url="")
 
 
 @dataclass(frozen=True)

@@ -1,14 +1,16 @@
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.dependencies import admin_user
-from app.models import EmailPlatformSettings, GoogleAuthSettings, User
-from app.monitoring.notifications import send_test_email
+from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings, User
+from app.monitoring.notifications import send_test_email, smtp_error_detail
 from app.oauth.google import redirect_uri, validate_connectivity
-from app.platform_settings import email_runtime_config, google_runtime_config
-from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut
+from app.platform_settings import email_runtime_config, general_runtime_config, google_runtime_config
+from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, GeneralSettingsOut, GeneralSettingsUpdate, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut
 from app.secrets import encrypt_secret
 from app.services import write_audit
 
@@ -19,6 +21,48 @@ router = APIRouter(prefix="/api/admin/settings", tags=["admin-platform-settings"
 def _valid_email(value: str) -> bool:
     name, separator, domain = value.rpartition("@")
     return bool(name and separator and "." in domain and " " not in value)
+
+
+def _valid_public_url(value: str) -> bool:
+    if not value:
+        return True
+    if any(character.isspace() for character in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.hostname) and not parsed.username and not parsed.password
+
+
+def _general_out(db: Session) -> GeneralSettingsOut:
+    config = general_runtime_config(db)
+    return GeneralSettingsOut(help_url=config.help_url, updated_at=config.updated_at)
+
+
+@router.get("/general", response_model=GeneralSettingsOut)
+def get_general_settings(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return _general_out(db)
+
+
+@router.patch("/general", response_model=GeneralSettingsOut)
+def update_general_settings(payload: GeneralSettingsUpdate, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    help_url = payload.help_url.strip()
+    if not _valid_public_url(help_url):
+        raise HTTPException(status_code=422, detail="help URL must be a valid HTTP or HTTPS URL")
+    value = db.get(GeneralPlatformSettings, "default")
+    if not value:
+        value = GeneralPlatformSettings(id="default")
+        db.add(value)
+    before = {"help_url": value.help_url}
+    value.help_url = help_url
+    value.updated_by_id = actor.id
+    db.flush()
+    write_audit(db, actor, "platform_general.updated", "platform_settings", value.id, "General settings",
+                before=before, after={"help_url": help_url}, request=request)
+    db.commit()
+    return _general_out(db)
 
 
 def _email_out(db: Session) -> EmailSettingsOut:
@@ -71,7 +115,7 @@ def test_email_settings(payload: EmailTestInput, db: Session = Depends(get_db), 
     try:
         send_test_email(db, payload.recipient)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc)[:500]) from exc
+        raise HTTPException(status_code=422, detail=smtp_error_detail(exc)) from exc
     return {"status": "sent"}
 
 

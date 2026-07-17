@@ -1,7 +1,9 @@
 import { request } from '../api'
-import type { EmailPlatformSettings, EmailPlatformSettingsInput, GoogleAuthSettings, GoogleAuthSettingsInput, MonitoringPlatformSettings } from './types'
+import type { EmailPlatformSettings, EmailPlatformSettingsInput, GeneralPlatformSettings, GeneralPlatformSettingsInput, GoogleAuthSettings, GoogleAuthSettingsInput, MonitoringPlatformSettings } from './types'
 
 export const platformSettingsApi = {
+  general: () => request<GeneralPlatformSettings>('/api/admin/settings/general'),
+  updateGeneral: (value: GeneralPlatformSettingsInput) => request<GeneralPlatformSettings>('/api/admin/settings/general', { method: 'PATCH', body: JSON.stringify(value) }),
   email: () => request<EmailPlatformSettings>('/api/admin/settings/email'),
   updateEmail: (value: EmailPlatformSettingsInput) => request<EmailPlatformSettings>('/api/admin/settings/email', { method: 'PATCH', body: JSON.stringify(value) }),
   testEmail: (recipient: string) => request<{ status: string }>('/api/admin/settings/email/test', { method: 'POST', body: JSON.stringify({ recipient }) }),

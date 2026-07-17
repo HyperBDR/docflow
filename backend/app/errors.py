@@ -51,6 +51,14 @@ DETAIL_CODES = {
     "image not found": "asset.not_found",
     "asset not found": "asset.not_found",
     "DOM snapshot not found": "snapshot.not_found",
+    "SMTP is not configured": "smtp.not_configured",
+    "SMTP account unavailable": "smtp.account_unavailable",
+    "SMTP authentication failed": "smtp.authentication_failed",
+    "SMTP connection failed": "smtp.connection_failed",
+    "SMTP sender rejected": "smtp.sender_rejected",
+    "SMTP recipient rejected": "smtp.recipient_rejected",
+    "SMTP delivery rejected": "smtp.delivery_rejected",
+    "SMTP delivery failed": "smtp.delivery_failed",
 }
 
 
