@@ -1,8 +1,8 @@
 {
-  "loading":"正在加载分析数据…","back":"← 我的演示","preview":"预览演示","title":"分享分析","subtitle":"了解观众从进入、互动到完成演示的完整路径。","from":"开始日期","to":"结束日期","tagFilter":"标签筛选","allTags":"全部标签","tabs":{"general":"概览数据","devices":"设备与位置","leads":"线索与评论"},"aggregating":"正在汇总所选时间范围的数据…","filteredOut":"当前演示不包含所选标签，因此没有匹配数据。",
+  "loading":"正在加载分析数据…","back":"← 我的演示","preview":"预览演示","title":"分享分析","subtitle":"了解观众从进入、互动到完成演示的完整路径。","from":"开始日期","to":"结束日期","shareFilter":"分享链接","allShares":"全部分享链接","unnamedShare":"未命名链接","tagFilter":"标签筛选","allTags":"全部标签","tabs":{"general":"概览数据","devices":"设备与位置","leads":"线索与评论"},"aggregating":"正在汇总所选时间范围的数据…","filteredOut":"当前演示不包含所选标签，因此没有匹配数据。",
   "metrics":{"views":"总访问量","viewsNote":"访问会话数","viewers":"独立访客","viewersNote":"独立访客数","engagement":"互动率","engagementNote":"浏览多步或产生互动","completion":"完成率","completionNote":"到达演示末尾"},
   "steps":{"title":"各步骤观众","description":"条形图表示到达每个步骤的观众数量，将鼠标悬停查看转化值。","tooltip":"{{viewers}} 位观众 · {{conversion}}% 总访问转化","empty":"发布演示并产生访问后，这里会展示每一步的观众数量。","label":"步骤 {{index}}"},
-  "devices":{"os":"操作系统","browser":"浏览器","type":"设备类型","location":"地理位置","distribution":"所选时间范围内的访问分布。","osEmpty":"收到访问后，操作系统分析将显示在这里。","browserEmpty":"收到访问后，浏览器分析将显示在这里。","typeEmpty":"收到访问后，设备分析将显示在这里。","locationEmpty":"收到不同地区的访问后，地理分析将显示在这里。","mobile":"移动设备","desktop":"桌面设备","other":"其他"},
+  "devices":{"os":"操作系统","browser":"浏览器","type":"设备类型","location":"地理位置","source":"访问来源","distribution":"所选时间范围内的访问分布。","osEmpty":"收到访问后，操作系统分析将显示在这里。","browserEmpty":"收到访问后，浏览器分析将显示在这里。","typeEmpty":"收到访问后，设备分析将显示在这里。","locationEmpty":"收到不同地区的访问后，地理分析将显示在这里。","sourceEmpty":"带来源的访问会显示在这里。","utmEmpty":"带 UTM 参数的访问会显示在这里。","mobile":"移动设备","desktop":"桌面设备","other":"其他"},
   "leads":{"title":"线索数据","description":"访客在评论时留下的联系人信息。","guest":"访客","noEmail":"未留邮箱","empty":"有访客留下姓名或邮箱后，线索会集中显示在这里。"},
   "comments":{"title":"步骤评论","description":"查看观众针对具体步骤提出的建议。","restore":"恢复发布","hide":"隐藏评论","empty":"分享页收到的逐步骤评论会展示在这里。"}
 }

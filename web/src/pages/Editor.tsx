@@ -7,6 +7,7 @@ import { formatDate } from '../i18n'
 import Icon, { type IconName } from '../components/Icon'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import HelpLink from '../components/HelpLink'
+import ShareLinkManager from '../components/ShareLinkManager'
 import SlideStage from '../components/SlideStage'
 import { useToast } from '../components/toast'
 import { prepareExtensionRecording } from '../extensionBridge'
@@ -495,6 +496,7 @@ export default function Editor() {
             <div className="export-section-heading"><span><Icon name="link" />{t('export.shareLink')}</span></div>
             {demo.share_url ? <div className="share-link-card"><span title={demo.share_url}>{demo.share_url}</span><button className={`icon-button ${exportAction === 'copy-share' ? 'action-pending' : ''}`} aria-busy={exportAction === 'copy-share'} disabled={actionBusy} onClick={copyShareLink}>{exportAction === 'copy-share' ? <span className="action-spinner" /> : <Icon name="copy" />}{exportAction === 'copy-share' ? t('export.copying') : t('common:actions.copy')}</button><a className="icon-button" href={demo.share_url} target="_blank" rel="noreferrer"><Icon name="play" />{t('common:actions.open')}</a></div> : <div className="export-empty-note"><Icon name="link" /><span>{t('export.unpublished')}</span></div>}
             <button className={`publish-version-button icon-button ${exportAction === 'publish' ? 'action-pending' : ''}`} aria-busy={exportAction === 'publish'} disabled={actionBusy} onClick={publish}>{exportAction === 'publish' ? <span className="action-spinner" /> : <Icon name="publish" />}{exportAction === 'publish' ? t('export.publishing') : demo.status === 'published' ? t('export.updatePublished') : t('export.publishCreate')}</button>
+            <ShareLinkManager demo={demo}/>
           </section>
 
           <section>

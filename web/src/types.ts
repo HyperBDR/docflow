@@ -25,6 +25,9 @@ export type OrganizationMember = { id: string; user_id: string; name: string; em
 export type AdminMembership = { id: string; organization_id: string; organization_name: string; organization_slug: string; organization_kind: 'personal' | 'team'; role: OrganizationRole; is_current: boolean; created_at: string }
 export type Invitation = { id: string; email: string; role: OrganizationRole; organization_id: string; organization_name: string; invite_url?: string; expires_at: string; accepted_at?: string; created_at: string }
 export type AdminOrganization = { id: string; name: string; slug: string; kind: 'personal' | 'team'; status: 'active' | 'archived'; owner_name: string; owner_email: string; member_count: number; demo_count: number; storage_bytes: number; created_by_email: string; created_at: string; archived_at?: string }
+export type QuotaLimits=Record<string,number|null>
+export type QuotaPlan={id:string;name:string;description:string;is_default:boolean;limits:QuotaLimits;created_at:string;updated_at:string}
+export type QuotaSummary={organization_id:string;plan:{id:string;name:string;description:string};items:{key:string;used:number;limit:number|null;percent:number;status:string;enforcement:string}[];period:{starts_at:string;resets_at:string};has_overrides:boolean;assignment?:{plan_id:string;overrides:QuotaLimits}|null}
 export type AuditLog = { id: string; actor_id?: string; actor_name: string; actor_email: string; organization_id?: string; organization_name: string; action: string; target_type: string; target_id: string; target_label: string; before: Record<string, unknown>; after: Record<string, unknown>; ip_address: string; user_agent: string; source: string; outcome: string; created_at: string }
 export type RecycleItem = {
   id: string
@@ -136,6 +139,7 @@ export type AdminResource = {
   status: 'draft' | 'published'
   content_locale: Locale
   owner: AdminResourceOwner
+  organization?: { id: string; name: string; kind: string } | null
   step_count: number
   views: number
   unique_viewers: number
@@ -145,6 +149,22 @@ export type AdminResource = {
   updated_at: string
 }
 export type AdminResourceDetail = AdminResource & { demo: Demo }
+
+export type ShareLink = { id: string; name: string; url: string; token: string; revoked: boolean; expired: boolean; password_protected: boolean; expires_at?: string | null; access_count: number; last_accessed_at?: string | null; created_by?: AdminResourceOwner | null; created_at: string }
+export type AdminShare = { id: string; name: string; status: 'active' | 'expired' | 'revoked'; password_protected: boolean; url: string; resource: { id: string; title: string }; owner: AdminResourceOwner; created_by?: AdminResourceOwner | null; organization?: { id: string; name: string; kind: string } | null; views: number; unique_viewers: number; access_count: number; expires_at?: string | null; last_accessed_at?: string | null; created_at: string }
+export type AdminDownload = { id: string; kind: ExportJob['kind']; status: AdminJobStatus; progress: number; resource: { id: string; title: string }; owner: AdminResourceOwner; organization?: { id: string; name: string; kind: string } | null; size: number; storage_key?: string | null; download_requests: number; completed_downloads: number; last_downloaded_at?: string | null; created_at: string; completed_at?: string | null }
+export type ResourceGovernance = {
+  range: { days: number; from: string; to: string }
+  summary: { views: number; unique_viewers: number; engagement: number; completion: number; share_links: number; active_shares: number; exports: number; download_requests: number; completed_downloads: number }
+  trend: { date: string; views: number; viewers: number; completions: number }[]
+  steps: { id: string; title: string; position: number; viewers: number; conversion: number }[]
+  devices: { operating_systems: { name: string; value: number }[]; browsers: { name: string; value: number }[]; device_types: { name: string; value: number }[] }
+  locations: { name: string; value: number }[]; sources: { name: string; value: number }[]; utm_sources: { name: string; value: number }[]
+  shares: { id: string; name: string; status: string; url: string; password_protected: boolean; expires_at?: string | null; views: number; access_count: number; last_accessed_at?: string | null; created_by?: AdminResourceOwner | null; created_at: string }[]
+  exports: { id: string; kind: string; status: string; size: number; storage_key?: string | null; created_at: string; completed_at?: string | null }[]
+  downloads: { id: string; job_id: string; request_id: string; source: string; status: string; bytes: number; country: string; ip_address: string; user_agent: string; requested_by?: AdminResourceOwner | null; created_at: string; completed_at?: string | null }[]
+  audit: { id: string; action: string; target_type: string; target_label: string; actor?: AdminResourceOwner | null; source: string; outcome: string; created_at: string }[]
+}
 
 export type SelectorInfo = { css?: string; node_id?: number; tag?: string; role?: string; aria_label?: string; text?: string }
 export type HotspotAction = { type: 'next' | 'goto' | 'link' | 'end'; target_step_id?: string; url?: string }
@@ -215,7 +235,7 @@ export type Analytics = {
   range?: { from: string; to: string }
   summary: { total_views: number; unique_viewers: number; engagement: number; completion: number }
   steps: { id: string; position: number; title: string; viewers: number; conversion: number }[]
-  devices: { operating_systems?: { name: string; value: number }[]; browsers?: { name: string; value: number }[]; device_types?: { name: string; value: number }[]; locations?: { name: string; value: number }[] }
+  devices: { operating_systems?: { name: string; value: number }[]; browsers?: { name: string; value: number }[]; device_types?: { name: string; value: number }[]; locations?: { name: string; value: number }[]; sources?: { name: string; value: number }[]; utm_sources?: { name: string; value: number }[] }
   leads: { name: string; email: string; comment: string; step_id: string; created_at: string }[]
   comments: StepComment[]
 }

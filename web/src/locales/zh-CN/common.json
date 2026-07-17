@@ -26,6 +26,9 @@
       "public": { "not_found": "演示不存在或已取消共享。" },
       "asset": { "not_found": "资源不存在。" },
       "snapshot": { "not_found": "页面快照不存在。" },
+      "network": { "unavailable": "暂时无法连接服务器，请检查网络后重试。" },
+      "response": { "invalid": "服务器返回了无法识别的数据，请稍后重试。" },
+      "quota":{"storage_bytes_exceeded":"存储空间已满，请清理文件或联系管理员扩容。","resources_exceeded":"资源数量已达到上限。","max_steps_per_resource_exceeded":"该资源的录制步骤已达到上限。","members_exceeded":"团队成员数量已达到上限。","active_shares_exceeded":"有效分享链接数量已达到上限。","monthly_ai_tokens_exceeded":"本月 AI Token 已用完。","monthly_exports_exceeded":"本月导出次数已用完。","monthly_video_minutes_exceeded":"本月视频导出时长已用完。"},
       "smtp": { "not_configured": "邮件服务尚未完整配置。", "account_unavailable": "阿里云邮件推送主账号当前不可用，请在控制台检查服务开通、欠费或冻结状态，以及发信地址是否属于当前账号。", "authentication_failed": "SMTP 认证失败，请检查用户名和 SMTP 密码（不是账号登录密码）。", "connection_failed": "无法连接 SMTP 服务，请检查服务器地址、端口和连接安全方式。", "sender_rejected": "SMTP 服务拒绝了发件地址，请确认发信地址已验证且与当前账号匹配。", "recipient_rejected": "SMTP 服务拒绝了收件地址，请检查测试邮箱是否有效。", "delivery_rejected": "SMTP 服务拒绝投递邮件，请检查发信权限、额度和服务商限制。", "delivery_failed": "测试邮件发送失败，请检查 SMTP 配置和服务商状态。" },
       "request": { "validation": "提交内容格式不正确。", "failed": "请求失败，请稍后重试。" }
     }

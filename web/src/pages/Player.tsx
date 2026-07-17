@@ -37,6 +37,9 @@ export default function Player() {
   const [ready, setReady] = useState(false)
   const [exportZoomProgress, setExportZoomProgress] = useState<number | undefined>(exportMode ? 0 : undefined)
   const [error, setError] = useState('')
+  const [locked, setLocked] = useState(false)
+  const [password, setPassword] = useState('')
+  const [unlocking, setUnlocking] = useState(false)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [comments, setComments] = useState<StepComment[]>([])
   const [commentName, setCommentName] = useState(() => localStorage.getItem('docflow-comment-name') || '')
@@ -51,9 +54,9 @@ export default function Player() {
   }, [])
   function track(event_type: 'view' | 'step_view' | 'interaction' | 'complete', step_id?: string) {
     if (exportMode) return
-    fetch(`${publicApi}/public/${token}/events`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type, visitor_id: visitorId, session_id: sessionId, step_id }), keepalive: true }).catch(() => undefined)
+    fetch(`${publicApi}/public/${token}/events`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_type, visitor_id: visitorId, session_id: sessionId, step_id, referrer: document.referrer, utm_source: params.get('utm_source') || '', utm_medium: params.get('utm_medium') || '', utm_campaign: params.get('utm_campaign') || '', utm_content: params.get('utm_content') || '', utm_term: params.get('utm_term') || '' }), keepalive: true }).catch(() => undefined)
   }
-  useEffect(() => { fetch(`${publicApi}/public/${token}`).then(response => { if (!response.ok) throw new Error(t('notFound')); return response.json() }).then(async value => {
+  function load() { setError(''); return fetch(`${publicApi}/public/${token}`, { credentials: 'include' }).then(response => { if (response.status === 401) { setLocked(true); throw new Error('locked') } if (!response.ok) throw new Error(t('notFound')); return response.json() }).then(async value => {
     value.steps = value.steps.map((step: Step) => ({
       ...step,
       image_url: `${publicApi}/public/${token}/assets/${step.id}.webp`,
@@ -64,8 +67,9 @@ export default function Player() {
       snapshot_url: !exportMode && step.render_mode === 'dom' ? `${publicApi}/public/${token}/slides/${step.id}/snapshot${step.snapshot_version ? `?v=${encodeURIComponent(step.snapshot_version)}` : ''}` : undefined,
     }))
     if (exportMode) await applyLocale(value.content_locale || 'zh-CN', PUBLIC_LOCALE_KEY)
-    setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1))); track('view')
-  }).catch(value => setError(value.message)) }, [token, publicApi, requestedStep])
+    setLocked(false); setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1))); track('view')
+  }).catch(value => { if (value.message !== 'locked') setError(value.message) }) }
+  useEffect(() => { void load() }, [token, publicApi, requestedStep])
   useEffect(() => setReady(false), [index])
   useEffect(() => {
     if (!demo || exportMode || !ready || !demo.steps[index]) return
@@ -85,7 +89,7 @@ export default function Player() {
   useEffect(() => {
     if (!demo || exportMode || !demo.steps[index]) return
     setComments([]); setCommentText('')
-    fetch(`${publicApi}/public/${token}/comments?step_id=${encodeURIComponent(demo.steps[index].id)}`).then(response => response.ok ? response.json() : []).then(setComments).catch(() => undefined)
+    fetch(`${publicApi}/public/${token}/comments?step_id=${encodeURIComponent(demo.steps[index].id)}`, { credentials: 'include' }).then(response => response.ok ? response.json() : []).then(setComments).catch(() => undefined)
   }, [demo, exportMode, index, publicApi, token])
   useEffect(() => {
     if (!exportMode) return
@@ -117,6 +121,15 @@ export default function Player() {
     return () => window.clearTimeout(timer)
   }, [demo, exportMode, index, ready])
 
+  async function unlock(event: React.FormEvent) {
+    event.preventDefault(); setUnlocking(true); setError('')
+    try {
+      const response = await fetch(`${publicApi}/public/${token}/unlock`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) })
+      if (!response.ok) throw new Error(t('passwordIncorrect'))
+      await load()
+    } catch (value) { setError(value instanceof Error ? value.message : t('passwordIncorrect')) } finally { setUnlocking(false) }
+  }
+  if (!demo && locked) return <main className="player-shell player-locked"><form onSubmit={unlock}><span><Icon name="lock" size={24} /></span><h1>{t('passwordTitle')}</h1><p>{t('passwordHint')}</p><input autoFocus type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={t('passwordPlaceholder')} /><button className="primary" disabled={unlocking || !password}>{unlocking ? t('unlocking') : t('unlock')}</button>{error && <small>{error}</small>}</form></main>
   if (!demo) return <main className="player-shell center-page">{error || t('loading')}</main>
   const step = demo.steps[index]
   if (!step) return <main className="player-shell center-page">{t('empty')}</main>
@@ -158,7 +171,7 @@ export default function Player() {
     event.preventDefault(); if (!commentText.trim()) return
     setCommentBusy(true)
     try {
-      const response = await fetch(`${publicApi}/public/${token}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step_id: step.id, visitor_id: visitorId, author_name: commentName || t('guest'), author_email: commentEmail, content: commentText }) })
+      const response = await fetch(`${publicApi}/public/${token}/comments`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step_id: step.id, visitor_id: visitorId, author_name: commentName || t('guest'), author_email: commentEmail, content: commentText }) })
       if (!response.ok) throw new Error(t('submitFailed'))
       const comment = await response.json(); setComments(current => [comment, ...current]); setCommentText(''); localStorage.setItem('docflow-comment-name', commentName); localStorage.setItem('docflow-comment-email', commentEmail)
     } catch (value) { setError(value instanceof Error ? value.message : t('submitFailed')) } finally { setCommentBusy(false) }
