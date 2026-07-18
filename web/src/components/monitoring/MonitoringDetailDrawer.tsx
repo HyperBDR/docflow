@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatDate, normalizeLocale } from '../../i18n'
 import { monitoringApi } from '../../monitoring/api'
@@ -21,6 +21,12 @@ function displayValue(key: string, value: unknown, locale: string) {
   return String(value)
 }
 
+function OverflowValue({ children, className = '' }: { children: string; className?: string }) {
+  const text = useRef<HTMLSpanElement>(null), [overflow, setOverflow] = useState(false)
+  const measure = () => setOverflow(!!text.current && text.current.scrollWidth > text.current.clientWidth)
+  return <span className={`monitor-overflow-value ${className}`.trim()} data-full-value={children} data-overflow={overflow} title={children} tabIndex={0} onMouseEnter={measure} onFocus={measure}><span ref={text}>{children}</span></span>
+}
+
 export default function MonitoringDetailDrawer({ metricKey, onClose }: { metricKey: MonitoringDetailKey; onClose: () => void }) {
   const { t, i18n } = useTranslation(['monitoring', 'common'])
   const locale = normalizeLocale(i18n.language)
@@ -33,9 +39,9 @@ export default function MonitoringDetailDrawer({ metricKey, onClose }: { metricK
     <header className="admin-user-drawer-header"><div className="monitor-detail-identity"><span className={value?.status || 'unknown'}><Icon name={item.icon} size={23} /></span><div><small>{t('details.eyebrow')}</small><h2>{t(item.title)}</h2><p><i className={value?.status || 'unknown'} />{t(`status.${value?.status || 'unknown'}`)}</p></div></div><button className="admin-user-drawer-close" aria-label={t('common:actions.close')} onClick={onClose}>×</button></header>
     <nav className="monitor-detail-ranges">{ranges.map(key => <button key={key} className={range === key ? 'active' : ''} onClick={() => setRange(key)}>{t(`details.ranges.${key}`)}</button>)}</nav>
     <div className="admin-user-drawer-body monitor-detail-body">{error && <div className="error">{error}</div>}{!value && !error && <div className="monitor-detail-loading"><span className="action-spinner" />{t('loading')}</div>}{value && <>
-      <section className="monitor-detail-summary">{item.fields.map(key => <article key={key}><small>{t(`details.fields.${key}`, { defaultValue: key })}</small><strong>{displayValue(key, value.summary[key], locale)}</strong></article>)}</section>
-      <section className="monitor-detail-card"><header><div><strong>{t('details.history')}</strong><small>{t('details.historyHint')}</small></div></header><InteractiveMetricChart points={chartPoints} series={item.series.map(series => ({ ...series, label: t(series.label) }))} unit={item.unit} threshold={threshold} /></section>
-      {!!value.breakdown.length && <section className="monitor-detail-card"><header><div><strong>{t('details.endpoints')}</strong><small>{t('details.endpointsHint')}</small></div></header><div className="monitor-endpoint-list">{value.breakdown.slice(0, 10).map((row, index) => <article key={`${row.method}-${row.route}-${index}`}><code>{String(row.method)} {String(row.route)}</code><span><b>{Number(row.requests || 0).toLocaleString(locale)}</b>{t('details.requests')}</span><span><b>{Number(row.avg_latency_ms || 0).toLocaleString(locale)} ms</b>{t('details.averageLatency')}</span><span className={Number(row.error_rate || 0) >= 5 ? 'danger' : ''}><b>{Number(row.error_rate || 0)}%</b>{t('details.errorRate')}</span></article>)}</div></section>}
+      <section className="monitor-detail-summary">{item.fields.map(key => { const formatted = displayValue(key, value.summary[key], locale); return <article key={key}><small>{t(`details.fields.${key}`, { defaultValue: key })}</small><strong><OverflowValue>{formatted}</OverflowValue></strong></article> })}</section>
+      <section className="monitor-detail-card monitor-history-card"><header><div><strong>{t('details.history')}</strong><small>{t('details.historyHint')}</small></div></header><InteractiveMetricChart points={chartPoints} series={item.series.map(series => ({ ...series, label: t(series.label) }))} unit={item.unit} threshold={threshold} /></section>
+      {!!value.breakdown.length && <section className="monitor-detail-card monitor-endpoint-card"><header><div><strong>{t('details.endpoints')}</strong><small>{t('details.endpointsHint')}</small></div></header><div className="monitor-endpoint-list">{value.breakdown.slice(0, 10).map((row, index) => { const endpoint = `${String(row.method)} ${String(row.route)}`; return <article key={`${row.method}-${row.route}-${index}`}><OverflowValue className="monitor-endpoint-value">{endpoint}</OverflowValue><span><b>{Number(row.requests || 0).toLocaleString(locale)}</b>{t('details.requests')}</span><span><b>{Number(row.avg_latency_ms || 0).toLocaleString(locale)} ms</b>{t('details.averageLatency')}</span><span className={Number(row.error_rate || 0) >= 5 ? 'danger' : ''}><b>{Number(row.error_rate || 0)}%</b>{t('details.errorRate')}</span></article> })}</div></section>}
       <section className="monitor-detail-card"><header><div><strong>{t('details.relatedAlerts')}</strong><small>{t('details.relatedAlertsHint')}</small></div></header>{value.alerts.length ? <div className="monitor-detail-alerts">{value.alerts.map(alert => <article key={alert.id}><SeverityBadge value={alert.severity} /><div><strong>{alert.title}</strong><small>{formatDate(alert.started_at, locale)}</small></div><span>{t(`alertStatus.${alert.status}`)}</span></article>)}</div> : <div className="monitor-detail-empty">{t('details.noAlerts')}</div>}</section>
     </>}</div>
   </aside></>
