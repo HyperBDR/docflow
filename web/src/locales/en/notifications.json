@@ -1,0 +1,30 @@
+{
+  "title": "Notifications",
+  "adminTitle": "Platform Notifications",
+  "subtitle": "Review task, quota, team, and system updates in one place",
+  "adminSubtitle": "Handle monitoring alerts, platform quota, and operational events",
+  "bell": "Notifications",
+  "unread": "{{count}} unread",
+  "markAll": "Mark all read",
+  "viewAll": "View all notifications",
+  "empty": "No notifications",
+  "emptyHint": "Task results, quota reminders, and system updates will appear here",
+  "filters": { "all": "All", "unread": "Unread", "task": "Tasks", "quota": "Quotas", "alert": "Alerts", "security": "Security", "team": "Team", "system": "System" },
+  "events": {
+    "system": { "welcome": { "title": "Welcome to DocFlow", "message": "Your workspace is ready." } },
+    "job": {
+      "export": { "completed": { "title": "Export completed", "message": "“{{resource_title}}” is ready to download." }, "failed": { "title": "Export failed", "message": "The export for “{{resource_title}}” failed. Open Tasks for details." } },
+      "ai": { "completed": { "title": "AI optimization completed", "message": "AI optimization for “{{resource_title}}” has completed." }, "failed": { "title": "AI optimization failed", "message": "AI optimization for “{{resource_title}}” failed. Open the task details." } }
+    },
+    "quota": {
+      "notice": { "title": "Quota usage reached 70%", "message": "{{organization_name}} has used {{percent}}% of its {{metric}} quota." },
+      "warning": { "title": "Quota is running low", "message": "{{organization_name}} has used {{percent}}% of its {{metric}} quota. Consider upgrading early." },
+      "exceeded": { "title": "Quota exhausted", "message": "{{organization_name}} has reached or exceeded its {{metric}} limit." },
+      "admin_exceeded": { "title": "Workspace quota exceeded", "message": "{{organization_name}} has used {{percent}}% of its {{metric}} quota." }
+    },
+    "alert": {
+      "triggered": { "title": "Platform alert triggered", "message": "{{title}}: current value {{current_value}}, threshold {{threshold}}." },
+      "resolved": { "title": "Platform alert recovered", "message": "{{title}} has returned to normal." }
+    }
+  }
+}

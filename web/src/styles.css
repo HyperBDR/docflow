@@ -20,14 +20,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .header-icon-button:active { transform: scale(.96); }
 .topbar-account-actions { min-width: 0; display: flex; align-items: center; gap: 4px; }
 .topbar-account-actions .language-menu { flex: 0 0 auto; }
-.topbar-account-actions .language-menu .header-icon-button { width: 42px; height: 42px; border: 1px solid #d7dce5; border-radius: 10px; background: white; box-shadow: 0 1px 3px #1720330d; }
-.topbar-account-actions .help-center-link { width: 42px; height: 42px; border: 1px solid #d7dce5; border-radius: 10px; background: white; box-shadow: 0 1px 3px #1720330d; }
-.topbar-account-actions .help-center-link:hover { border-color: #aaa3f4; background: #faf9ff; box-shadow: 0 0 0 3px #635bff14,0 3px 10px #5146d914; }
-.topbar-account-actions .language-menu .header-icon-button:hover, .topbar-account-actions .language-menu .header-icon-button[aria-expanded="true"] { border-color: #aaa3f4; background: #faf9ff; box-shadow: 0 0 0 3px #635bff14, 0 3px 10px #5146d914; }
+.topbar-account-actions .language-menu .header-icon-button, .topbar-account-actions .help-center-link { width: 42px; height: 42px; border: 0; border-radius: 10px; color: #697386; background: transparent; box-shadow: none; }
+.topbar-account-actions .help-center-link:hover, .topbar-account-actions .language-menu .header-icon-button:hover, .topbar-account-actions .language-menu .header-icon-button[aria-expanded="true"] { border: 0; color: #554ae8; background: #f0efff; box-shadow: none; }
 .language-current-mark { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; color: #554ae8; background: #efeeff; font-size: 11px; font-weight: 850; line-height: 1; letter-spacing: -.03em; }
 .language-current-mark.en { color: #176a8a; background: #e9f6fb; font-size: 9px; letter-spacing: 0; }
-.topbar-account-actions .language-current-mark { width: 30px; height: 30px; border-radius: 8px; font-size: 13px; }
-.topbar-account-actions .language-current-mark.en { font-size: 10px; }
+.topbar-account-actions .language-current-mark { width: 26px; height: 26px; border-radius: 0; color: inherit; background: transparent; font-size: 13px; }
+.topbar-account-actions .language-current-mark.en { color: inherit; background: transparent; font-size: 10px; }
+.topbar-account-actions .header-icon-button:hover .language-current-mark, .topbar-account-actions .header-icon-button[aria-expanded="true"] .language-current-mark { color: inherit; background: transparent; }
 .header-icon-button:hover .language-current-mark, .header-icon-button[aria-expanded="true"] .language-current-mark { color: white; background: #635bff; }
 .workspace-switcher { position: relative; flex: 0 0 auto; }
 .workspace-switcher-trigger { min-width: 168px; height: 42px; display: grid; grid-template-columns: 30px minmax(0, 1fr) 12px; align-items: center; gap: 8px; padding: 4px 8px 4px 5px; border: 1px solid #d7dce5; border-radius: 10px; color: #455166; background: #fff; box-shadow: 0 1px 3px #1720330d, inset 0 1px #ffffff; text-align: left; transition: border-color .16s, background .16s, box-shadow .16s, transform .16s; }
@@ -983,9 +982,10 @@ label.check input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: #63
 .admin-sidebar-foot-anchor { width: 100%; }
 .admin-sidebar-foot { width: 100%; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px 10px; border: 1px solid #ffffff0d; border-radius: 11px; color: #8f99aa; background: #ffffff05; }
 .admin-sidebar-foot:hover { border-color: #ffffff1c; color: #fff; background: #ffffff0c; }
-.admin-sidebar-foot > span { min-width: 0; display: grid; gap: 2px; white-space: nowrap; }
+.admin-sidebar-foot > span { min-width: 0; overflow: hidden; display: grid; gap: 2px; white-space: nowrap; }
 .admin-sidebar-foot strong { color: #c9d0db; font-size: 11px; }
 .admin-sidebar-foot small { font-size: 9px; }
+.admin-sidebar-foot strong, .admin-sidebar-foot small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-shell.collapsed .admin-sidebar-brand .brand-lockup > span, .admin-shell.collapsed .admin-sidebar-label, .admin-shell.collapsed .admin-sidebar nav a > span, .admin-shell.collapsed .admin-sidebar-foot > span { display: none; }
 .admin-shell.collapsed .admin-sidebar-brand .brand-lockup img { width: 34px; height: 34px; }
 .admin-shell.collapsed .admin-sidebar-toggle { position: absolute; z-index: 2; right: -15px; top: 21px; }

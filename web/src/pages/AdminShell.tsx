@@ -25,6 +25,8 @@ import MonitoringOverview from './monitoring/MonitoringOverview'
 import AlertEvents from './monitoring/AlertEvents'
 import AlertRules from './monitoring/AlertRules'
 import NotificationChannels from './monitoring/NotificationChannels'
+import NotificationBell from '../components/notifications/NotificationBell'
+import NotificationCenter from './NotificationCenter'
 import '../styles/monitoring.css'
 
 export default function AdminShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
@@ -37,6 +39,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
     : location.pathname.startsWith('/admin/settings') ? t('nav.settings')
     : location.pathname.startsWith('/admin/monitoring') ? t('nav.monitoring')
     : location.pathname.startsWith('/admin/jobs') ? t('nav.jobs')
+    : location.pathname.startsWith('/admin/notifications') ? t('nav.notifications')
     : location.pathname.startsWith('/admin/storage') ? t('nav.storage')
     : location.pathname.startsWith('/admin/operations/quotas') ? t('nav.quotas')
     : location.pathname.startsWith('/admin/ai/settings') ? t('nav.aiSettings')
@@ -52,10 +55,11 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
     <AdminSidebar collapsed={collapsed} onToggle={toggle} />
     <button className="admin-sidebar-scrim" aria-label={t('common:actions.close')} onClick={() => setMobileOpen(false)} />
     <div className="admin-shell-main">
-      <header className="admin-topbar"><div><button className="admin-mobile-menu" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button><span><small>DocFlow Admin</small><strong>{title}</strong></span></div><div className="topbar-account-actions"><HelpLink/><LanguageSwitcher account /><AccountMenu user={user} view="admin" onUserChange={onUserChange} logout={logout} /></div></header>
+      <header className="admin-topbar"><div><button className="admin-mobile-menu" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button><span><small>DocFlow Admin</small><strong>{title}</strong></span></div><div className="topbar-account-actions"><HelpLink/><LanguageSwitcher account /><NotificationBell scope="admin" /><AccountMenu user={user} view="admin" onUserChange={onUserChange} logout={logout} /></div></header>
       <div className="admin-route-content"><Routes>
         <Route index element={<AdminOverview />} />
         <Route path="jobs" element={<AdminJobs />} />
+        <Route path="notifications" element={<NotificationCenter scope="admin" />} />
         <Route path="monitoring" element={<MonitoringOverview />} />
         <Route path="monitoring/alerts" element={<AlertEvents />} />
         <Route path="monitoring/rules" element={<AlertRules />} />

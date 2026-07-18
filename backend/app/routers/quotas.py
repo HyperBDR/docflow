@@ -3,7 +3,7 @@ from sqlalchemy import func,select,update
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import admin_user,current_user
-from app.models import Organization,OrganizationQuotaAssignment,PlatformQuotaPolicy,QuotaPlan,User
+from app.models import Organization,OrganizationMember,OrganizationQuotaAssignment,PlatformQuotaPolicy,QuotaPlan,User
 from app.quota import DEFAULT_LIMITS,effective_plan,quota_summary
 from app.quota_analytics import collect_quota_usage,operations_overview,plan_statistics,space_history
 from app.quota_policy import platform_limits,preview,validate_limits,policy_values,normalized_policy,impact
@@ -14,7 +14,17 @@ router=APIRouter(tags=["quotas"])
 def plan_out(p):return {"id":p.id,"name":p.name,"description":p.description,"is_default":p.is_default,"limits":{**DEFAULT_LIMITS,**(p.limits or {})},"created_at":p.created_at,"updated_at":p.updated_at}
 
 @router.get("/api/workspace/quotas")
-def workspace_quotas(db:Session=Depends(get_db),user:User=Depends(current_user)):return quota_summary(db,current_organization_id(db,user))
+def workspace_quotas(db:Session=Depends(get_db),user:User=Depends(current_user)):
+    organization_id=current_organization_id(db,user);result=quota_summary(db,organization_id)
+    membership=db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id==organization_id,OrganizationMember.user_id==user.id))
+    organization=db.get(Organization,organization_id)
+    result["can_manage_plan"]=bool(user.role=="admin" or membership and membership.role in {"owner","admin"})
+    result["organization_kind"]=organization.kind if organization else "team"
+    return result
+
+@router.get("/api/workspace/quotas/history")
+def workspace_quota_history(days:int=Query(30,ge=1,le=400),db:Session=Depends(get_db),user:User=Depends(current_user)):
+    return space_history(db,current_organization_id(db,user),days)
 
 @router.get("/api/admin/quota-plans")
 def plans(db:Session=Depends(get_db),_:User=Depends(admin_user)):return [plan_out(x) for x in db.scalars(select(QuotaPlan).order_by(QuotaPlan.is_default.desc(),QuotaPlan.name)).all()]

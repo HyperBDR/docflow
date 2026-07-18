@@ -9,6 +9,7 @@ from app.exporters import render_markdown_zip, render_mp4, render_pdf, render_pl
 from app.models import ExportJob, JobStatus, PublishedRevision, ShareToken, now
 from app.storage import storage
 from app.ai_service import run_ai_generation
+from app.in_app_notifications import notify_job_result
 
 celery = Celery("docflow", broker=settings.redis_url, backend=settings.redis_url)
 celery.conf.update(
@@ -70,6 +71,8 @@ def render_export(job_id: str):
         job.progress = 100
         job.completed_at = now()
         db.commit()
+        notify_job_result(db, job, "export", True)
+        db.commit()
     except Exception as exc:
         db.rollback()
         job = db.get(ExportJob, job_id)
@@ -81,6 +84,8 @@ def render_export(job_id: str):
             job.error = f"{exc}\n{traceback.format_exc()[-1500:]}"
             job.error_code = "export.render_failed"
             job.completed_at = now()
+            db.commit()
+            notify_job_result(db, job, "export", False)
             db.commit()
         raise
     finally:

@@ -7,10 +7,51 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Organization, OrganizationMember, OrganizationQuotaAssignment, QuotaPlan, QuotaUsageSnapshot, User
+from app.in_app_notifications import create_notification, notify_admins, organization_manager_ids
 from app.quota import DEFAULT_LIMITS, SOFT, effective_plan, quota_summary, usage
 
 
 RETENTION_DAYS = 400
+
+
+def _quota_notification_band(percent: float) -> tuple[str, str] | None:
+    if percent >= 100:
+        return "exceeded", "critical"
+    if percent >= 85:
+        return "warning", "warning"
+    if percent >= 70:
+        return "notice", "info"
+    return None
+
+
+def _quota_notification_cycle(key: str, moment: datetime) -> str:
+    if key.startswith("monthly_"):
+        return moment.strftime("%Y-%m")
+    year, week, _ = moment.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def _notify_quota_usage(db: Session, organization: Organization, key: str, used: int, limit: int | None, percent: float, moment: datetime) -> None:
+    band = _quota_notification_band(percent) if limit else None
+    if not band:
+        return
+    level, severity = band
+    data = {"organization_id": organization.id, "organization_name": organization.name, "metric_key": key, "used": used, "limit": limit, "percent": percent}
+    cycle = _quota_notification_cycle(key, moment)
+    for recipient_id in organization_manager_ids(db, organization):
+        create_notification(
+            db, recipient_id, f"quota.{level}", organization_id=organization.id,
+            category="quota", severity=severity, title="Workspace quota update",
+            message=organization.name, action_url="/quotas", data=data,
+            dedupe_key=f"quota:{organization.id}:{key}:{level}:{cycle}",
+        )
+    if level == "exceeded":
+        notify_admins(
+            db, "quota.admin_exceeded", organization_id=organization.id,
+            category="quota", severity="critical", title="Workspace quota exceeded",
+            message=organization.name, action_url="/admin/operations/quotas", data=data,
+            dedupe_key=f"admin-quota:{organization.id}:{key}:{cycle}",
+        )
 
 
 def health_for(items: list[dict]) -> str:
@@ -46,6 +87,7 @@ def collect_quota_usage(db: Session, organization_ids: list[str] | None = None, 
             snapshot.usage_percent = percent
             snapshot.collected_at = moment
             db.add(snapshot)
+            _notify_quota_usage(db, organization, key, used, int(limit) if limit is not None else None, percent, moment)
             updated += 1
     db.execute(delete(QuotaUsageSnapshot).where(QuotaUsageSnapshot.snapshot_date < moment.date() - timedelta(days=RETENTION_DAYS)))
     db.commit()

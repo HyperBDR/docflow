@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import AlertEvent, AlertRule, now
+from app.in_app_notifications import notify_admins
 from app.monitoring.notifications import dispatch_notifications
 
 
@@ -78,5 +79,13 @@ def evaluate_rules(db: Session, observations: dict[str, float]) -> list[AlertEve
                 notifications.append((active, True))
     db.commit()
     for event, recovered in notifications:
+        notify_admins(
+            db, "alert.resolved" if recovered else "alert.triggered",
+            category="alert", severity="success" if recovered else event.severity,
+            title=event.title, message=event.message,
+            action_url="/admin/monitoring/alerts",
+            data={"alert_id": event.id, "metric_key": event.metric_key, "current_value": event.current_value, "threshold": event.threshold},
+            dedupe_key=f"alert:{event.id}:{'resolved' if recovered else 'triggered'}",
+        )
         dispatch_notifications(db, event, recovered)
     return changed

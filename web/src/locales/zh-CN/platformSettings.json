@@ -4,9 +4,11 @@
   "tabs": { "general": "通用设置", "generalHint": "帮助中心与产品入口", "email": "邮件服务", "emailHint": "SMTP 与发件身份", "login": "登录与注册", "loginHint": "Google 登录与账号策略", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略", "quota":"配额管理", "quotaHint":"方案模板与默认限制" },
   "status": { "ready": "配置正常", "inactive": "尚未配置", "enabled": "已启用", "disabled": "已停用", "running": "自动运行中" },
   "general": {
-    "statusTitle": "平台通用配置", "configured": "帮助中心入口已对用户开放", "notConfigured": "尚未配置外部帮助中心",
+    "statusTitle": "平台通用配置", "configured": "平台公开产品入口已完成配置", "notConfigured": "尚未配置公开产品入口",
     "helpTitle": "帮助中心", "helpHint": "连接内部知识库、公开文档站或任意外部帮助网站。", "helpUrl": "帮助网站地址", "helpUrlHint": "仅支持完整的 HTTP 或 HTTPS 地址；留空并保存即可隐藏所有帮助入口。",
     "previewTitle": "入口展示预览", "previewEnabled": "登录注册页和登录后的右上角将显示帮助入口。", "previewDisabled": "未配置时，用户界面不会显示帮助入口。", "openPreview": "打开预览",
+    "upgradeTitle": "套餐升级入口", "upgradeHint": "可以连接账单、收银台、销售表单或任意外部套餐购买页面。", "upgradeUrl": "升级购买网站地址", "upgradeUrlHint": "空间用量达到 70% 后向有权限的所有者展示；留空时隐藏购买操作。",
+    "upgradePreviewTitle": "升级入口预览", "upgradePreviewEnabled": "符合条件的空间所有者将看到对应的升级操作。", "upgradePreviewDisabled": "留空时仍展示用量，但不会出现购买按钮。", "openUpgradePreview": "打开升级页面",
     "footerHint": "保存后会立即应用到所有用户界面。", "saved": "通用设置已保存"
   },
   "email": {

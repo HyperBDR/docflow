@@ -1,0 +1,30 @@
+{
+  "title": "通知中心",
+  "adminTitle": "平台通知",
+  "subtitle": "集中查看任务、配额、团队和系统消息",
+  "adminSubtitle": "集中处理监控告警、平台配额和运营事件",
+  "bell": "通知",
+  "unread": "{{count}} 条未读",
+  "markAll": "全部已读",
+  "viewAll": "查看全部通知",
+  "empty": "当前没有通知",
+  "emptyHint": "新的任务结果、配额提醒和系统消息会显示在这里",
+  "filters": { "all": "全部", "unread": "未读", "task": "任务", "quota": "配额", "alert": "告警", "security": "安全", "team": "团队", "system": "系统" },
+  "events": {
+    "system": { "welcome": { "title": "欢迎使用 DocFlow", "message": "你的工作空间已经准备就绪。" } },
+    "job": {
+      "export": { "completed": { "title": "导出任务已完成", "message": "资源“{{resource_title}}”已经可以下载。" }, "failed": { "title": "导出任务失败", "message": "资源“{{resource_title}}”导出失败，请进入任务中心查看。" } },
+      "ai": { "completed": { "title": "AI 优化已完成", "message": "资源“{{resource_title}}”的 AI 优化任务已完成。" }, "failed": { "title": "AI 优化失败", "message": "资源“{{resource_title}}”的 AI 优化任务失败，请查看任务详情。" } }
+    },
+    "quota": {
+      "notice": { "title": "配额使用达到 70%", "message": "{{organization_name}} 的{{metric}}已使用 {{percent}}%。" },
+      "warning": { "title": "配额即将用尽", "message": "{{organization_name}} 的{{metric}}已使用 {{percent}}%，建议提前扩容。" },
+      "exceeded": { "title": "配额已经用尽", "message": "{{organization_name}} 的{{metric}}已达到或超过上限。" },
+      "admin_exceeded": { "title": "空间配额已超额", "message": "{{organization_name}} 的{{metric}}已使用 {{percent}}%。" }
+    },
+    "alert": {
+      "triggered": { "title": "平台告警已触发", "message": "{{title}}：当前值 {{current_value}}，阈值 {{threshold}}。" },
+      "resolved": { "title": "平台告警已恢复", "message": "{{title}} 已恢复正常。" }
+    }
+  }
+}

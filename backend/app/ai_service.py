@@ -339,6 +339,7 @@ def apply_results(db, job: AIJob, demo: Demo, outline: dict, generated: list[dic
 
 
 def run_ai_generation(job_id: str) -> None:
+    from app.in_app_notifications import notify_job_result
     db = SessionLocal()
     try:
         job = db.get(AIJob, job_id)
@@ -392,6 +393,8 @@ def run_ai_generation(job_id: str) -> None:
         job.progress = 100
         job.completed_at = now()
         db.commit()
+        notify_job_result(db, job, "ai", True)
+        db.commit()
     except Exception as exc:
         db.rollback()
         job = db.get(AIJob, job_id)
@@ -403,6 +406,8 @@ def run_ai_generation(job_id: str) -> None:
             job.error = f"{exc}\n{traceback.format_exc()[-1500:]}"
             job.error_code = "ai.generation_failed"
             job.completed_at = now()
+            db.commit()
+            notify_job_result(db, job, "ai", False)
             db.commit()
         raise
     finally:

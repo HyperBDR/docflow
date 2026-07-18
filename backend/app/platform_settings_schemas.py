@@ -44,15 +44,18 @@ class MonitoringSettingsOut(BaseModel):
 
 class GeneralSettingsUpdate(BaseModel):
     help_url: str = Field(default="", max_length=1000)
+    upgrade_url: str = Field(default="", max_length=1000)
 
 
 class GeneralSettingsOut(BaseModel):
     help_url: str
+    upgrade_url: str
     updated_at: datetime | None = None
 
 
 class PublicPlatformConfig(BaseModel):
     help_url: str = ""
+    upgrade_url: str = ""
 
 
 class GoogleAuthSettingsUpdate(BaseModel):

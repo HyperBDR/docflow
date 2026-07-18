@@ -160,6 +160,29 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
+class InAppNotification(Base):
+    __tablename__ = "in_app_notifications"
+    __table_args__ = (
+        UniqueConstraint("recipient_id", "scope", "dedupe_key", name="uq_in_app_notification_dedupe"),
+        Index("ix_in_app_notification_recipient_scope_created", "recipient_id", "scope", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    recipient_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(20), default="user", index=True)
+    category: Mapped[str] = mapped_column(String(30), default="system", index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="info", index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    title: Mapped[str] = mapped_column(String(240), default="")
+    message: Mapped[str] = mapped_column(String(1000), default="")
+    action_url: Mapped[str] = mapped_column(String(1000), default="")
+    notification_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    dedupe_key: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
 demo_tags = Table(
     "demo_tags",
     Base.metadata,
@@ -615,6 +638,7 @@ class GeneralPlatformSettings(Base):
     __tablename__ = "general_platform_settings"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
     help_url: Mapped[str] = mapped_column(String(1000), default="")
+    upgrade_url: Mapped[str] = mapped_column(String(1000), default="")
     updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

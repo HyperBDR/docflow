@@ -1,6 +1,6 @@
 import type React from 'react'
 
-export type IconName = 'ai' | 'analytics' | 'animation' | 'arrowDown' | 'arrowRight' | 'arrowUp' | 'book' | 'check' | 'chevronLeft' | 'chevronRight' | 'clock' | 'close' | 'copy' | 'cursor' | 'database' | 'delete' | 'device' | 'download' | 'edit' | 'eye' | 'eyeOff' | 'folder' | 'globe' | 'grid' | 'help' | 'home' | 'image' | 'layout' | 'link' | 'list' | 'lock' | 'logout' | 'menu' | 'message' | 'more' | 'move' | 'palette' | 'play' | 'plus' | 'publish' | 'record' | 'search' | 'settings' | 'share' | 'shield' | 'support' | 'tag' | 'target' | 'text' | 'unlink' | 'user' | 'users' | 'warning'
+export type IconName = 'ai' | 'analytics' | 'animation' | 'arrowDown' | 'arrowRight' | 'arrowUp' | 'bell' | 'book' | 'check' | 'chevronLeft' | 'chevronRight' | 'clock' | 'close' | 'copy' | 'cursor' | 'database' | 'delete' | 'device' | 'download' | 'edit' | 'eye' | 'eyeOff' | 'folder' | 'globe' | 'grid' | 'help' | 'home' | 'image' | 'layout' | 'link' | 'list' | 'lock' | 'logout' | 'menu' | 'message' | 'more' | 'move' | 'palette' | 'play' | 'plus' | 'publish' | 'record' | 'search' | 'settings' | 'share' | 'shield' | 'support' | 'tag' | 'target' | 'text' | 'unlink' | 'user' | 'users' | 'warning'
 
 export default function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
@@ -11,6 +11,7 @@ export default function Icon({ name, size = 16 }: { name: IconName; size?: numbe
     arrowDown: <><path d="M12 4v16"/><path d="m6 14 6 6 6-6"/></>,
     arrowRight: <><path d="M4 12h16"/><path d="m14 6 6 6-6 6"/></>,
     arrowUp: <><path d="M12 20V4"/><path d="m6 10 6-6 6 6"/></>,
+    bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></>,
     book: <><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5Z"/><path d="M20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
     chevronLeft: <path d="m15 18-6-6 6-6"/>,

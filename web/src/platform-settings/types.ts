@@ -5,8 +5,8 @@ export type EmailPlatformSettings = {
 }
 export type EmailPlatformSettingsInput = Omit<EmailPlatformSettings, 'password_configured' | 'configured' | 'source' | 'updated_at'> & { password: string }
 export type MonitoringPlatformSettings = { automatic_collection: boolean; interval_seconds: number; retention_days: number; raw_ranges: string[] }
-export type GeneralPlatformSettings = { help_url: string; updated_at?: string | null }
-export type GeneralPlatformSettingsInput = Pick<GeneralPlatformSettings, 'help_url'>
+export type GeneralPlatformSettings = { help_url: string; upgrade_url: string; updated_at?: string | null }
+export type GeneralPlatformSettingsInput = Pick<GeneralPlatformSettings, 'help_url' | 'upgrade_url'>
 export type GoogleAuthSettings = {
   enabled: boolean; client_id: string; client_secret_configured: boolean; allow_registration: boolean
   allowed_domains: string[]; configured: boolean; redirect_uri: string; updated_at?: string | null

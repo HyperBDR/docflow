@@ -22,6 +22,8 @@ import monitoringZh from './locales/zh-CN/monitoring.json'
 import monitoringEn from './locales/en/monitoring.json'
 import platformSettingsZh from './locales/zh-CN/platformSettings.json'
 import platformSettingsEn from './locales/en/platformSettings.json'
+import notificationsZh from './locales/zh-CN/notifications.json'
+import notificationsEn from './locales/en/notifications.json'
 
 export type Locale = 'zh-CN' | 'en'
 export const UI_LOCALE_KEY = 'docflow.uiLocale'
@@ -39,8 +41,8 @@ const initialLocale = detectedLocale()
 
 void i18n.use(initReactI18next).init({
   resources: {
-    'zh-CN': { common: commonZh, auth: authZh, dashboard: dashboardZh, analytics: analyticsZh, player: playerZh, editor: editorZh, account: accountZh, admin: adminZh, workspace: workspaceZh, monitoring: monitoringZh, platformSettings: platformSettingsZh },
-    en: { common: commonEn, auth: authEn, dashboard: dashboardEn, analytics: analyticsEn, player: playerEn, editor: editorEn, account: accountEn, admin: adminEn, workspace: workspaceEn, monitoring: monitoringEn, platformSettings: platformSettingsEn },
+    'zh-CN': { common: commonZh, auth: authZh, dashboard: dashboardZh, analytics: analyticsZh, player: playerZh, editor: editorZh, account: accountZh, admin: adminZh, workspace: workspaceZh, monitoring: monitoringZh, platformSettings: platformSettingsZh, notifications: notificationsZh },
+    en: { common: commonEn, auth: authEn, dashboard: dashboardEn, analytics: analyticsEn, player: playerEn, editor: editorEn, account: accountEn, admin: adminEn, workspace: workspaceEn, monitoring: monitoringEn, platformSettings: platformSettingsEn, notifications: notificationsEn },
   },
   lng: initialLocale,
   fallbackLng: 'en',

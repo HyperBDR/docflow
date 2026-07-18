@@ -38,7 +38,7 @@ def _valid_public_url(value: str) -> bool:
 
 def _general_out(db: Session) -> GeneralSettingsOut:
     config = general_runtime_config(db)
-    return GeneralSettingsOut(help_url=config.help_url, updated_at=config.updated_at)
+    return GeneralSettingsOut(help_url=config.help_url, upgrade_url=config.upgrade_url, updated_at=config.updated_at)
 
 
 @router.get("/general", response_model=GeneralSettingsOut)
@@ -49,18 +49,20 @@ def get_general_settings(db: Session = Depends(get_db), _: User = Depends(admin_
 @router.patch("/general", response_model=GeneralSettingsOut)
 def update_general_settings(payload: GeneralSettingsUpdate, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
     help_url = payload.help_url.strip()
-    if not _valid_public_url(help_url):
-        raise HTTPException(status_code=422, detail="help URL must be a valid HTTP or HTTPS URL")
+    upgrade_url = payload.upgrade_url.strip()
+    if not _valid_public_url(help_url) or not _valid_public_url(upgrade_url):
+        raise HTTPException(status_code=422, detail="product links must be valid HTTP or HTTPS URLs")
     value = db.get(GeneralPlatformSettings, "default")
     if not value:
         value = GeneralPlatformSettings(id="default")
         db.add(value)
-    before = {"help_url": value.help_url}
+    before = {"help_url": value.help_url, "upgrade_url": value.upgrade_url}
     value.help_url = help_url
+    value.upgrade_url = upgrade_url
     value.updated_by_id = actor.id
     db.flush()
     write_audit(db, actor, "platform_general.updated", "platform_settings", value.id, "General settings",
-                before=before, after={"help_url": help_url}, request=request)
+                before=before, after={"help_url": help_url, "upgrade_url": upgrade_url}, request=request)
     db.commit()
     return _general_out(db)
 

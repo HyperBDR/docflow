@@ -49,12 +49,13 @@ def email_runtime_config(db: Session) -> EmailRuntimeConfig:
 @dataclass(frozen=True)
 class GeneralRuntimeConfig:
     help_url: str
+    upgrade_url: str
     updated_at: object | None = None
 
 
 def general_runtime_config(db: Session) -> GeneralRuntimeConfig:
     value = db.get(GeneralPlatformSettings, "default")
-    return GeneralRuntimeConfig(help_url=value.help_url, updated_at=value.updated_at) if value else GeneralRuntimeConfig(help_url="")
+    return GeneralRuntimeConfig(help_url=value.help_url, upgrade_url=value.upgrade_url, updated_at=value.updated_at) if value else GeneralRuntimeConfig(help_url="", upgrade_url="")
 
 
 @dataclass(frozen=True)

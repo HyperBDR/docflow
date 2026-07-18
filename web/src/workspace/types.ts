@@ -62,5 +62,7 @@ export type WorkspaceJobPage = {
   page_size: number
   summary: Record<WorkspaceJobStatus, number>
 }
-export type WorkspaceQuotaItem={key:string;used:number;limit:number|null;percent:number;status:'normal'|'warning'|'exceeded';enforcement:'hard'|'soft'}
-export type WorkspaceQuota={organization_id:string;plan:{id:string;name:string;description:string};items:WorkspaceQuotaItem[];period:{starts_at:string;resets_at:string};has_overrides:boolean}
+export type WorkspaceQuotaMetricKey='storage_bytes'|'resources'|'max_steps_per_resource'|'members'|'active_shares'|'monthly_ai_tokens'|'monthly_exports'|'monthly_video_minutes'|'monthly_public_views'|'monthly_download_bytes'
+export type WorkspaceQuotaItem={key:WorkspaceQuotaMetricKey;used:number;limit:number|null;percent:number;status:'normal'|'warning'|'exceeded';enforcement:'hard'|'soft'}
+export type WorkspaceQuota={organization_id:string;organization_kind:'personal'|'team';can_manage_plan:boolean;plan:{id:string;name:string;description:string};items:WorkspaceQuotaItem[];period:{starts_at:string;resets_at:string};has_overrides:boolean}
+export type WorkspaceQuotaHistory={organization_id:string;points:{date:string;metrics:Partial<Record<WorkspaceQuotaMetricKey,{used:number;limit:number|null;percent:number}>>}[]}
