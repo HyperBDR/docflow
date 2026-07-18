@@ -3,9 +3,10 @@ from sqlalchemy import func,select,update
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import admin_user,current_user
-from app.models import Organization,OrganizationQuotaAssignment,QuotaPlan,User
+from app.models import Organization,OrganizationQuotaAssignment,PlatformQuotaPolicy,QuotaPlan,User
 from app.quota import DEFAULT_LIMITS,effective_plan,quota_summary
 from app.quota_analytics import collect_quota_usage,operations_overview,plan_statistics,space_history
+from app.quota_policy import platform_limits,preview,validate_limits,policy_values,normalized_policy,impact
 from app.services import current_organization_id,write_audit
 
 router=APIRouter(tags=["quotas"])
@@ -22,6 +23,7 @@ def plans(db:Session=Depends(get_db),_:User=Depends(admin_user)):return [plan_ou
 def create_plan(payload:dict,request:Request,db:Session=Depends(get_db),actor:User=Depends(admin_user)):
     p=QuotaPlan(name=str(payload.get("name") or "").strip(),description=str(payload.get("description") or ""),limits={**DEFAULT_LIMITS,**(payload.get("limits") or {})},is_default=bool(payload.get("is_default")),created_by_id=actor.id)
     if not p.name:raise HTTPException(422,"plan name is required")
+    validate_limits(db,p.limits)
     if p.is_default:db.execute(update(QuotaPlan).values(is_default=False))
     db.add(p);db.flush();write_audit(db,actor,"quota_plan.created","quota_plan",p.id,p.name,request=request);db.commit();db.refresh(p);return plan_out(p)
 
@@ -31,7 +33,8 @@ def update_plan(plan_id:str,payload:dict,request:Request,db:Session=Depends(get_
     if not p:raise HTTPException(404,"quota plan not found")
     if "name" in payload:p.name=str(payload["name"]).strip()
     if "description" in payload:p.description=str(payload["description"])
-    if "limits" in payload:p.limits={**DEFAULT_LIMITS,**payload["limits"]}
+    if "limits" in payload:
+        limits={**DEFAULT_LIMITS,**payload["limits"]};validate_limits(db,limits);p.limits=limits
     if payload.get("is_default"):db.execute(update(QuotaPlan).values(is_default=False));p.is_default=True
     write_audit(db,actor,"quota_plan.updated","quota_plan",p.id,p.name,request=request);db.commit();db.refresh(p);return plan_out(p)
 
@@ -54,8 +57,31 @@ def admin_org_quota(organization_id:str,db:Session=Depends(get_db),_:User=Depend
 def assign(organization_id:str,payload:dict,request:Request,db:Session=Depends(get_db),actor:User=Depends(admin_user)):
     plan=db.get(QuotaPlan,str(payload.get("plan_id") or ""));org=db.get(Organization,organization_id)
     if not plan or not org:raise HTTPException(404,"quota plan or organization not found")
+    overrides=payload.get("overrides") or {};validate_limits(db,{**DEFAULT_LIMITS,**(plan.limits or {}),**overrides})
     a=db.get(OrganizationQuotaAssignment,organization_id) or OrganizationQuotaAssignment(organization_id=organization_id,plan_id=plan.id)
-    a.plan_id=plan.id;a.overrides=payload.get("overrides") or {};a.updated_by_id=actor.id;db.add(a);write_audit(db,actor,"organization.quota_updated","organization",org.id,org.name,org.id,after={"plan_id":plan.id,"overrides":a.overrides},request=request);db.commit();return admin_org_quota(organization_id,db,actor)
+    a.plan_id=plan.id;a.overrides=overrides;a.updated_by_id=actor.id;db.add(a);write_audit(db,actor,"organization.quota_updated","organization",org.id,org.name,org.id,after={"plan_id":plan.id,"overrides":a.overrides},request=request);db.commit();return admin_org_quota(organization_id,db,actor)
+
+@router.get("/api/admin/quotas/platform-limits")
+def admin_platform_limits(db:Session=Depends(get_db),_:User=Depends(admin_user)):
+    return platform_limits(db)
+
+@router.post("/api/admin/quotas/platform-limits/preview")
+def admin_platform_limits_preview(payload:dict,db:Session=Depends(get_db),_:User=Depends(admin_user)):
+    return preview(db,payload)
+
+@router.put("/api/admin/quotas/platform-limits")
+def update_platform_limits(payload:dict,request:Request,db:Session=Depends(get_db),actor:User=Depends(admin_user)):
+    current_maximums,current_unlimited,policy=policy_values(db)
+    maximums,allow_unlimited=normalized_policy(payload,current_maximums,current_unlimited)
+    impact_value=impact(db,maximums,allow_unlimited)
+    if (impact_value["affected_plan_count"] or impact_value["affected_space_count"]) and not payload.get("confirm_impact"):
+        raise HTTPException(409,{"message":"platform limit change affects existing quota configurations","code":"quota.platform_limit_impact"})
+    before={"maximums":current_maximums,"allow_unlimited":current_unlimited}
+    if not policy:policy=PlatformQuotaPolicy(id="default")
+    policy.maximums=maximums;policy.allow_unlimited=allow_unlimited;policy.updated_by_id=actor.id;db.add(policy)
+    write_audit(db,actor,"platform_quota.updated","platform_quota",policy.id,"Platform quota limits",before=before,after={"maximums":maximums,"allow_unlimited":allow_unlimited,"confirmed_impact":bool(payload.get("confirm_impact"))},request=request)
+    db.commit();db.refresh(policy)
+    return platform_limits(db)
 
 @router.get("/api/admin/quotas/overview")
 def admin_quota_overview(

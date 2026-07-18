@@ -44,7 +44,10 @@ def test_monitoring_collection_and_overview(client):
     assert detail.json()["summary"]["requests"] == 24
     assert detail.json()["breakdown"][0]["route"] == "/api/demos"
     with SessionLocal() as db:
-        assert db.query(MonitoringSnapshot).count() == 7
+        assert db.query(MonitoringSnapshot).count() == 8
+        quota = db.query(MonitoringSnapshot).filter(MonitoringSnapshot.metric_key == "quota").one()
+        assert "quota.spaces.exceeded_count" in quota.metrics
+        assert "quota.plans.max_growth_30d_percent" in quota.metrics
         assert db.query(AlertRule).filter(AlertRule.built_in.is_(True)).count() == 8
 
 
@@ -70,6 +73,7 @@ def test_alert_rule_event_and_notification_channel_management(client):
     register(client, "monitor-config@example.com")
     metrics = client.get("/api/admin/monitoring/metrics")
     assert metrics.status_code == 200
+    assert "quota.storage.capacity_percent" in {item["key"] for item in metrics.json()}
     rule = client.post("/api/admin/monitoring/rules", json={
         "name": "Custom queue alert", "metric_key": "jobs.queued", "operator": "gte",
         "threshold": 5, "severity": "warning", "consecutive_periods": 1,

@@ -26,3 +26,27 @@ export type QuotaOverview = {
   collected_at?: string | null
 }
 export type QuotaSpaceHistory = { organization_id: string; points: { date: string; metrics: Partial<Record<QuotaMetricKey, { used: number; limit: number | null; percent: number }>> }[] }
+export type PlatformQuotaImpact = {
+  affected_plans: { id: string; name: string; metrics: QuotaMetricKey[] }[]
+  affected_spaces: { id: string; name: string; kind: 'team' | 'personal'; plan_name: string; metrics: QuotaMetricKey[] }[]
+  affected_plan_count: number
+  affected_space_count: number
+  metric_plan_counts: Record<QuotaMetricKey, number>
+  metric_space_counts: Record<QuotaMetricKey, number>
+}
+export type PlatformQuotaMetric = {
+  key: QuotaMetricKey; maximum: number; allow_unlimited: boolean
+  default_plan_value: number | null; highest_plan_value: number; affected_plans: number; affected_spaces: number
+  total_used: number; capacity_percent: number; growth_percent: number; trend: { date: string; used: number }[]
+}
+export type PlatformQuotaLimits = {
+  maximums: Record<QuotaMetricKey, number>
+  allow_unlimited: Record<QuotaMetricKey, boolean>
+  metrics: PlatformQuotaMetric[]
+  impact: PlatformQuotaImpact
+  updated_at?: string | null
+}
+export type PlatformQuotaPreview = PlatformQuotaImpact & {
+  maximums: Record<QuotaMetricKey, number>
+  allow_unlimited: Record<QuotaMetricKey, boolean>
+}

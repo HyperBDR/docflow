@@ -106,6 +106,16 @@ class QuotaPlan(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class PlatformQuotaPolicy(Base):
+    __tablename__ = "platform_quota_policies"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    maximums: Mapped[dict] = mapped_column(JSON, default=dict)
+    allow_unlimited: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class OrganizationQuotaAssignment(Base):
     __tablename__ = "organization_quota_assignments"
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)

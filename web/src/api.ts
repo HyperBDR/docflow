@@ -1,6 +1,6 @@
 import i18n from './i18n'
 import type { AdminDownload, AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminShare, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, PublicPlatformConfig, QuotaPlan, QuotaSummary, RecycleItem, ResourceGovernance, ShareLink, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
-import type { QuotaMetricKey, QuotaOverview, QuotaPlanStatistics, QuotaSpaceHistory } from './quota/types'
+import type { PlatformQuotaLimits, PlatformQuotaPreview, QuotaMetricKey, QuotaOverview, QuotaPlanStatistics, QuotaSpaceHistory } from './quota/types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -122,6 +122,9 @@ export const api = {
   quotaOperations:(filters:{days?:number;metric?:QuotaMetricKey;kind?:string;plan_id?:string;health?:string}={})=>request<QuotaOverview>(`/api/admin/quotas/overview?${new URLSearchParams(Object.entries(filters).filter(([,value])=>value!==''&&value!==undefined).map(([key,value])=>[key,String(value)])).toString()}`),
   quotaPlanStatistics:()=>request<QuotaPlanStatistics[]>('/api/admin/quotas/plans'),
   collectQuotaUsage:()=>request<{spaces:number;snapshots:number;collected_at:string}>('/api/admin/quotas/collect',{method:'POST'}),
+  platformQuotaLimits:()=>request<PlatformQuotaLimits>('/api/admin/quotas/platform-limits'),
+  previewPlatformQuotaLimits:(maximums:Record<string,number>,allow_unlimited:Record<string,boolean>)=>request<PlatformQuotaPreview>('/api/admin/quotas/platform-limits/preview',{method:'POST',body:JSON.stringify({maximums,allow_unlimited})}),
+  updatePlatformQuotaLimits:(maximums:Record<string,number>,allow_unlimited:Record<string,boolean>,confirm_impact=false)=>request<PlatformQuotaLimits>('/api/admin/quotas/platform-limits',{method:'PUT',body:JSON.stringify({maximums,allow_unlimited,confirm_impact})}),
   quotaSpaceHistory:(id:string,days=90)=>request<QuotaSpaceHistory>(`/api/admin/quotas/spaces/${id}/history?days=${days}`),
   auditLogs: (filters: { query?: string; action?: string; target_type?: string; organization_id?: string; source?: string; outcome?: string; page?: number; page_size?: number } = {}) => request<PageResult<AuditLog>>(`/api/admin/audit-logs?${new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))).toString()}`),
   recycleBin: () => request<RecycleItem[]>('/api/admin/recycle-bin'),

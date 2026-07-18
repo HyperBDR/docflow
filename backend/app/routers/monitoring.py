@@ -40,6 +40,24 @@ METRICS = [
     MetricDefinition(key="ai.failure_rate_10m", unit="percent", recommended_operator="gte", recommended_threshold=30),
     MetricDefinition(key="service.postgres.available", unit="boolean", recommended_operator="lt", recommended_threshold=1),
     MetricDefinition(key="service.redis.available", unit="boolean", recommended_operator="lt", recommended_threshold=1),
+    MetricDefinition(key="quota.spaces.warning_count", unit="spaces", recommended_operator="gte", recommended_threshold=1),
+    MetricDefinition(key="quota.spaces.exceeded_count", unit="spaces", recommended_operator="gte", recommended_threshold=1),
+    MetricDefinition(key="quota.spaces.max_utilization_percent", unit="percent", recommended_operator="gte", recommended_threshold=90),
+    MetricDefinition(key="quota.storage.total_used_bytes", unit="bytes", recommended_operator="gte", recommended_threshold=107374182400),
+    MetricDefinition(key="quota.storage.growth_24h_percent", unit="percent", recommended_operator="gte", recommended_threshold=20),
+    MetricDefinition(key="quota.storage.capacity_percent", unit="percent", recommended_operator="gte", recommended_threshold=85),
+    MetricDefinition(key="quota.ai_tokens.monthly_used", unit="tokens", recommended_operator="gte", recommended_threshold=10000000),
+    MetricDefinition(key="quota.download_bytes.monthly_used", unit="bytes", recommended_operator="gte", recommended_threshold=107374182400),
+    MetricDefinition(key="quota.exports.monthly_used", unit="exports", recommended_operator="gte", recommended_threshold=10000),
+    MetricDefinition(key="quota.video_minutes.monthly_used", unit="minutes", recommended_operator="gte", recommended_threshold=10000),
+    MetricDefinition(key="quota.spaces.total", unit="spaces", recommended_operator="gte", recommended_threshold=10000),
+    MetricDefinition(key="quota.spaces.growth_30d_percent", unit="percent", recommended_operator="gte", recommended_threshold=30),
+    MetricDefinition(key="quota.plans.total", unit="plans", recommended_operator="gte", recommended_threshold=100),
+    MetricDefinition(key="quota.plans.largest_space_count", unit="spaces", recommended_operator="gte", recommended_threshold=1000),
+    MetricDefinition(key="quota.plans.max_growth_30d_percent", unit="percent", recommended_operator="gte", recommended_threshold=30),
+    *[MetricDefinition(key=f"quota.{key}.max_utilization_percent", unit="percent", recommended_operator="gte", recommended_threshold=90) for key in [
+        "storage_bytes", "resources", "max_steps_per_resource", "members", "active_shares", "monthly_ai_tokens", "monthly_exports", "monthly_video_minutes", "monthly_public_views", "monthly_download_bytes",
+    ]],
 ]
 METRIC_KEYS = {item.key for item in METRICS}
 DETAIL_SNAPSHOTS = {

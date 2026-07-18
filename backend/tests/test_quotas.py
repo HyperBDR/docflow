@@ -56,3 +56,30 @@ def test_quota_operations_snapshots_and_personal_spaces(authenticated):
     history=authenticated.get(f'/api/admin/quotas/spaces/{organization_id}/history')
     assert history.status_code==200
     assert history.json()['points']
+
+def test_platform_quota_limits_preview_confirmation_and_validation(authenticated):
+    initial=authenticated.get('/api/admin/quotas/platform-limits')
+    assert initial.status_code==200,initial.text
+    value=initial.json();assert len(value['metrics'])==10
+    assert value['maximums']['resources']>value['metrics'][1]['default_plan_value']
+
+    proposal={'maximums':{**value['maximums'],'resources':1},'allow_unlimited':value['allow_unlimited']}
+    preview=authenticated.post('/api/admin/quotas/platform-limits/preview',json=proposal)
+    assert preview.status_code==200,preview.text
+    assert preview.json()['affected_plan_count']>=1,preview.text
+    assert preview.json()['affected_space_count']>=1
+
+    blocked=authenticated.put('/api/admin/quotas/platform-limits',json=proposal)
+    assert blocked.status_code==409
+    assert blocked.json()['code']=='quota.platform_limit_impact'
+    saved=authenticated.put('/api/admin/quotas/platform-limits',json={**proposal,'confirm_impact':True})
+    assert saved.status_code==200,saved.text
+    assert saved.json()['maximums']['resources']==1
+
+    # Explicit confirmation grandfathers existing values; it never truncates them.
+    assert next(item for item in authenticated.get('/api/workspace/quotas').json()['items'] if item['key']=='resources')['limit']==100
+    invalid=authenticated.post('/api/admin/quota-plans',json={'name':'Too large','limits':{'resources':2}})
+    assert invalid.status_code==422
+    assert invalid.json()['code']=='quota.platform_limit_exceeded'
+    valid=authenticated.post('/api/admin/quota-plans',json={'name':'Within boundary','limits':{'resources':1}})
+    assert valid.status_code==201,valid.text
