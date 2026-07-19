@@ -96,35 +96,34 @@ export default function OrganizationQuotaPanel({ id }: { id: string }) {
   }
 
   return <div className="organization-quota-panel">
-    <header>
+    <header className="organization-quota-heading">
       <div><h3>{t('admin:spaces.quotaTitle')}</h3><p>{t('admin:spaces.quotaHint')}</p></div>
       <label className="organization-quota-plan-select"><span>{t('admin:spaces.proposedPlan')}</span><select value={plan} onChange={event => { setPlan(event.target.value); setError('') }}>{plans.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     </header>
     {error && <div className="error organization-quota-error"><Icon name="warning" />{error}</div>}
     {value && selectedPlan && <>
       <section className="organization-quota-plan-preview" aria-label={t('admin:spaces.planChangeTitle')}>
-        <article><small>{t('admin:spaces.currentPlan')}</small><strong>{value.plan.name}</strong><span>{t('admin:spaces.currentlyEffective')}</span></article>
+        <div><small>{t('admin:spaces.currentPlan')}</small><strong>{value.plan.name}</strong></div>
         <Icon name="chevronRight" />
-        <article className={plan !== savedPlanId ? 'changed' : ''}><small>{t('admin:spaces.proposedPlan')}</small><strong>{selectedPlan.name}</strong><span>{plan !== savedPlanId ? t('admin:spaces.pendingSave') : t('admin:spaces.noPlanChange')}</span></article>
+        <div className={plan !== savedPlanId ? 'changed' : ''}><small>{t('admin:spaces.proposedPlan')}</small><strong>{selectedPlan.name}</strong></div>
+        <span className={plan !== savedPlanId ? 'changed' : ''}>{t(plan !== savedPlanId ? 'admin:spaces.pendingSave' : 'admin:spaces.currentlyEffective')}</span>
       </section>
-      <fieldset className="organization-quota-override-choice">
-        <legend>{t('admin:spaces.overrideStrategy')}</legend>
-        <label className={overrideMode === 'keep' ? 'active' : ''}><input type="radio" name={`quota-override-mode-${id}`} checked={overrideMode === 'keep'} onChange={() => setOverrideMode('keep')} /><span><strong>{t('admin:spaces.keepOverrides')}</strong><small>{t('admin:spaces.keepOverridesHint')}</small></span></label>
-        <label className={overrideMode === 'clear' ? 'active' : ''}><input type="radio" name={`quota-override-mode-${id}`} checked={overrideMode === 'clear'} onChange={() => setOverrideMode('clear')} /><span><strong>{t('admin:spaces.clearOverrides')}</strong><small>{t('admin:spaces.clearOverridesHint')}</small></span></label>
-      </fieldset>
+      <section className="organization-quota-override-choice"><div><strong>{t('admin:spaces.overrideStrategy')}</strong><div role="radiogroup"><label className={overrideMode === 'keep' ? 'active' : ''}><input type="radio" name={`quota-override-mode-${id}`} checked={overrideMode === 'keep'} onChange={() => setOverrideMode('keep')} /><span>{t('admin:spaces.keepOverrides')}</span></label><label className={overrideMode === 'clear' ? 'active' : ''}><input type="radio" name={`quota-override-mode-${id}`} checked={overrideMode === 'clear'} onChange={() => setOverrideMode('clear')} /><span>{t('admin:spaces.clearOverrides')}</span></label></div></div><p>{t(overrideMode === 'keep' ? 'admin:spaces.keepOverridesHint' : 'admin:spaces.clearOverridesHint')}</p></section>
     </>}
-    <div className="organization-quota-grid">{QUOTA_METRICS.map(metric => {
+    {!value || !selectedPlan ? <div className="organization-quota-loading"><span className="action-spinner" />{t('common:status.loading')}</div> : <section className="organization-quota-table"><header><span>{t('admin:spaces.metricColumn')}</span><span>{t('admin:spaces.usedColumn')}</span><span>{t('admin:spaces.currentLimitColumn')}</span><span>{t('admin:spaces.proposedLimitColumn')}</span><span>{t('admin:spaces.overrideColumn')}</span></header><div>{QUOTA_METRICS.map(metric => {
       const current = value?.items.find(item => item.key === metric.key)
       const planLimit = selectedPlan?.limits[metric.key]
       const overridden = overrideMode === 'keep' && hasOverride(overrides, metric.key)
       const proposed = overridden ? overrides[metric.key] : planLimit
       const changed = current?.limit !== proposed
-      return <label key={metric.key} className={changed ? 'quota-value-changed' : ''}>
-        <span className={`quota-metric-icon ${metric.tone}`}><Icon name={metric.icon} /></span>
-        <span><strong>{t(`platformSettings:quota.metrics.${metric.key}`)}</strong><small className="quota-used-value">{t('admin:spaces.usedValue', { value: current ? formatQuotaValue(metric.key, current.used, locale) : '—' })}</small><small className="quota-limit-preview"><span>{t('admin:spaces.currentLimit')} <b>{current ? formatQuotaValue(metric.key, current.limit, locale) : '—'}</b></span><Icon name="chevronRight" size={12} /><span>{t('admin:spaces.proposedLimit')} <b>{formatQuotaValue(metric.key, proposed, locale)}</b></span></small><em>{t(overridden ? 'admin:spaces.overrideValue' : 'admin:spaces.planValue')}</em></span>
-        <QuotaLimitInput metric={metric.key} value={overrideMode === 'keep' ? overrides[metric.key] : undefined} disabled={overrideMode === 'clear'} placeholder={t('admin:spaces.usePlanValue', { value: formatQuotaValue(metric.key, planLimit, locale) })} onChange={next => updateOverride(metric.key, next)} />
-      </label>
-    })}</div>
+      return <article key={metric.key} className={changed ? 'quota-value-changed' : ''}>
+        <div className="quota-table-metric"><span className={`quota-metric-icon ${metric.tone}`}><Icon name={metric.icon} /></span><strong>{t(`platformSettings:quota.metrics.${metric.key}`)}</strong></div>
+        <div className="quota-table-value"><small>{t('admin:spaces.usedColumn')}</small><b>{current ? formatQuotaValue(metric.key, current.used, locale) : '—'}</b></div>
+        <div className="quota-table-value"><small>{t('admin:spaces.currentLimitColumn')}</small><b>{current ? formatQuotaValue(metric.key, current.limit, locale) : '—'}</b></div>
+        <div className="quota-table-value proposed"><small>{t('admin:spaces.proposedLimitColumn')}</small><b>{formatQuotaValue(metric.key, proposed, locale)}</b><em>{t(overridden ? 'admin:spaces.overrideValue' : 'admin:spaces.planValue')}</em></div>
+        <label className="quota-table-override"><small>{t('admin:spaces.overrideColumn')}</small><QuotaLimitInput metric={metric.key} value={overrideMode === 'keep' ? overrides[metric.key] : undefined} disabled={overrideMode === 'clear'} placeholder={t('admin:spaces.usePlanValue', { value: formatQuotaValue(metric.key, planLimit, locale) })} onChange={next => updateOverride(metric.key, next)} /></label>
+      </article>
+    })}</div></section>}
     <footer><button className="secondary" disabled={busy || !dirty} onClick={reset}>{t('admin:spaces.resetDraft')}</button><button className="primary icon-button" disabled={busy || !dirty || !selectedPlan} onClick={save}>{busy ? <span className="action-spinner" /> : <Icon name="check" />}{t('common:actions.save')}</button></footer>
   </div>
 }
