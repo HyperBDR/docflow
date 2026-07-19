@@ -1,6 +1,6 @@
 import { browserLocale, tr, type MessageKey } from './locale'
 import { configuredWebUrl } from './config'
-import type { Credentials, Locale, RecordingMode, RecordingTarget } from './types'
+import type { Credentials, Locale, RecordingMode, RecordingPreferences, RecordingTarget } from './types'
 
 type Space = { id: string; name: string; kind: 'personal' | 'team' }
 type ExtensionConfig = { ai_enabled: boolean; default_content_locale: Locale }
@@ -18,6 +18,7 @@ let spaces: Space[] = []
 let pendingTarget: RecordingTarget | undefined
 let activeOrganizationId = ''
 let extensionConfig: ExtensionConfig = { ai_enabled: false, default_content_locale: locale }
+let recordingPreferences: RecordingPreferences = {}
 
 function applyTranslations() {
   document.documentElement.lang = locale
@@ -88,12 +89,13 @@ async function refresh() {
       authorizedFetch(auth, '/api/organizations'),
       authorizedFetch(auth, '/api/auth/me'),
       authorizedFetch(auth, '/api/extension/config'),
-      chrome.storage.local.get(['activeOrganizationId', 'pendingTarget']),
+      chrome.storage.local.get(['activeOrganizationId', 'pendingTarget', 'recordingPreferences']),
     ])
     spaces = await spaceResponse.json()
     const me = await meResponse.json()
     extensionConfig = await configResponse.json()
     pendingTarget = stored.pendingTarget as RecordingTarget | undefined
+    recordingPreferences = (stored.recordingPreferences as RecordingPreferences | undefined) || {}
     if (pendingTarget && !spaces.some(item => item.id === pendingTarget?.organizationId)) {
       pendingTarget = undefined
       await chrome.storage.local.remove('pendingTarget')
@@ -127,9 +129,11 @@ async function openRecordingSetup(mode: RecordingMode, button: HTMLButtonElement
     const result = await chrome.runtime.sendMessage({
       type: 'OPEN_SETUP', tabId: tab?.id, demoId: pendingTarget?.demoId,
       aiAvailable: extensionConfig.ai_enabled, defaultMode: mode,
-      defaultAI: extensionConfig.ai_enabled, spaces, organizationId: activeOrganizationId,
+      defaultAI: recordingPreferences.aiEnabled ?? extensionConfig.ai_enabled,
+      spaces, organizationId: activeOrganizationId,
       lockOrganization: Boolean(pendingTarget), locale,
-      contentLocale: pendingTarget?.contentLocale || extensionConfig.default_content_locale || locale,
+      contentLocale: pendingTarget?.contentLocale || recordingPreferences.contentLocale || extensionConfig.default_content_locale || locale,
+      aiContext: pendingTarget?.aiContext || '',
     })
     if (result?.error) throw new Error(result.error)
     message.textContent = tr(locale, 'setupOpened')

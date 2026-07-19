@@ -144,6 +144,7 @@ def demo_out(db: Session, demo: Demo, include_steps: bool = True) -> DemoOut:
         organization_id=demo.organization_id,
         title=demo.title,
         description=demo.description,
+        ai_context=demo.ai_context or "",
         content_locale=demo.content_locale or "zh-CN",
         status=demo.status.value,
         created_at=demo.created_at,

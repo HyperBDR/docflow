@@ -254,6 +254,7 @@ class Demo(Base):
     category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), default="未命名演示")
     description: Mapped[str] = mapped_column(Text, default="")
+    ai_context: Mapped[str] = mapped_column(Text, default="")
     content_locale: Mapped[str] = mapped_column(String(10), default="zh-CN")
     theme: Mapped[dict] = mapped_column(JSON, default=dict)
     navigation: Mapped[dict] = mapped_column(JSON, default=dict)

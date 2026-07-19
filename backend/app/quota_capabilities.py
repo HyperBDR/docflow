@@ -88,6 +88,7 @@ def quota_capabilities(db: Session, organization_id: str, demo: Demo | None = No
     return {
         "organization_id": organization_id,
         "generated_at": datetime.now(timezone.utc),
+        "demo_step_count": step_count,
         "plan": summary["plan"],
         "period": summary["period"],
         "items": summary["items"],

@@ -2,7 +2,8 @@ import { captureDom, captureWarnings, normalized, pageContext, passwordRects, ta
 import { browserLocale, tr } from './locale'
 import type { CapturedSnapshot, Locale, RecordingMode } from './types'
 import { isConfiguredWebPage } from './config'
-import { quotaAllowed, quotaMessage, type WorkspaceCapabilities } from './quota'
+import { quotaAllowed, quotaEndedText, quotaMessage, type WorkspaceCapabilities, type WorkspaceQuotaSummary } from './quota'
+import { aiSettingsStyles, aiSettingsView, aiText } from './ai-settings'
 
 type RecorderState = {
   active?: boolean
@@ -30,6 +31,7 @@ let currentSnapshot: CapturedSnapshot | null = null
 let refreshTimer: number | undefined
 let hudHost: HTMLDivElement | null = null
 let setupHost: HTMLDivElement | null = null
+let quotaEndHost: HTMLDivElement | null = null
 let setupCleanup: (() => void) | null = null
 let highlight: HTMLDivElement | null = null
 let statusText: HTMLSpanElement | null = null
@@ -74,6 +76,23 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 }
 
+function showQuotaEnded(message: { message?: string; editorUrl?: string }) {
+  if (window.top !== window) return
+  quotaEndHost?.remove()
+  const copy = quotaEndedText(locale)
+  const host = document.createElement('div')
+  host.className = 'docflow-recorder-ui'
+  const shadow = host.attachShadow({ mode: 'closed' })
+  shadow.innerHTML = `<style>
+    :host{all:initial;position:fixed;inset:0;z-index:2147483647;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2937}
+    *{box-sizing:border-box}.backdrop{position:fixed;inset:0;display:grid;place-items:center;padding:24px;background:#0b1020a8;backdrop-filter:blur(5px)}.dialog{width:min(480px,calc(100vw - 32px));padding:27px;border:1px solid #ffffff30;border-radius:18px;background:#fff;box-shadow:0 28px 80px #0007}.icon{width:48px;height:48px;display:grid;place-items:center;margin-bottom:16px;border-radius:14px;color:#a66008;background:#ffedc9}.icon svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}h2{margin:0 0 8px;font-size:20px;line-height:1.3}p{margin:0;color:#765016;font-size:12px;font-weight:700;line-height:1.55;white-space:pre-line}.saved{margin-top:13px;padding:11px 12px;border-radius:10px;color:#687386;background:#f5f6f8;font-size:11px;line-height:1.5}.actions{display:flex;justify-content:flex-end;gap:9px;margin-top:22px}.actions button,.actions a{min-width:100px;padding:10px 15px;border:1px solid #d9dee7;border-radius:9px;color:#38445a;background:#fff;font:650 11px inherit;text-align:center;text-decoration:none;cursor:pointer}.actions a{border-color:#635bff;color:#fff;background:#635bff}
+  </style><div class="backdrop"><section class="dialog" role="alertdialog" aria-modal="true"><span class="icon"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17h.01"/></svg></span><h2>${copy.title}</h2><p>${escapeHtml(String(message.message || ''))}</p><div class="saved">${copy.saved}</div><div class="actions"><button id="quota-close">${copy.close}</button><a href="${escapeHtml(String(message.editorUrl || '#'))}" target="_blank" rel="noopener noreferrer">${copy.open}</a></div></section></div>`
+  quotaEndHost = host
+  shadow.querySelector('#quota-close')?.addEventListener('click', () => { host.remove(); if (quotaEndHost === host) quotaEndHost = null })
+  shadow.querySelector('a')?.addEventListener('click', () => { host.remove(); if (quotaEndHost === host) quotaEndHost = null })
+  ;(document.documentElement || document.body).appendChild(host)
+}
+
 function selectableTarget(raw: Element | null): HTMLElement | null {
   if (!raw || raw.closest('.docflow-recorder-ui')) return null
   const semantic = raw.closest<HTMLElement>('button,a,input,select,textarea,label,[role="button"],[role="link"],[onclick],[tabindex]')
@@ -99,6 +118,7 @@ function showRecordingSetup(message: {
   }
   locale?: Locale
   contentLocale?: Locale
+  aiContext?: string
 }) {
   if (window.top !== window || active) return
   setupCleanup?.()
@@ -111,11 +131,17 @@ function showRecordingSetup(message: {
   let selectedMode: RecordingMode = message.defaultMode || 'html'
   let selectedAI = Boolean(message.aiAvailable && message.defaultAI)
   let capabilities: WorkspaceCapabilities | null = null
+  let quotaSummary: WorkspaceQuotaSummary | null = null
+  let quotaSummaryError = ''
   let quotaLoading = true
   let quotaError = ''
   let quotaRequest = 0
   let tutorialIndex = 0
-  let setupView: 'config' | 'tutorial' = 'config'
+  let setupView: 'config' | 'ai' | 'tutorial' = 'config'
+  let aiContext = String(message.aiContext || '').slice(0, 500)
+  let aiDraftEnabled = selectedAI
+  let aiDraftContext = aiContext
+  let aiDraftLocale = contentLocale
   const availableSpaces = [...(message.spaces || [])].sort((left, right) => Number(left.kind === 'personal') - Number(right.kind === 'personal'))
   let selectedOrganizationId = availableSpaces.some(space => space.id === message.organizationId) ? message.organizationId! : availableSpaces[0]?.id || ''
   let diagnostics = message.diagnostics
@@ -139,19 +165,50 @@ function showRecordingSetup(message: {
     h2{margin:0 0 7px;font-size:23px;line-height:1.25}p{margin:0;color:#6b768a;font-size:13px;line-height:1.55}.body{display:grid;gap:17px;padding:4px 32px 25px}
     .diagnostics{width:calc(100% - 82px);display:grid;gap:8px;margin:-1px auto 22px}.diagnostic{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px 12px;border:1px solid #f0d58a;border-radius:0 0 12px 12px;background:linear-gradient(180deg,#fffdf7,#fff8e9);box-shadow:0 7px 18px #8e650e12}.diagnostic+ .diagnostic{border-radius:12px}.diagnostic>span{width:36px;height:36px;display:grid;place-items:center;border-radius:9px;color:#b7791f;background:#fff0c7}.diagnostic>span svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.diagnostic div{min-width:0}.diagnostic strong{display:block;margin-bottom:2px;color:#7a5315;font-size:12px}.diagnostic p{color:#906d34;font-size:10px;line-height:1.4}.diagnostic button{min-width:92px;padding:8px 10px;border:1px solid #e7c56b;border-radius:8px;color:#855d17;background:#fff;font:700 10px inherit;cursor:pointer;white-space:nowrap}.diagnostic button:hover{background:#fff5d9}.diagnostic button:disabled{opacity:.55;cursor:progress}
     .modes{display:grid;grid-template-columns:1fr 1fr;gap:16px}.mode{position:relative;min-height:196px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px 22px;border:1px solid #dfe3eb;border-radius:17px;background:#fff;text-align:center;cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .2s,background .2s}.mode:hover{border-color:#c9c5ff;transform:translateY(-1px)}.mode.active{border-color:#7468f4;box-shadow:0 12px 30px #635bff22,0 0 0 3px #635bff16;background:linear-gradient(145deg,#fff 0%,#f8f6ff 46%,#ece9ff 100%)}.mode svg,.step-icon svg,.ai-icon svg,.space-icon svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mode>span:first-child{width:62px;height:62px;display:grid;place-items:center;border-radius:18px;color:#554ae8;background:linear-gradient(145deg,#eeedff,#dfdcff);box-shadow:0 8px 20px #635bff20}.mode>span:first-child svg{width:31px;height:31px}.mode>span:nth-child(2){display:block}.mode strong{display:block;margin-bottom:6px;font-size:15px;text-align:center}.mode small{display:block;max-width:260px;color:#748095;font-size:12px;line-height:1.5;text-align:center}.badge{position:absolute;right:13px;top:12px;padding:4px 8px;border-radius:10px;color:#4f46e5;background:#e8e6ff;font-size:9px;font-style:normal;font-weight:750}
-    .config-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:16px;padding-top:2px}.space-field{min-width:0;margin:0;padding:0 10px 9px;border:1px solid #d9dee8;border-radius:11px}.space-field legend{margin-left:auto;padding:0 7px;color:#69758a;background:#fff;font-size:11px;font-weight:750}.space-dropdown{position:relative}.space-trigger{width:100%;height:42px;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:9px;padding:4px 1px;border:0;color:#344054;background:#fff;font:600 12px inherit;text-align:left;cursor:pointer}.space-trigger:disabled{cursor:not-allowed;opacity:.7}.space-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#5c52df;background:#eeedff}.space-icon svg{width:17px;height:17px}.space-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chevron{color:#8a94a6;font-size:11px}.space-menu{position:absolute;z-index:4;left:-10px;right:-10px;bottom:calc(100% + 10px);max-height:210px;overflow:auto;padding:6px;border:1px solid #dfe3eb;border-radius:11px;background:#fff;box-shadow:0 14px 35px #1820332e}.space-menu[hidden]{display:none}.space-option{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px;padding:7px;border:0;border-radius:8px;color:#344054;background:transparent;text-align:left;cursor:pointer}.space-option:hover,.space-option.active{background:#f3f1ff}.space-option.group-start{margin-top:5px;padding-top:10px;border-top:1px solid #edf0f4;border-radius:0 0 8px 8px}.space-option div{min-width:0}.space-option strong,.space-option small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.space-option strong{font-size:11px}.space-option small{margin-top:2px;color:#8a94a6;font-size:9px}
-    .ai-compact{height:44px;display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #e3e6ed;border-radius:10px;background:#f8f9fc}.ai-compact>span{display:flex;align-items:center;gap:7px;color:#465267;font-size:11px;font-weight:700;white-space:nowrap}.ai-icon{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;color:#7357df;background:#eee9ff}.ai-icon svg{width:16px;height:16px}.switch{position:relative;width:42px;height:24px}.switch input{position:absolute;opacity:0}.switch span{position:absolute;inset:0;border-radius:20px;background:#cbd2dd;transition:.2s}.switch span:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0003;transition:.2s}.switch input:checked+span{background:#635bff}.switch input:checked+span:after{transform:translateX(18px)}.switch input:disabled+span{opacity:.45}
+    .config-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:stretch;gap:12px;padding-top:2px}.space-field{min-width:0;margin:0;padding:0 10px 9px;border:1px solid #d9dee8;border-radius:11px}.space-field legend{margin-left:5px;padding:0 7px;color:#69758a;background:#fff;font-size:11px;font-weight:750}.space-dropdown{position:relative}.space-trigger{width:100%;height:100%;min-height:49px;display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:9px;padding:4px 1px;border:0;color:#344054;background:#fff;font:600 12px inherit;text-align:left;cursor:pointer}.space-trigger:disabled{cursor:not-allowed;opacity:.7}.space-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;color:#5c52df;background:#eeedff}.space-icon svg{width:18px;height:18px}.space-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chevron{color:#8a94a6;font-size:11px}.space-menu{position:absolute;z-index:4;left:-10px;right:-10px;bottom:calc(100% + 10px);max-height:210px;overflow:auto;padding:6px;border:1px solid #dfe3eb;border-radius:11px;background:#fff;box-shadow:0 14px 35px #1820332e}.space-menu[hidden]{display:none}.space-option{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px;padding:7px;border:0;border-radius:8px;color:#344054;background:transparent;text-align:left;cursor:pointer}.space-option:hover,.space-option.active{background:#f3f1ff}.space-option.group-start{margin-top:5px;padding-top:10px;border-top:1px solid #edf0f4;border-radius:0 0 8px 8px}.space-option div{min-width:0}.space-option strong,.space-option small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.space-option strong{font-size:11px}.space-option small{margin-top:2px;color:#8a94a6;font-size:9px}
+    .ai-setting-button{width:100%;min-width:0;display:grid;grid-template-columns:34px minmax(0,1fr) 20px;align-items:center;gap:9px;padding:9px 10px;border:1px solid #dedbf9;border-radius:11px;color:#303a4d;background:linear-gradient(135deg,#fbfaff,#f6f4ff);font-family:inherit;text-align:left;cursor:pointer;transition:border-color .18s,box-shadow .18s,transform .18s}.ai-setting-button:hover{border-color:#aaa3f3;box-shadow:0 7px 18px #635bff12;transform:translateY(-1px)}.ai-setting-button.blocked{border-color:#e4a642;background:linear-gradient(135deg,#fffdf8,#fff6e6)}.ai-setting-button.loading{border-color:#dfe3eb;background:#fafbfc}.ai-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;color:#6658e8;background:#eae7ff}.ai-icon svg{width:18px;height:18px}.ai-setting-button.blocked .ai-icon{color:#a96913;background:#ffedc9}.ai-button-copy{min-width:0}.ai-button-copy strong,.ai-button-copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-button-copy strong{font-size:11.5px}.ai-button-copy small{margin-top:3px;color:#748095;font-size:9.5px}.ai-setting-button.blocked .ai-button-copy small{color:#925c0c;font-weight:750}.ai-button-chevron{color:#8b94a5;font-size:18px;text-align:right}
     .quota-note{display:flex;align-items:flex-start;gap:8px;margin-top:-7px;padding:10px 12px;border:1px solid #ead9a3;border-radius:10px;color:#72581e;background:#fffaf0;font-size:11px;font-weight:650;line-height:1.45;white-space:pre-line}.quota-note i{width:7px;height:7px;flex:0 0 auto;margin-top:4px;border-radius:50%;background:#d89a24;box-shadow:0 0 0 4px #d89a2418}
     .actions{display:flex;justify-content:flex-end;gap:9px;padding:16px 32px 22px;border-top:1px solid #edf0f4}.btn{min-width:106px;padding:11px 16px;border:1px solid #d8dde7;border-radius:10px;background:#fff;color:#38445a;font:600 12px inherit;cursor:pointer}.btn.primary{border-color:#635bff;background:#635bff;color:#fff}.btn:hover{filter:brightness(.98)}
     .tutorial{padding:6px 26px 24px}.progress{display:flex;gap:6px;margin:0 0 19px}.progress i{height:4px;flex:1;border-radius:4px;background:#e5e7ec}.progress i.done{background:#635bff}.step-card{min-height:205px;display:grid;place-items:center;align-content:center;gap:14px;padding:28px;border:1px solid #e2e5ec;border-radius:16px;text-align:center;background:linear-gradient(145deg,#fafaff,#f5f6fa);animation:enter .25s ease}.step-icon{width:60px;height:60px;display:grid;place-items:center;border-radius:18px;color:#5b50e5;background:#eae8ff;box-shadow:0 8px 24px #635bff20}.step-icon svg{width:29px;height:29px}.step-card h3{margin:0;font-size:17px}.step-card p{max-width:450px}.step-number{color:#8a94a6;font-size:10px;font-weight:700;letter-spacing:.08em}@keyframes enter{from{opacity:.2;transform:translateY(5px)}}
-    @media(max-width:620px){.modes{grid-template-columns:1fr}.mode{min-height:178px}.config-row{grid-template-columns:1fr}.ai-compact{justify-content:space-between}.diagnostics{width:calc(100% - 36px)}.diagnostic{grid-template-columns:32px 1fr}.diagnostic button{grid-column:2;width:max-content}.modal{border-radius:15px}.head,.body,.tutorial{padding-left:18px;padding-right:18px}.actions{padding-left:18px;padding-right:18px}}
+    @media(max-width:620px){.modes,.config-row{grid-template-columns:1fr}.mode{min-height:178px}.diagnostics{width:calc(100% - 36px)}.diagnostic{grid-template-columns:32px 1fr}.diagnostic button{grid-column:2;width:max-content}.modal{border-radius:15px}.head,.body,.tutorial{padding-left:18px;padding-right:18px}.actions{padding-left:18px;padding-right:18px}}
+    ${aiSettingsStyles}
   </style><div class="backdrop"><section class="modal"><div id="view"></div></section></div>`
   const view = shadow.querySelector<HTMLDivElement>('#view')!
 
   const startRecording = async () => {
+    const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, organizationId: selectedOrganizationId, mode: selectedMode, aiEnabled: selectedAI, aiContext, locale, contentLocale })
+    if (result?.error) { window.alert(result.error); return }
     closeSetup()
-    const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, organizationId: selectedOrganizationId, mode: selectedMode, aiEnabled: selectedAI, locale, contentLocale })
-    if (result?.error) { window.alert(result.error); showRecordingSetup(message) }
+  }
+
+  const renderAISettings = () => {
+    setupView = 'ai'
+    const aiAllowed = !quotaLoading && !quotaError && Boolean(message.aiAvailable) && quotaAllowed(capabilities, 'use_ai')
+    if (!quotaLoading && !aiAllowed) aiDraftEnabled = false
+    const unavailableReason = !message.aiAvailable ? tr(locale, 'aiUnavailable') : quotaLoading ? tr(locale, 'quotaChecking') : quotaError || (!quotaAllowed(capabilities, 'use_ai') ? quotaMessage(capabilities, 'use_ai', locale) : quotaSummaryError)
+    view.innerHTML = aiSettingsView({
+      locale, enabled: aiDraftEnabled, allowed: aiAllowed, loading: quotaLoading,
+      context: aiDraftContext, contentLocale: aiDraftLocale, quota: quotaSummary, unavailableReason,
+    })
+    const close = () => renderConfig()
+    view.querySelector('#ai-config-close')?.addEventListener('click', close)
+    view.querySelector('#ai-config-cancel')?.addEventListener('click', close)
+    view.querySelector<HTMLInputElement>('#ai-config-toggle')?.addEventListener('change', event => { aiDraftEnabled = (event.currentTarget as HTMLInputElement).checked })
+    view.querySelector<HTMLTextAreaElement>('#ai-context')?.addEventListener('input', event => {
+      aiDraftContext = (event.currentTarget as HTMLTextAreaElement).value.slice(0, 500)
+      const count = view.querySelector<HTMLElement>('#ai-context-count')
+      if (count) count.textContent = `${aiDraftContext.length}/500`
+    })
+    view.querySelector<HTMLSelectElement>('#ai-language')?.addEventListener('change', event => { aiDraftLocale = (event.currentTarget as HTMLSelectElement).value as Locale })
+    view.querySelector<HTMLButtonElement>('#ai-config-save')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement
+      button.disabled = true
+      selectedAI = aiAllowed && aiDraftEnabled
+      aiContext = aiDraftContext.trim()
+      contentLocale = aiDraftLocale
+      await chrome.runtime.sendMessage({ type: 'SAVE_RECORDING_PREFERENCES', aiEnabled: selectedAI, contentLocale })
+      renderConfig()
+    })
   }
 
   const renderConfig = () => {
@@ -159,9 +216,14 @@ function showRecordingSetup(message: {
     const primaryAction = message.demoId ? 'record_step' : 'create_resource'
     const recordAllowed = !quotaLoading && !quotaError && quotaAllowed(capabilities, primaryAction) && quotaAllowed(capabilities, 'record_step')
     const aiAllowed = !quotaLoading && !quotaError && Boolean(message.aiAvailable) && quotaAllowed(capabilities, 'use_ai')
-    if (!aiAllowed) selectedAI = false
-    const recordQuotaMessage = quotaLoading ? tr(locale, 'quotaChecking') : quotaError || (!quotaAllowed(capabilities, primaryAction) ? quotaMessage(capabilities, primaryAction, locale) : !quotaAllowed(capabilities, 'record_step') ? quotaMessage(capabilities, 'record_step', locale) : '')
-    const aiQuotaMessage = !message.aiAvailable ? tr(locale, 'aiUnavailable') : quotaLoading ? tr(locale, 'quotaChecking') : quotaError || (!quotaAllowed(capabilities, 'use_ai') ? quotaMessage(capabilities, 'use_ai', locale) : tr(locale, 'aiDescription'))
+    if (!quotaLoading && !aiAllowed) selectedAI = false
+    const recordQuotaMessage = quotaLoading ? tr(locale, 'quotaChecking') : quotaError || [...new Set([
+      !quotaAllowed(capabilities, primaryAction) ? quotaMessage(capabilities, primaryAction, locale) : '',
+      !quotaAllowed(capabilities, 'record_step') ? quotaMessage(capabilities, 'record_step', locale) : '',
+    ].filter(Boolean))].join('\n')
+    const aiState = quotaLoading ? 'loading' : aiAllowed ? 'available' : 'blocked'
+    const aiLanguage = contentLocale === 'zh-CN' ? aiText(locale, 'chinese') : aiText(locale, 'english')
+    const aiButtonStatus = quotaLoading ? aiText(locale, 'checking') : !message.aiAvailable ? tr(locale, 'aiUnavailable') : quotaError || (!aiAllowed ? aiText(locale, 'quotaReached') : selectedAI ? `${aiText(locale, 'enabled')} · ${aiLanguage}` : aiText(locale, 'disabled'))
     const selectedSpace = availableSpaces.find(space => space.id === selectedOrganizationId)
     const spaceOptions = availableSpaces.map((space, index) => `<button class="space-option ${space.id === selectedOrganizationId ? 'active' : ''} ${space.kind === 'personal' && index > 0 && availableSpaces[index - 1].kind !== 'personal' ? 'group-start' : ''}" data-space-id="${escapeHtml(space.id)}"><span class="space-icon">${icon(space.kind === 'team' ? 'team' : 'user')}</span><div><strong>${escapeHtml(space.name)}</strong><small>${tr(locale, space.kind === 'team' ? 'teamSpace' : 'personalSpace')}</small></div></button>`).join('')
     const resizeWarning = Boolean(diagnostics?.width && diagnostics?.height && (Math.abs(diagnostics.width - diagnostics.recommendedWidth) > 48 || Math.abs(diagnostics.height - diagnostics.recommendedHeight) > 48))
@@ -171,7 +233,7 @@ function showRecordingSetup(message: {
       <button class="mode ${selectedMode === 'html' ? 'active' : ''}" data-mode="html"><span>${icon('clone')}</span><span><strong>${tr(locale, 'htmlTitle')}</strong><small>${tr(locale, 'htmlDescription')}</small></span><em class="badge">${tr(locale, 'htmlBadge')}</em></button>
       <button class="mode ${selectedMode === 'screenshot' ? 'active' : ''}" data-mode="screenshot"><span>${icon('image')}</span><span><strong>${tr(locale, 'screenshotDemoTitle')}</strong><small>${tr(locale, 'screenshotDescription')}</small></span></button></div>
       <div class="config-row"><fieldset class="space-field"><legend>${tr(locale, 'saveTo')}</legend><div class="space-dropdown"><button id="space-trigger" class="space-trigger" ${message.lockOrganization ? 'disabled' : ''}><span class="space-icon">${icon(selectedSpace?.kind === 'personal' ? 'user' : 'team')}</span><strong>${escapeHtml(selectedSpace?.name || tr(locale, 'noAvailableSpace'))}</strong><span class="chevron">⌄</span></button><div id="space-menu" class="space-menu" hidden>${spaceOptions}</div></div></fieldset>
-      <div class="ai-compact" title="${escapeHtml(aiQuotaMessage)}"><span><i class="ai-icon">${icon('ai')}</i>${tr(locale, 'enhanceWithAI')}</span><label class="switch"><input id="ai-toggle" type="checkbox" ${selectedAI ? 'checked' : ''} ${aiAllowed ? '' : 'disabled'}><span></span></label></div></div>${recordQuotaMessage ? `<div class="quota-note"><i></i><span>${escapeHtml(recordQuotaMessage)}</span></div>` : ''}</div>
+      <button id="ai-settings-trigger" class="ai-setting-button ${aiState}" type="button"><i class="ai-icon">${icon('ai')}</i><span class="ai-button-copy"><strong>${aiText(locale, 'title')}</strong><small>${escapeHtml(aiButtonStatus)}</small></span><span class="ai-button-chevron">›</span></button></div>${recordQuotaMessage ? `<div class="quota-note"><i></i><span>${escapeHtml(recordQuotaMessage)}</span></div>` : ''}</div>
       <div class="actions"><button class="btn" id="cancel">${tr(locale, 'cancel')}</button><button class="btn primary" id="continue" ${recordAllowed ? '' : 'disabled'} title="${escapeHtml(recordQuotaMessage)}">${tr(locale, 'startSetup')}</button></div>${diagnosticCards ? `<div class="diagnostics">${diagnosticCards}</div>` : ''}`
     view.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => { selectedMode = button.dataset.mode as RecordingMode; renderConfig() }))
     view.querySelector<HTMLButtonElement>('#resize-window')?.addEventListener('click', async event => {
@@ -190,7 +252,13 @@ function showRecordingSetup(message: {
       if (diagnostics) diagnostics = { ...diagnostics, tabCount: result.tabCount, closableTabCount: result.closableTabCount }
       renderConfig()
     })
-    view.querySelector<HTMLInputElement>('#ai-toggle')?.addEventListener('change', event => { selectedAI = (event.currentTarget as HTMLInputElement).checked })
+    view.querySelector('#ai-settings-trigger')?.addEventListener('click', () => {
+      aiDraftEnabled = selectedAI
+      aiDraftContext = aiContext
+      aiDraftLocale = contentLocale
+      renderAISettings()
+      void refreshQuota()
+    })
     const spaceMenu = view.querySelector<HTMLElement>('#space-menu')
     view.querySelector('#space-trigger')?.addEventListener('click', () => { if (spaceMenu) spaceMenu.hidden = !spaceMenu.hidden })
     view.querySelectorAll<HTMLButtonElement>('[data-space-id]').forEach(button => button.addEventListener('click', () => { selectedOrganizationId = button.dataset.spaceId || selectedOrganizationId; void refreshQuota() }))
@@ -206,15 +274,22 @@ function showRecordingSetup(message: {
   const refreshQuota = async () => {
     const requestId = ++quotaRequest
     const requestedOrganizationId = selectedOrganizationId
-    quotaLoading = true; quotaError = ''; capabilities = null
+    quotaLoading = true; quotaError = ''; quotaSummaryError = ''; capabilities = null; quotaSummary = null
     if (setupView === 'config') renderConfig()
-    const result = await chrome.runtime.sendMessage({ type: 'GET_QUOTA_CAPABILITIES', organizationId: requestedOrganizationId, demoId: message.demoId || '' })
+    else if (setupView === 'ai') renderAISettings()
+    const [result, summary] = await Promise.all([
+      chrome.runtime.sendMessage({ type: 'GET_QUOTA_CAPABILITIES', organizationId: requestedOrganizationId, demoId: message.demoId || '' }),
+      chrome.runtime.sendMessage({ type: 'GET_QUOTA_SUMMARY', organizationId: requestedOrganizationId }),
+    ])
     if (requestId !== quotaRequest || requestedOrganizationId !== selectedOrganizationId) return
     quotaLoading = false
     if (result?.error) quotaError = result.error
     else capabilities = result as WorkspaceCapabilities
+    if (summary?.error) quotaSummaryError = summary.error
+    else quotaSummary = summary as WorkspaceQuotaSummary
     if (!message.aiAvailable || !quotaAllowed(capabilities, 'use_ai')) selectedAI = false
     if (setupView === 'config') renderConfig()
+    else if (setupView === 'ai') renderAISettings()
   }
 
   const renderTutorial = () => {
@@ -310,6 +385,7 @@ function ensureHud() {
     capturing = true; phase = 'uploading'; renderHud()
     try {
       const result = await chrome.runtime.sendMessage({ type: 'MANUAL_STEP', data, snapshot })
+      if (result?.quotaEnded) return
       if (result?.error) throw new Error(result.error)
       if (typeof result?.steps === 'number') steps = result.steps
     } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
@@ -440,19 +516,22 @@ async function onPointer(event: PointerEvent) {
     event.stopImmediatePropagation()
   }
   capturing = true; phase = 'uploading'; clearHighlight(); renderHud()
+  let quotaEnded = false
   try {
     const result = await chrome.runtime.sendMessage({ type: 'STEP_EVENT', data, snapshot })
+    if (result?.quotaEnded) { quotaEnded = true; clearBlockedClick(); return }
     if (result?.error) throw new Error(result.error)
     if (typeof result?.steps === 'number') steps = result.steps
   } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
   finally {
     capturing = false; phase = ''; renderHud(); scheduleRefresh()
-    if (freezeClick) replayClick(target)
+    if (freezeClick && !quotaEnded) replayClick(target)
   }
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SHOW_RECORDING_SETUP') { showRecordingSetup(message); sendResponse({ ok: true }); return }
+  if (message.type === 'RECORDING_QUOTA_ENDED') { showQuotaEnded(message); sendResponse({ ok: true }); return }
   if (message.type === 'RECORDING_STATE') applyState(message)
   if (message.type === 'RECORDER_UI_VISIBILITY') {
     let synchronizedSnapshot: CapturedSnapshot | undefined

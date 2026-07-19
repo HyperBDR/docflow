@@ -15,8 +15,10 @@ router=APIRouter(tags=["quotas"])
 def plan_out(p):return {"id":p.id,"name":p.name,"description":p.description,"is_default":p.is_default,"limits":{**DEFAULT_LIMITS,**(p.limits or {})},"created_at":p.created_at,"updated_at":p.updated_at}
 
 @router.get("/api/workspace/quotas")
-def workspace_quotas(db:Session=Depends(get_db),user:User=Depends(current_user)):
-    organization_id=current_organization_id(db,user);result=quota_summary(db,organization_id)
+def workspace_quotas(organization_id:str|None=None,db:Session=Depends(get_db),user:User=Depends(current_user)):
+    organization_id=organization_id or current_organization_id(db,user)
+    require_organization_role(db,user,organization_id,{"owner","admin","editor","viewer"})
+    result=quota_summary(db,organization_id)
     membership=db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id==organization_id,OrganizationMember.user_id==user.id))
     organization=db.get(Organization,organization_id)
     result["can_manage_plan"]=bool(user.role=="admin" or membership and membership.role in {"owner","admin"})

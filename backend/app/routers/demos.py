@@ -47,6 +47,7 @@ def create_demo(payload: DemoCreate, db: Session = Depends(get_db), user: User =
             raise HTTPException(status_code=400, detail="category not found")
     demo = Demo(
         owner_id=user.id, organization_id=organization_id, title=payload.title, description=payload.description,
+        ai_context=payload.ai_context.strip(),
         content_locale=payload.content_locale, navigation=navigation_defaults(payload.content_locale),
         category_id=payload.category_id, manual_fields=manual_fields,
     )
@@ -65,6 +66,8 @@ def get_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(c
 def update_demo(payload: DemoUpdate, demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
     values = payload.model_dump(exclude_unset=True)
+    if "ai_context" in values:
+        values["ai_context"] = (values["ai_context"] or "").strip()
     tag_ids = values.pop("tag_ids", None)
     if values.get("content_locale") and values["content_locale"] != demo.content_locale:
         # Preserve all visible content when only the future AI language changes.
@@ -109,6 +112,7 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
         organization_id=source.organization_id,
         title=f"{source.title}{' (Copy)' if source.content_locale == 'en' else '（副本）'}"[:200],
         description=source.description,
+        ai_context=source.ai_context,
         content_locale=source.content_locale,
         theme=deepcopy(source.theme or {}),
         navigation=deepcopy(source.navigation or {}),
@@ -207,6 +211,7 @@ def merge_demos(payload: MergeDemos, db: Session = Depends(get_db), user: User =
     merged = Demo(
         owner_id=user.id, organization_id=first.organization_id, title=payload.title,
         description=(f"Merged from {len(sources)} demos" if first.content_locale == "en" else f"由 {len(sources)} 个演示合并生成"),
+        ai_context=first.ai_context,
         content_locale=first.content_locale,
         category_id=payload.category_id or first.category_id, theme=deepcopy(first.theme or {}),
         navigation=deepcopy(first.navigation or {}), playback=deepcopy(first.playback or {}), manual_fields=["title"],

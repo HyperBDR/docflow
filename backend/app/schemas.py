@@ -656,6 +656,7 @@ class StepOut(BaseModel):
 class DemoCreate(BaseModel):
     title: str = Field(default="未命名演示", min_length=1, max_length=200)
     description: str = Field(default="", max_length=5000)
+    ai_context: str = Field(default="", max_length=500)
     category_id: str | None = None
     content_locale: Locale = "zh-CN"
     auto_title: bool = False
@@ -664,6 +665,7 @@ class DemoCreate(BaseModel):
 class DemoUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=5000)
+    ai_context: str | None = Field(default=None, max_length=500)
     theme: dict | None = None
     navigation: dict | None = None
     playback: PlaybackConfig | None = None
@@ -788,6 +790,7 @@ class DemoOut(BaseModel):
     organization_id: str
     title: str
     description: str
+    ai_context: str = ""
     content_locale: Locale = "zh-CN"
     status: str
     created_at: datetime

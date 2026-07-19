@@ -210,6 +210,7 @@ export type Demo = {
   organization_id: string
   title: string
   description: string
+  ai_context: string
   content_locale: Locale
   status: 'draft' | 'published'
   created_at: string

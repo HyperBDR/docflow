@@ -246,7 +246,7 @@ def test_recording_ai_can_be_disabled_per_capture(authenticated, monkeypatch):
 
 
 def test_duplicate_demo_copies_steps_as_draft(authenticated):
-    demo = authenticated.post("/api/demos", json={"title": "原始演示", "description": "说明"}).json()
+    demo = authenticated.post("/api/demos", json={"title": "原始演示", "description": "说明", "ai_context": "面向新成员的操作演示"}).json()
     source_step = create_step(authenticated, demo["id"]).json()
     response = authenticated.post(f"/api/demos/{demo['id']}/duplicate")
     assert response.status_code == 201
@@ -255,6 +255,7 @@ def test_duplicate_demo_copies_steps_as_draft(authenticated):
     assert copied["title"] == "原始演示（副本）"
     assert copied["status"] == "draft"
     assert copied["share_url"] is None
+    assert copied["ai_context"] == "面向新成员的操作演示"
     assert len(copied["steps"]) == 1
     assert copied["steps"][0]["id"] != source_step["id"]
     assert copied["steps"][0]["title"] == source_step["title"]

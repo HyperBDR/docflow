@@ -1,7 +1,25 @@
+import io
+import json
 from unittest.mock import patch
+
+from PIL import Image
 
 from app.database import SessionLocal
 from app.models import Demo, PublishedRevision, Step
+
+
+def recording_step(client, demo_id: str, event_id: str):
+    output = io.BytesIO()
+    Image.new('RGB', (320, 180), 'white').save(output, 'PNG')
+    return client.post(
+        f'/api/recordings/{demo_id}/steps',
+        data={'meta': json.dumps({
+            'event_id': event_id, 'title': 'Step', 'body': 'Do the thing',
+            'viewport_width': 320, 'viewport_height': 180,
+            'hotspot': {'x': .5, 'y': .5, 'w': .1, 'h': .1}, 'duration': 3,
+        })},
+        files={'screenshot': ('screen.png', output.getvalue(), 'image/png')},
+    )
 
 
 def assign_limits(client, organization_id: str, **overrides):
@@ -114,12 +132,42 @@ def test_capabilities_recover_immediately_after_quota_increase(authenticated):
     assert blocked.status_code == 200, blocked.text
     assert blocked.json()['actions']['use_ai']['allowed'] is False
     assert blocked.json()['actions']['record_step']['allowed'] is False
+    assert blocked.json()['demo_step_count'] == 0
     assert blocked.json()['actions']['use_ai']['blockers'][0]['code'] == 'quota.monthly_ai_tokens_exceeded'
 
     assign_limits(authenticated, organization_id, monthly_ai_tokens=10_000, max_steps_per_resource=20)
     restored = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo['id']}).json()
     assert restored['actions']['use_ai']['allowed'] is True
     assert restored['actions']['record_step']['allowed'] is True
+
+
+def test_recording_capabilities_block_resource_creation_and_full_storage(authenticated):
+    summary = authenticated.get('/api/workspace/quotas').json()
+    organization_id = summary['organization_id']
+    assign_limits(authenticated, organization_id, resources=0, storage_bytes=0)
+
+    blocked = authenticated.get('/api/workspace/capabilities', params={'organization_id': organization_id})
+    assert blocked.status_code == 200, blocked.text
+    value = blocked.json()
+    assert value['actions']['create_resource']['allowed'] is False
+    assert value['actions']['create_resource']['blockers'][0]['code'] == 'quota.resources_exceeded'
+    assert value['actions']['record_step']['allowed'] is False
+    assert value['actions']['record_step']['blockers'][0]['code'] == 'quota.storage_bytes_exceeded'
+
+
+def test_recording_upload_enforces_step_and_storage_quotas(authenticated):
+    demo = authenticated.post('/api/demos', json={'title': 'Guarded recording'}).json()
+    organization_id = demo['organization_id']
+
+    assign_limits(authenticated, organization_id, max_steps_per_resource=0)
+    step_blocked = recording_step(authenticated, demo['id'], 'step-blocked')
+    assert step_blocked.status_code == 403
+    assert step_blocked.json()['code'] == 'quota.max_steps_per_resource_exceeded'
+
+    assign_limits(authenticated, organization_id, max_steps_per_resource=10, storage_bytes=0)
+    storage_blocked = recording_step(authenticated, demo['id'], 'storage-blocked')
+    assert storage_blocked.status_code == 403
+    assert storage_blocked.json()['code'] == 'quota.storage_bytes_exceeded'
 
 
 def test_duplicate_and_merge_respect_resource_and_step_quotas(authenticated):

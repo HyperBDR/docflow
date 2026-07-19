@@ -1,11 +1,12 @@
 import type { Credentials, Locale, Recording, RecordingMode, RecordingTarget } from './types'
 import { browserLocale } from './locale'
-import { quotaAllowed, quotaApiError, quotaMessage, type QuotaAction, type WorkspaceCapabilities } from './quota'
+import { quotaAllowed, quotaApiError, quotaMessage, quotaMetricMessage, type QuotaAction, type WorkspaceCapabilities, type WorkspaceQuotaSummary } from './quota'
 import { configuredApiUrl, configuredWebUrl, isConfiguredWebPage, isRecordableUrl } from './config'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
 let recording: Recording | null = null
 let queue: Promise<void> = Promise.resolve()
+let quotaEnding = false
 
 async function loadCapabilities(auth: Credentials, organizationId = '', demoId = ''): Promise<WorkspaceCapabilities> {
   const params = new URLSearchParams({ ...(organizationId ? { organization_id: organizationId } : {}), ...(demoId ? { demo_id: demoId } : {}) })
@@ -15,6 +16,16 @@ async function loadCapabilities(auth: Credentials, organizationId = '', demoId =
     throw new Error(String(error.detail || 'Could not check workspace quota'))
   }
   return response.json() as Promise<WorkspaceCapabilities>
+}
+
+async function loadQuotaSummary(auth: Credentials, organizationId = ''): Promise<WorkspaceQuotaSummary> {
+  const params = new URLSearchParams({ ...(organizationId ? { organization_id: organizationId } : {}) })
+  const response = await fetch(`${auth.api}/api/workspace/quotas?${params}`, { headers: { Authorization: `Bearer ${auth.token}` } })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Could not load workspace quota' }))
+    throw new Error(String(error.detail || 'Could not load workspace quota'))
+  }
+  return response.json() as Promise<WorkspaceQuotaSummary>
 }
 
 function requireQuota(value: WorkspaceCapabilities, action: QuotaAction, locale: Locale) {
@@ -112,7 +123,7 @@ async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = f
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
   if (!auth || !tab.id || !isRecordableUrl(tab.url)) throw new Error('请打开可录制的业务页面并确认扩展已连接')
   recording = {
-    rootTabId: tab.id, activeTabId: tab.id, trackedTabIds: [tab.id], demoId, api: auth.api, token: auth.token,
+    rootTabId: tab.id, activeTabId: tab.id, trackedTabIds: [tab.id], demoId, api: auth.api, web: auth.web, token: auth.token,
     screenshot: await capture(tab.id), active: true, paused: false,
     capturing: false, phase: '', steps: 0, mode, aiEnabled, locale, contentLocale,
     autoCreated,
@@ -289,11 +300,27 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
   const auth: Credentials = { api: state.api, token: state.token }
   const live = await loadCapabilities(auth, '', state.demoId).catch(() => null)
   if (live) {
-    if (!quotaAllowed(live, 'record_step')) {
-      state.paused = true
-      state.error = quotaMessage(live, 'record_step', state.locale)
-      await persist(state); await notify(state)
-      throw new Error(state.error)
+    const stepQuota = live.items?.find(item => item.key === 'max_steps_per_resource')
+    if (typeof stepQuota?.limit === 'number') {
+      const liveRemaining = Math.max(0, stepQuota.limit - Number(live.demo_step_count || 0))
+      let localRemaining = state.stepQuotaRemaining ?? liveRemaining
+      if (state.stepQuotaLimit !== undefined && state.stepQuotaLimit !== stepQuota.limit) {
+        localRemaining = Math.max(0, localRemaining + stepQuota.limit - state.stepQuotaLimit)
+      }
+      state.stepQuotaLimit = stepQuota.limit
+      state.stepQuotaRemaining = Math.min(localRemaining, liveRemaining)
+    } else {
+      state.stepQuotaLimit = undefined
+      state.stepQuotaRemaining = undefined
+    }
+    const quotaError = !quotaAllowed(live, 'record_step')
+      ? quotaMessage(live, 'record_step', state.locale)
+      : state.stepQuotaRemaining !== undefined && state.stepQuotaRemaining < 1 && state.stepQuotaLimit !== undefined
+        ? quotaMetricMessage('max_steps_per_resource', state.stepQuotaLimit, state.stepQuotaLimit, state.locale)
+        : ''
+    if (quotaError) {
+      await scheduleQuotaEnd(state, quotaError)
+      return { quotaEnded: true, error: quotaError, steps: state.steps }
     }
     if (state.aiEnabled && !quotaAllowed(live, 'use_ai')) {
       state.aiEnabled = false
@@ -315,6 +342,7 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
   // The page can be released as soon as its pixels are captured. DOM asset
   // enrichment, upload and AI work continue serially in the background.
   state.steps += 1
+  if (state.stepQuotaRemaining !== undefined) state.stepQuotaRemaining = Math.max(0, state.stepQuotaRemaining - 1)
   state.capturing = false; state.phase = ''
   await persist(state); await notify(state)
   const synchronizedSnapshot = state.mode === 'html' ? (captured.snapshot || snapshot) : undefined
@@ -322,9 +350,11 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
   queue = task.catch(async error => {
     console.warn('DocFlow step upload:', error)
     state.steps = Math.max(0, state.steps - 1)
+    if (state.stepQuotaRemaining !== undefined) state.stepQuotaRemaining += 1
     state.error = (error as Error).message
-    if ((error as Error & { quota?: boolean }).quota) state.paused = true
-    await persist(state); await notify(state)
+    const quotaFailure = Boolean((error as Error & { quota?: boolean }).quota)
+    if (quotaFailure) await scheduleQuotaEnd(state, state.error)
+    else { await persist(state); await notify(state) }
     try {
       await chrome.action.setBadgeText({ tabId: sourceTabId, text: '!' })
       await chrome.action.setBadgeBackgroundColor({ tabId: sourceTabId, color: '#dc2626' })
@@ -336,6 +366,7 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
 async function pause() {
   const state = await restore()
   if (!state?.active) return null
+  if (quotaEnding) return state
   await queue
   state.paused = !state.paused
   if (!state.paused) state.error = ''
@@ -346,9 +377,50 @@ async function pause() {
   return state
 }
 
+async function demoEditorUrl(state: Recording) {
+  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  const apiUrl = new URL(state.api)
+  return `${auth?.web || state.web || `${apiUrl.protocol}//${apiUrl.hostname}:5173`}/demos/${state.demoId}`
+}
+
+async function completeRecording(state: Recording, open: boolean) {
+  await auditRecording(state, 'completed')
+  state.active = false; state.paused = false; state.capturing = false; state.phase = ''
+  await notify(state)
+  recording = null
+  await chrome.storage.session.remove('recording')
+  if (open) await chrome.tabs.create({ url: await demoEditorUrl(state) })
+}
+
+async function finishQuotaEnd(state: Recording, message: string) {
+  try {
+    await queue.catch(() => {})
+    if (!recording || recording.demoId !== state.demoId) return
+    const editorUrl = await demoEditorUrl(state)
+    let delivered = false
+    try {
+      await sendToRecordableTab(state.activeTabId, { type: 'RECORDING_QUOTA_ENDED', message, editorUrl })
+      delivered = true
+    } catch { /* fall back to opening the editor directly */ }
+    await completeRecording(state, false)
+    if (!delivered) await chrome.tabs.create({ url: editorUrl })
+  } finally {
+    quotaEnding = false
+  }
+}
+
+async function scheduleQuotaEnd(state: Recording, message: string) {
+  if (quotaEnding) return
+  quotaEnding = true
+  state.paused = true; state.capturing = false; state.phase = ''; state.error = message
+  await persist(state); await notify(state)
+  setTimeout(() => { void finishQuotaEnd(state, message) }, 0)
+}
+
 async function stop(open = true) {
   const state = await restore()
   if (!state) { await chrome.storage.session.remove('recording'); return }
+  if (quotaEnding) return
   await queue.catch(() => {})
   state.paused = false; state.capturing = true; state.phase = 'uploading'
   await notify(state)
@@ -367,17 +439,7 @@ async function stop(open = true) {
       }
     } catch { /* AI is optional */ }
   }
-  await auditRecording(state, 'completed')
-  state.active = false; state.capturing = false; state.phase = ''
-  await notify(state)
-  recording = null
-  await chrome.storage.session.remove('recording')
-  if (open) {
-    const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
-    const apiUrl = new URL(state.api)
-    const webOrigin = auth?.web || `${apiUrl.protocol}//${apiUrl.hostname}:5173`
-    await chrome.tabs.create({ url: `${webOrigin}/demos/${state.demoId}` })
-  }
+  await completeRecording(state, open)
 }
 
 function requireWebSender(sender: chrome.runtime.MessageSender) {
@@ -408,17 +470,29 @@ function automaticTitle(tab: chrome.tabs.Tab, locale: Locale) {
   return `${base} · ${date}`.slice(0, 200)
 }
 
-async function createAutomaticDemo(auth: Credentials, tab: chrome.tabs.Tab, contentLocale: Locale, uiLocale: Locale) {
+async function createAutomaticDemo(auth: Credentials, tab: chrome.tabs.Tab, contentLocale: Locale, uiLocale: Locale, aiContext = '') {
   const response = await fetch(`${auth.api}/api/demos`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: automaticTitle(tab, contentLocale), content_locale: contentLocale, auto_title: true }),
+    body: JSON.stringify({ title: automaticTitle(tab, contentLocale), content_locale: contentLocale, ai_context: aiContext.trim(), auto_title: true }),
   })
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Could not create a recording draft' }))
     throw new Error(quotaApiError(error, uiLocale))
   }
   return response.json() as Promise<{ id: string }>
+}
+
+async function updateDemoAISettings(auth: Credentials, demoId: string, contentLocale: Locale, aiContext = '') {
+  const response = await fetch(`${auth.api}/api/demos/${demoId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content_locale: contentLocale, ai_context: aiContext.trim() }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Could not save AI settings' }))
+    throw new Error(String(error.detail || 'Could not save AI settings'))
+  }
 }
 
 async function validateRecordingTarget(auth: Credentials, demoId: string) {
@@ -502,6 +576,7 @@ async function selectTargetFromWeb(demoId: string, sender: chrome.runtime.Messag
   const target: RecordingTarget = {
     demoId: demo.id, organizationId: demo.organization_id, title: demo.title,
     contentLocale: demo.content_locale || browserLocale(), aiEnabled: Boolean(demo.ai_enabled),
+    aiContext: String(demo.ai_context || ''),
   }
   const switched = await fetch(`${auth.api}/api/organizations/${target.organizationId}/switch`, {
     method: 'POST', headers: { Authorization: `Bearer ${auth.token}` },
@@ -529,6 +604,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!auth) throw new Error('Extension connection expired')
       return loadCapabilities(auth, String(message.organizationId || ''), String(message.demoId || ''))
     }
+    if (message.type === 'GET_QUOTA_SUMMARY') {
+      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      if (!auth) throw new Error('Extension connection expired')
+      return loadQuotaSummary(auth, String(message.organizationId || ''))
+    }
+    if (message.type === 'SAVE_RECORDING_PREFERENCES') {
+      await chrome.storage.local.set({ recordingPreferences: {
+        aiEnabled: Boolean(message.aiEnabled),
+        contentLocale: (message.contentLocale || browserLocale()) as Locale,
+      } })
+      return { ok: true }
+    }
     if (message.type === 'RESIZE_RECORDING_WINDOW') return resizeRecordingWindow(sender)
     if (message.type === 'CLOSE_OTHER_RECORDING_TABS') return closeOtherRecordingTabs(sender)
     if (message.type === 'OPEN_SETUP') {
@@ -543,6 +630,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         diagnostics,
         locale: message.locale || browserLocale(),
         contentLocale: message.contentLocale || message.locale || browserLocale(),
+        aiContext: String(message.aiContext || ''),
       })
       return { ok: true }
     }
@@ -551,6 +639,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = sender.tab
       if (!auth || !tab?.id || !isRecordableUrl(tab.url)) throw new Error('Please open a recordable business page first.')
       const contentLocale = (message.contentLocale || message.locale || browserLocale()) as Locale
+      const aiContext = String(message.aiContext || '').trim().slice(0, 500)
       const uiLocale = (message.locale || browserLocale()) as Locale
       const organizationId = String(message.organizationId || '')
       await switchRecordingOrganization(auth, organizationId)
@@ -561,9 +650,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.aiEnabled) requireQuota(live, 'use_ai', uiLocale)
       let autoCreated = false
       if (!demoId) {
-        demoId = (await createAutomaticDemo(auth, tab, contentLocale, uiLocale)).id
+        demoId = (await createAutomaticDemo(auth, tab, contentLocale, uiLocale, aiContext)).id
         autoCreated = true
-      } else await validateRecordingTarget(auth, demoId)
+      } else {
+        await validateRecordingTarget(auth, demoId)
+        await updateDemoAISettings(auth, demoId, contentLocale, aiContext)
+      }
       try {
         await begin(demoId, message.mode, Boolean(message.aiEnabled), tab.id, message.locale || browserLocale(), contentLocale, autoCreated)
       } catch (error) {
