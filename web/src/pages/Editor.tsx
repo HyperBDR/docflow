@@ -82,6 +82,25 @@ function RangeField({ label, value, min, max, step = 1, suffix = '', onChange }:
   return <label className="range-field"><span>{label}<output>{value}{suffix}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={event => onChange(Number(event.target.value))} /></label>
 }
 
+function NumberField({ label, value, min, max, step = 1, decimals, onCommit }: { label: string; value: number; min: number; max: number; step?: number; decimals?: number; onCommit: (value: number) => void }) {
+  const display = useCallback((current: number) => decimals === undefined ? String(current) : current.toFixed(decimals), [decimals])
+  const [draft, setDraft] = useState(() => display(value))
+  useEffect(() => setDraft(display(value)), [display, value])
+  const commit = () => {
+    if (!draft.trim()) { setDraft(display(value)); return }
+    const parsed = Number(draft)
+    if (!Number.isFinite(parsed)) { setDraft(display(value)); return }
+    const clamped = Math.min(max, Math.max(min, parsed))
+    const normalized = decimals === undefined ? clamped : Number(clamped.toFixed(decimals))
+    setDraft(display(normalized))
+    if (normalized !== value) onCommit(normalized)
+  }
+  return <label>{label}<input type="number" min={min} max={max} step={step} value={draft} onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => {
+    if (event.key === 'Enter') event.currentTarget.blur()
+    if (event.key === 'Escape') { event.preventDefault(); setDraft(display(value)) }
+  }} /></label>
+}
+
 function AIFieldComparison({ label, change, originalLabel, generatedLabel, appliedLabel, retainedLabel, emptyLabel }: { label: string; change: AIFieldChange; originalLabel: string; generatedLabel: string; appliedLabel: string; retainedLabel: string; emptyLabel: string }) {
   const before = String(change.before ?? '').trim()
   const after = String(change.after ?? '').trim()
@@ -636,7 +655,7 @@ export default function Editor() {
             <label>{t('content.instructions')}<textarea value={selected.body} onChange={event => setDemo({ ...demo, steps: demo.steps.map(step => step.id === selected.id ? { ...step, body: event.target.value } : step) })} onBlur={() => patchStep(selected.id, { body: selected.body })} /></label>
           </InspectorSection>
           <InspectorSection icon="clock" title={t('content.timing')} description={t('content.timingDescription')}>
-            <label>{t('content.duration')}<input type="number" min="1" max="15" step=".5" value={selected.duration} onChange={event => patchStep(selected.id, { duration: Number(event.target.value) })} /></label>
+            <NumberField label={t('content.duration')} value={selected.duration} min={1} max={15} step={.5} onCommit={value => patchStep(selected.id, { duration: value })} />
           </InspectorSection>
           {demo.ai_enabled && <InspectorSection icon="ai" title={t('content.smartCopy')} description={t('content.smartCopyDescription')}><QuotaGuard fill message={!can('use_ai') ? quotaTitle('use_ai') : ''}><button className="icon-button" disabled={!can('use_ai')} onClick={() => generateAI(selected.id)}><Icon name="ai" />{t('content.regenerate')}</button></QuotaGuard></InspectorSection>}
         </div>}
@@ -652,9 +671,9 @@ export default function Editor() {
               <label>{t('hotspot.action')}<select value={selectedHotspot.action.type} onChange={event => patchHotspot({ action: { ...selectedHotspot.action, type: event.target.value as HotspotData['action']['type'] } })}><option value="next">{t('hotspot.next')}</option><option value="goto">{t('hotspot.goto')}</option><option value="link">{t('hotspot.link')}</option><option value="end">{t('hotspot.end')}</option></select></label>
               {selectedHotspot.action.type === 'goto' && <label>{t('hotspot.target')}<select value={selectedHotspot.action.target_step_id || ''} onChange={event => patchHotspot({ action: { ...selectedHotspot.action, target_step_id: event.target.value } })}>{demo.steps.map((step, index) => <option value={step.id} key={step.id}>{index + 1}. {step.title}</option>)}</select></label>}
               {selectedHotspot.action.type === 'link' && <label>{t('hotspot.url')}<input value={selectedHotspot.action.url || ''} placeholder="https://" onChange={event => patchHotspot({ action: { ...selectedHotspot.action, url: event.target.value } })} /></label>}
-            </InspectorSection>
-            <InspectorSection icon="move" title={t('hotspot.position')} description={t('hotspot.positionDescription')}>
-              <div className="rect-grid">{(['x', 'y', 'w', 'h'] as const).map(key => <label key={key}>{key.toUpperCase()}<input type="number" min="0" max="1" step=".01" value={selectedHotspot.fallback_rect[key].toFixed(2)} onChange={event => patchHotspot({ fallback_rect: { ...selectedHotspot.fallback_rect, [key]: Number(event.target.value) } })} /></label>)}</div>
+          </InspectorSection>
+          <InspectorSection icon="move" title={t('hotspot.position')} description={t('hotspot.positionDescription')}>
+              <div className="rect-grid">{(['x', 'y', 'w', 'h'] as const).map(key => <NumberField key={key} label={key.toUpperCase()} value={selectedHotspot.fallback_rect[key]} min={0} max={1} step={.01} decimals={2} onCommit={value => patchHotspot({ fallback_rect: { ...selectedHotspot.fallback_rect, [key]: value } })} />)}</div>
             </InspectorSection>
             <InspectorSection icon="palette" title={t('hotspot.appearance')} description={t('hotspot.appearanceDescription')}>
               <label>{t('hotspot.shape')}<select value={selectedHotspot.style.shape} onChange={event => patchHotspot({ style: { ...selectedHotspot.style, shape: event.target.value as 'rectangle' | 'circle' } })}><option value="rectangle">{t('hotspot.rectangle')}</option><option value="circle">{t('hotspot.circle')}</option></select></label>
@@ -670,7 +689,7 @@ export default function Editor() {
           <InspectorSection icon="layout" title={t('tooltip.layout')} description={t('tooltip.layoutDescription')}>
             <label>{t('tooltip.placement')}<select value={selectedHotspot.tooltip.placement} onChange={event => patchHotspot({ tooltip: { ...selectedHotspot.tooltip, placement: event.target.value } })}>{['auto','top','top-start','top-end','bottom','bottom-start','bottom-end','left','left-start','left-end','right','right-start','right-end'].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
             <RangeField label={t('tooltip.offset')} value={selectedHotspot.tooltip.offset} min={0} max={60} suffix=" px" onChange={value => patchHotspot({ tooltip: { ...selectedHotspot.tooltip, offset: value } })} />
-            <label>{t('tooltip.maxWidth')}<input type="number" min="160" max="800" value={selectedHotspot.tooltip.max_width} onChange={event => patchHotspot({ tooltip: { ...selectedHotspot.tooltip, max_width: Number(event.target.value) } })} /></label>
+            <NumberField label={t('tooltip.maxWidth')} value={selectedHotspot.tooltip.max_width} min={160} max={800} onCommit={value => patchHotspot({ tooltip: { ...selectedHotspot.tooltip, max_width: value } })} />
           </InspectorSection>
           <InspectorSection icon="eye" title={t('tooltip.display')}><div className="toggle-list"><label className="check"><input type="checkbox" checked={selectedHotspot.tooltip.show_arrow} onChange={event => patchHotspot({ tooltip: { ...selectedHotspot.tooltip, show_arrow: event.target.checked } })} /><span><strong>{t('tooltip.arrow')}</strong><small>{t('tooltip.arrowHint')}</small></span></label></div></InspectorSection>
         </div>}
@@ -701,8 +720,8 @@ export default function Editor() {
             {selected.animation?.zoom?.rect ? <>
               <div className="animation-status"><span><i />{t('animation.enabled')}</span><small>{t('animation.dragHint')}</small></div>
               <div className="field-grid">
-                <label>{t('animation.transition')}<input type="number" min="0" max="5000" step="100" value={selected.animation.zoom.transition_duration_ms ?? 1200} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, transition_duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
-                <label>{t('animation.duration')}<input type="number" min="500" max="10000" step="250" value={selected.animation.zoom.duration_ms || 3000} onChange={event => updateStepLocal(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation.zoom, duration_ms: Number(event.target.value) } } })} onBlur={() => patchStep(selected.id, { animation: selected.animation })} /></label>
+                <NumberField label={t('animation.transition')} value={selected.animation.zoom.transition_duration_ms ?? 1200} min={0} max={5000} step={100} onCommit={value => patchStep(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation!.zoom!, transition_duration_ms: value } } })} />
+                <NumberField label={t('animation.duration')} value={selected.animation.zoom.duration_ms || 3000} min={500} max={10000} step={250} onCommit={value => patchStep(selected.id, { animation: { ...(selected.animation || {}), zoom: { ...selected.animation!.zoom!, duration_ms: value } } })} />
               </div>
               <p className="field-note">{t('animation.mp4Hint')}</p>
               <button className="danger icon-button" onClick={() => patchStep(selected.id, { animation: { ...(selected.animation || {}), zoom: undefined } })}><Icon name="delete" />{t('animation.delete')}</button>
@@ -714,8 +733,8 @@ export default function Editor() {
           <InspectorSection icon="play" title="Autoplay" description={t('animation.autoplayDescription')}>
             <div className="toggle-list"><label className="check"><input type="checkbox" checked={demo.playback?.autoplay === true} onChange={event => patchDemo({ playback: { ...demo.playback, autoplay: event.target.checked } })} /><span><strong>{t('animation.autoplay')}</strong><small>{t('animation.autoplayHint')}</small></span></label></div>
             <div className="field-grid">
-              <label>{t('animation.stepDuration')}<input type="number" min="250" max="60000" step="250" value={demo.playback?.step_duration_ms ?? 2000} onChange={event => setDemo({ ...demo, playback: { ...demo.playback, step_duration_ms: Number(event.target.value) } })} onBlur={() => patchDemo({ playback: demo.playback })} /></label>
-              <label>{t('animation.transitionDelay')}<input type="number" min="0" max="30000" step="250" value={demo.playback?.transition_delay_ms ?? 1000} onChange={event => setDemo({ ...demo, playback: { ...demo.playback, transition_delay_ms: Number(event.target.value) } })} onBlur={() => patchDemo({ playback: demo.playback })} /></label>
+              <NumberField label={t('animation.stepDuration')} value={demo.playback?.step_duration_ms ?? 2000} min={250} max={60000} step={250} onCommit={value => patchDemo({ playback: { ...demo.playback, step_duration_ms: value } })} />
+              <NumberField label={t('animation.transitionDelay')} value={demo.playback?.transition_delay_ms ?? 1000} min={0} max={30000} step={250} onCommit={value => patchDemo({ playback: { ...demo.playback, transition_delay_ms: value } })} />
             </div>
             <div className="toggle-list"><label className="check"><input type="checkbox" checked={demo.playback?.loop === true} onChange={event => patchDemo({ playback: { ...demo.playback, loop: event.target.checked } })} /><span><strong>{t('animation.loop')}</strong><small>{t('animation.loopHint')}</small></span></label></div>
           </InspectorSection>
