@@ -1,5 +1,5 @@
 import { browserLocale, tr, type MessageKey } from './locale'
-import { configuredWebUrl } from './config'
+import { configuredApiUrl, configuredWebUrl } from './config'
 import type { Credentials, Locale, RecordingMode, RecordingPreferences, RecordingTarget } from './types'
 
 type Space = { id: string; name: string; kind: 'personal' | 'team' }
@@ -38,7 +38,11 @@ function showSettings(open: boolean) {
 }
 
 async function credentials(): Promise<Credentials | undefined> {
-  return (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  if (!auth) return undefined
+  if (auth.api.replace(/\/$/, '') === configuredApiUrl && String(auth.web || '').replace(/\/$/, '') === configuredWebUrl) return auth
+  await chrome.storage.local.remove(['credentials', 'pendingTarget', 'activeOrganizationId'])
+  return undefined
 }
 
 async function authorizedFetch(auth: Credentials, path: string, options: RequestInit = {}) {

@@ -8,6 +8,14 @@ let recording: Recording | null = null
 let queue: Promise<void> = Promise.resolve()
 let quotaEnding = false
 
+async function connectedCredentials(): Promise<Credentials | undefined> {
+  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  if (!auth) return undefined
+  if (auth.api.replace(/\/$/, '') === configuredApiUrl && String(auth.web || '').replace(/\/$/, '') === configuredWebUrl) return auth
+  await chrome.storage.local.remove(['credentials', 'pendingTarget', 'activeOrganizationId'])
+  return undefined
+}
+
 async function loadCapabilities(auth: Credentials, organizationId = '', demoId = ''): Promise<WorkspaceCapabilities> {
   const params = new URLSearchParams({ ...(organizationId ? { organization_id: organizationId } : {}), ...(demoId ? { demo_id: demoId } : {}) })
   const response = await fetch(`${auth.api}/api/workspace/capabilities?${params}`, { headers: { Authorization: `Bearer ${auth.token}` } })
@@ -119,7 +127,7 @@ async function auditRecording(state: Recording, action: 'started' | 'paused' | '
 }
 
 async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false) {
-  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  const auth = await connectedCredentials()
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
   if (!auth || !tab.id || !isRecordableUrl(tab.url)) throw new Error('请打开可录制的业务页面并确认扩展已连接')
   recording = {
@@ -378,7 +386,7 @@ async function pause() {
 }
 
 async function demoEditorUrl(state: Recording) {
-  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  const auth = await connectedCredentials()
   const apiUrl = new URL(state.api)
   return `${auth?.web || state.web || `${apiUrl.protocol}//${apiUrl.hostname}:5173`}/demos/${state.demoId}`
 }
@@ -568,7 +576,7 @@ async function closeOtherRecordingTabs(sender: chrome.runtime.MessageSender) {
 
 async function selectTargetFromWeb(demoId: string, sender: chrome.runtime.MessageSender) {
   requireWebSender(sender)
-  const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+  const auth = await connectedCredentials()
   if (!auth) throw new Error('Extension is not connected')
   const response = await fetch(`${auth.api}/api/demos/${demoId}`, { headers: { Authorization: `Bearer ${auth.token}` } })
   if (!response.ok) throw new Error(response.status === 401 ? 'Extension connection expired' : 'Recording target is unavailable')
@@ -591,7 +599,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'CONNECT_FROM_WEB') return connectFromWeb(String(message.code || ''), sender)
     if (message.type === 'PING_FROM_WEB') {
       requireWebSender(sender)
-      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      const auth = await connectedCredentials()
       if (!auth?.token) return { installed: true, connected: false }
       const response = await fetch(`${auth.api}/api/extension/config`, { headers: { Authorization: `Bearer ${auth.token}` } }).catch(() => null)
       if (response?.ok) return { installed: true, connected: true }
@@ -600,12 +608,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === 'SET_TARGET_FROM_WEB') return selectTargetFromWeb(String(message.demoId || ''), sender)
     if (message.type === 'GET_QUOTA_CAPABILITIES') {
-      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      const auth = await connectedCredentials()
       if (!auth) throw new Error('Extension connection expired')
       return loadCapabilities(auth, String(message.organizationId || ''), String(message.demoId || ''))
     }
     if (message.type === 'GET_QUOTA_SUMMARY') {
-      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      const auth = await connectedCredentials()
       if (!auth) throw new Error('Extension connection expired')
       return loadQuotaSummary(auth, String(message.organizationId || ''))
     }
@@ -635,7 +643,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return { ok: true }
     }
     if (message.type === 'START') {
-      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      const auth = await connectedCredentials()
       const tab = sender.tab
       if (!auth || !tab?.id || !isRecordableUrl(tab.url)) throw new Error('Please open a recordable business page first.')
       const contentLocale = (message.contentLocale || message.locale || browserLocale()) as Locale
