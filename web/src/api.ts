@@ -5,13 +5,23 @@ import type { WorkspaceCapabilities } from './workspace/types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+export type ApiErrorPayload = {
+  detail?: string
+  code?: string
+  quota?: { metrics?: string[] }
+  errors?: unknown[]
+  [key: string]: unknown
+}
+
 export class ApiError extends Error {
   status: number
   code?: string
-  constructor(status: number, message: string, code?: string) {
+  payload?: ApiErrorPayload
+  constructor(status: number, message: string, code?: string, payload?: ApiErrorPayload) {
     super(message)
     this.status = status
     this.code = code
+    this.payload = payload
   }
 }
 
@@ -25,10 +35,10 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     throw new ApiError(0, i18n.t('errors.codes.network.unavailable', { ns: 'common' }), 'network.unavailable')
   }
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }))
+    const error: ApiErrorPayload = await response.json().catch(() => ({ detail: response.statusText }))
     const key = error.code ? `errors.codes.${error.code}` : ''
     const message = key && i18n.exists(key, { ns: 'common' }) ? i18n.t(key, { ns: 'common' }) : i18n.t('errors.requestFailed', { ns: 'common' })
-    throw new ApiError(response.status, message, error.code)
+    throw new ApiError(response.status, message, error.code, error)
   }
   if (response.status === 204) return undefined as T
   try {
