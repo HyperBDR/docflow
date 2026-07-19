@@ -2,20 +2,48 @@ import io
 import json
 
 from PIL import Image
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.database import SessionLocal
+from app.main import app
 from app.models import Demo, ExportDownloadEvent, ExportJob, JobStatus
+from app.routers.public import share_cookie_path
 from app.storage import storage
 
 
-def add_step(client, demo_id: str):
+def add_step(client, demo_id: str, prefix: str = ""):
     image = io.BytesIO(); Image.new("RGB", (800, 500), "white").save(image, "PNG")
     return client.post(
-        f"/api/recordings/{demo_id}/steps",
+        f"{prefix}/api/recordings/{demo_id}/steps",
         data={"meta": json.dumps({"event_id": "governance", "title": "First step", "viewport_width": 800, "viewport_height": 500, "hotspot": {"x": .5, "y": .5, "w": .1, "h": .1}, "ai_enabled": False})},
         files={"screenshot": ("screen.png", image.getvalue(), "image/png")},
     )
+
+
+def test_share_cookie_path_includes_reverse_proxy_prefix(monkeypatch):
+    monkeypatch.setattr(settings, "public_base_url", "https://docflow.example/backend")
+    assert share_cookie_path("share-token") == "/backend/public/share-token"
+
+
+def test_password_share_unlock_works_behind_reverse_proxy_prefix(monkeypatch):
+    monkeypatch.setattr(settings, "public_base_url", "https://testserver/backend")
+    proxy = FastAPI()
+    proxy.mount("/backend", app)
+    with TestClient(proxy, base_url="https://testserver") as client:
+        registered = client.post("/backend/api/auth/register", json={"email": "proxy@example.com", "password": "correct-horse"})
+        assert registered.status_code == 201, registered.text
+        demo = client.post("/backend/api/demos", json={"title": "Protected proxy share"}).json()
+        add_step(client, demo["id"], prefix="/backend")
+        assert client.post(f"/backend/api/demos/{demo['id']}/publish").status_code == 200
+        share = client.post(f"/backend/api/demos/{demo['id']}/shares", json={"password": "proxy-secret"}).json()
+        token = share["token"]
+        assert client.get(f"/backend/public/{token}").status_code == 401
+        unlocked = client.post(f"/backend/public/{token}/unlock", json={"password": "proxy-secret"})
+        assert unlocked.status_code == 204
+        assert f"Path=/backend/public/{token}" in unlocked.headers["set-cookie"]
+        assert client.get(f"/backend/public/{token}").status_code == 200
 
 
 def test_multiple_password_shares_and_source_analytics(authenticated):
@@ -31,7 +59,9 @@ def test_multiple_password_shares_and_source_analytics(authenticated):
     assert share["password_protected"] is True
     assert authenticated.get(f"/public/{token}").status_code == 401
     assert authenticated.post(f"/public/{token}/unlock", json={"password": "wrong"}).status_code == 401
-    assert authenticated.post(f"/public/{token}/unlock", json={"password": "review-secret"}).status_code == 204
+    unlocked = authenticated.post(f"/public/{token}/unlock", json={"password": "review-secret"})
+    assert unlocked.status_code == 204
+    assert f"Path={share_cookie_path(token)}" in unlocked.headers["set-cookie"]
     assert authenticated.get(f"/public/{token}").status_code == 200
     event = authenticated.post(f"/public/{token}/events", json={
         "event_type": "step_view", "visitor_id": "visitor", "session_id": "session", "step_id": step["id"],

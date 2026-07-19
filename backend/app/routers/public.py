@@ -20,6 +20,12 @@ def share_cookie_name(token: str) -> str:
     return f"docflow_share_{hash_token(token)[:16]}"
 
 
+def share_cookie_path(token: str) -> str:
+    """Scope the unlock cookie to the public share behind any API URL prefix."""
+    api_prefix = urlparse(settings.public_base_url).path.rstrip("/")
+    return f"{api_prefix}/public/{token}"
+
+
 def published(db: Session, token: str, request: Request | None = None) -> tuple[ShareToken, PublishedRevision]:
     share = db.scalar(select(ShareToken).where(ShareToken.token == token, ShareToken.revoked.is_(False)))
     if not share:
@@ -193,5 +199,5 @@ def unlock_share(token: str, payload: ShareUnlock, response: Response, db: Sessi
         raise HTTPException(status_code=401, detail="incorrect share password")
     response.set_cookie(
         share_cookie_name(token), hash_token(f"{share.id}:{share.password_hash}"), max_age=86400,
-        httponly=True, secure=settings.cookie_secure, samesite="lax", path=f"/public/{token}",
+        httponly=True, secure=settings.cookie_secure, samesite="lax", path=share_cookie_path(token),
     )
