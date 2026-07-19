@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from calendar import monthrange
-from sqlalchemy import distinct, func, or_, select
+import math
+from sqlalchemy import distinct, func, or_, select, text
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from app.models import AIUsageRecord, AnalyticsEvent, Demo, ExportDownloadEvent, ExportJob, OrganizationMember, OrganizationQuotaAssignment, PublishedRevision, QuotaPlan, ShareToken, Step
+from app.models import AIJob, AIUsageRecord, AnalyticsEvent, Demo, ExportDownloadEvent, ExportJob, JobStatus, OrganizationMember, OrganizationQuotaAssignment, PublishedRevision, QuotaPlan, ShareToken, Step
 from app.storage import storage
 
 DEFAULT_LIMITS={"storage_bytes":10737418240,"resources":100,"max_steps_per_resource":500,"members":10,"active_shares":50,"monthly_ai_tokens":100000,"monthly_exports":50,"monthly_video_minutes":60,"monthly_public_views":20000,"monthly_download_bytes":21474836480}
@@ -33,15 +34,26 @@ def usage(db:Session,organization_id:str)->dict[str,int]:
             if asset:keys.add(asset)
             if snapshot:keys.add(snapshot)
         keys.update(x for x in db.scalars(select(ExportJob.result_key).where(ExportJob.demo_id.in_(ids),ExportJob.result_key.is_not(None))).all() if x)
-    exports=db.scalars(select(ExportJob).where(ExportJob.demo_id.in_(ids),ExportJob.created_at>=start,ExportJob.created_at<=end)).all() if ids else []
+        for revision in db.scalars(select(PublishedRevision).where(PublishedRevision.demo_id.in_(ids))).all():
+            keys.update(step.get("asset_key") for step in (revision.snapshot or {}).get("steps",[]) if step.get("asset_key"))
+    exports=db.scalars(select(ExportJob).where(
+        ExportJob.demo_id.in_(ids),ExportJob.created_at>=start,ExportJob.created_at<=end,
+        ExportJob.status.in_([JobStatus.queued,JobStatus.running,JobStatus.complete]),
+    )).all() if ids else []
     revisions={r.id:r for r in db.scalars(select(PublishedRevision).where(PublishedRevision.id.in_([x.revision_id for x in exports if x.kind=="mp4"]))).all()} if exports else {}
     video_seconds=sum(sum(float(s.get("duration",3)) for s in revisions.get(x.revision_id).snapshot.get("steps",[])) for x in exports if x.kind=="mp4" and revisions.get(x.revision_id))
+    reserved_ai_tokens=db.scalar(select(func.sum(AIJob.quota_reserved_tokens)).join(Demo,Demo.id==AIJob.demo_id).where(
+        Demo.organization_id==organization_id,
+        AIJob.status.in_([JobStatus.queued,JobStatus.running]),
+        AIJob.created_at>=start,AIJob.created_at<=end,
+    )) or 0
+    reserved_export_bytes=sum(job.quota_reserved_bytes or 0 for job in exports if job.status in {JobStatus.queued,JobStatus.running})
     return {
-      "storage_bytes":sum(storage.size(k) for k in keys),"resources":len(ids),"max_steps_per_resource":max([c for _,c in steps],default=0),
+      "storage_bytes":sum(storage.size(k) for k in keys)+reserved_export_bytes,"resources":len(ids),"max_steps_per_resource":max([c for _,c in steps],default=0),
       "members":db.scalar(select(func.count(OrganizationMember.id)).where(OrganizationMember.organization_id==organization_id)) or 0,
       "active_shares":db.scalar(select(func.count(ShareToken.id)).join(Demo,Demo.id==ShareToken.demo_id).where(Demo.organization_id==organization_id,ShareToken.revoked.is_(False),or_(ShareToken.expires_at.is_(None),ShareToken.expires_at>datetime.now(timezone.utc)))) or 0,
-      "monthly_ai_tokens":db.scalar(select(func.sum(AIUsageRecord.total_tokens)).where(AIUsageRecord.organization_id==organization_id,AIUsageRecord.created_at>=start,AIUsageRecord.created_at<=end)) or 0,
-      "monthly_exports":len(exports),"monthly_video_minutes":round(video_seconds/60),
+      "monthly_ai_tokens":(db.scalar(select(func.sum(AIUsageRecord.total_tokens)).where(AIUsageRecord.organization_id==organization_id,AIUsageRecord.created_at>=start,AIUsageRecord.created_at<=end)) or 0)+reserved_ai_tokens,
+      "monthly_exports":len(exports),"monthly_video_minutes":math.ceil(video_seconds/60),
       "monthly_public_views":db.scalar(select(func.count(distinct(AnalyticsEvent.session_id))).join(Demo,Demo.id==AnalyticsEvent.demo_id).where(Demo.organization_id==organization_id,AnalyticsEvent.created_at>=start,AnalyticsEvent.created_at<=end)) or 0,
       "monthly_download_bytes":db.scalar(select(func.sum(ExportDownloadEvent.bytes_transferred)).where(ExportDownloadEvent.organization_id==organization_id,ExportDownloadEvent.status=="completed",ExportDownloadEvent.created_at>=start,ExportDownloadEvent.created_at<=end)) or 0,
     }
@@ -49,12 +61,24 @@ def usage(db:Session,organization_id:str)->dict[str,int]:
 def quota_summary(db:Session,organization_id:str)->dict:
     plan,limits,assignment=effective_plan(db,organization_id);used=usage(db,organization_id);start,end=month_range();items=[]
     for key,limit in limits.items():
-        value=int(used.get(key,0));percent=round(value/int(limit)*100,1) if limit else 0;items.append({"key":key,"used":value,"limit":limit,"percent":percent,"status":"exceeded" if limit and value>=limit else "warning" if limit and percent>=80 else "normal","enforcement":"soft" if key in SOFT else "hard"})
+        value=int(used.get(key,0));has_limit=limit is not None;percent=round(value/int(limit)*100,1) if limit else 100.0 if has_limit else 0;items.append({"key":key,"used":value,"limit":limit,"percent":percent,"status":"exceeded" if has_limit and value>=int(limit) else "warning" if has_limit and percent>=80 else "normal","enforcement":"soft" if key in SOFT else "hard"})
     return {"organization_id":organization_id,"plan":{"id":plan.id,"name":plan.name,"description":plan.description},"items":items,"period":{"starts_at":start,"resets_at":end},"has_overrides":bool(assignment and assignment.overrides)}
 
-def enforce(db:Session,organization_id:str,key:str,increment:int=1):
+def _quota_lock(db:Session,organization_id:str,key:str)->None:
+    """Serialize quota-consuming transactions in PostgreSQL.
+
+    UI capability checks are advisory. This transaction-scoped lock keeps two
+    concurrent requests from both observing the same remaining allowance.
+    SQLite is used by tests and does not support advisory locks.
+    """
+    if db.bind and db.bind.dialect.name=="postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),{"lock_key":f"docflow-quota:{organization_id}:{key}"})
+
+
+def enforce(db:Session,organization_id:str,key:str,increment:int=1,current:int|None=None):
     _,limits,_=effective_plan(db,organization_id);limit=limits.get(key)
     if key in SOFT or limit is None:return
-    current=usage(db,organization_id).get(key,0)
-    if current+increment>int(limit):
-        raise HTTPException(status_code=403,detail={"message":"workspace quota exceeded","code":f"quota.{key}_exceeded","quota":{"metric":key,"used":current,"limit":limit}})
+    _quota_lock(db,organization_id,key)
+    used=usage(db,organization_id).get(key,0) if current is None else current
+    if used+max(0,increment)>int(limit):
+        raise HTTPException(status_code=403,detail={"message":"workspace quota exceeded","code":f"quota.{key}_exceeded","quota":{"metric":key,"used":used,"limit":limit}})

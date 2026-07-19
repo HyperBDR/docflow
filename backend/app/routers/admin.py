@@ -84,6 +84,8 @@ from app.schemas import (
 )
 from app.security import hash_password
 from app.services import demo_out, write_audit
+from app.quota import enforce
+from app.quota_estimates import estimate_ai_tokens, estimate_snapshot_export_bytes, estimate_snapshot_video_minutes
 from app.security import utcnow
 from app.ai_models import platform_settings, set_default
 from app.secrets import encrypt_secret
@@ -496,17 +498,26 @@ def retry_admin_job(
     if job_type == "ai":
         if not active_model(db, source.model_config_id):
             raise HTTPException(status_code=409, detail="configured AI model is unavailable")
+        reservation = estimate_ai_tokens(demo, source.step_id)
+        enforce(db, demo.organization_id, "monthly_ai_tokens", reservation)
         target: AIJob | ExportJob = AIJob(
             owner_id=source.owner_id, demo_id=source.demo_id, step_id=source.step_id,
             model_config_id=source.model_config_id, model=source.model, retry_of_id=source.id,
+            quota_reserved_tokens=reservation,
         )
         task_name = "docflow.ai_generate"
     else:
-        if not db.get(PublishedRevision, source.revision_id):
+        revision = db.get(PublishedRevision, source.revision_id)
+        if not revision:
             raise HTTPException(status_code=409, detail="published revision is no longer available")
+        reserved_bytes = estimate_snapshot_export_bytes(revision.snapshot, source.kind)
+        enforce(db, demo.organization_id, "monthly_exports")
+        if source.kind == "mp4":
+            enforce(db, demo.organization_id, "monthly_video_minutes", estimate_snapshot_video_minutes(revision.snapshot))
+        enforce(db, demo.organization_id, "storage_bytes", reserved_bytes)
         target = ExportJob(
             owner_id=source.owner_id, demo_id=source.demo_id, revision_id=source.revision_id,
-            kind=source.kind, retry_of_id=source.id,
+            kind=source.kind, retry_of_id=source.id, quota_reserved_bytes=reserved_bytes,
         )
         task_name = "docflow.render_export"
     db.add(target)
@@ -1092,6 +1103,7 @@ def add_user_membership(
     ))
     if existing:
         raise HTTPException(status_code=409, detail="user is already an organization member")
+    enforce(db, organization.id, "members")
     membership = OrganizationMember(organization_id=organization.id, user_id=target.id, role=payload.role)
     db.add(membership); db.flush()
     if not target.current_organization_id:

@@ -16,7 +16,7 @@ from app.schemas import RecordingAuditInput, RecordingDomMeta, RecordingStepMeta
 from app.services import owned_demo, step_out, write_audit
 from app.snapshots import SnapshotError, decode_snapshot, sanitize_page_context, sanitize_snapshot, store_snapshot
 from app.storage import storage
-from app.quota import effective_plan, enforce
+from app.quota import enforce
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 
@@ -39,7 +39,7 @@ async def upload_step(
     if existing:
         return step_out(existing, demo.id)
     count = db.scalar(select(func.count()).select_from(Step).where(Step.demo_id == demo.id)) or 0
-    if count >= int(effective_plan(db,demo.organization_id)[1]["max_steps_per_resource"]): enforce(db,demo.organization_id,"max_steps_per_resource")
+    enforce(db,demo.organization_id,"max_steps_per_resource",current=count)
     content = await screenshot.read(10 * 1024 * 1024 + 1)
     enforce(db,demo.organization_id,"storage_bytes",len(content))
     if len(content) > 10 * 1024 * 1024:
@@ -112,29 +112,35 @@ async def upload_dom_slide(
     if existing:
         return step_out(existing, demo.id)
     count = db.scalar(select(func.count()).select_from(Step).where(Step.demo_id == demo.id)) or 0
-    if count >= int(effective_plan(db,demo.organization_id)[1]["max_steps_per_resource"]): enforce(db,demo.organization_id,"max_steps_per_resource")
+    enforce(db,demo.organization_id,"max_steps_per_resource",current=count)
 
     screenshot_content = await screenshot.read(10 * 1024 * 1024 + 1)
     if len(screenshot_content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="screenshot exceeds 10 MB")
-    try:
-        image_key, width, height = storage.save_screenshot(f"assets/drafts/{demo.id}/{uuid.uuid4()}", screenshot_content)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail="invalid screenshot") from exc
 
     warnings = list(parsed.capture_warnings)
     snapshot_key = None
+    snapshot_content = b""
+    sanitized_snapshot = None
     if snapshot and settings.dom_slides_enabled:
         try:
-            content = await snapshot.read(settings.snapshot_compressed_limit_mb * 1024 * 1024 + 1)
-            decoded = decode_snapshot(content)
-            sanitized, sanitizer_warnings = sanitize_snapshot(decoded)
+            snapshot_content = await snapshot.read(settings.snapshot_compressed_limit_mb * 1024 * 1024 + 1)
+            decoded = decode_snapshot(snapshot_content)
+            sanitized_snapshot, sanitizer_warnings = sanitize_snapshot(decoded)
             warnings.extend(sanitizer_warnings)
-            snapshot_key = store_snapshot(sanitized)
         except SnapshotError as exc:
+            snapshot_content = b""
             warnings.append(f"DOM fallback: {exc}")
     elif snapshot:
         warnings.append("DOM slides are disabled; stored as an image slide")
+
+    enforce(db,demo.organization_id,"storage_bytes",len(screenshot_content)+len(snapshot_content))
+    try:
+        image_key, width, height = storage.save_screenshot(f"assets/drafts/{demo.id}/{uuid.uuid4()}", screenshot_content)
+        if sanitized_snapshot is not None:
+            snapshot_key = store_snapshot(sanitized_snapshot)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="invalid screenshot") from exc
 
     target_text = parsed.target.text if parsed.target and parsed.target.text else "目标元素"
     title = parsed.title or ("流程完成" if parsed.terminal else f"点击「{target_text[:60]}」")

@@ -15,6 +15,7 @@ from app.services import write_audit
 from app.storage import storage
 from app.worker import celery
 from app.quota import enforce
+from app.quota_estimates import estimate_export_bytes, estimate_video_minutes
 
 router = APIRouter(prefix="/api/exports", tags=["exports"])
 
@@ -40,8 +41,6 @@ def export_out(job: ExportJob) -> ExportOut:
 @router.get("", response_model=list[ExportOut])
 def list_exports(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
-    enforce(db, demo.organization_id, "monthly_exports")
-    if payload.kind == "mp4": enforce(db, demo.organization_id, "monthly_video_minutes", max(1, round(sum(step.duration for step in demo.steps) / 60)))
     jobs = db.scalars(
         select(ExportJob).where(ExportJob.demo_id == demo.id, ExportJob.owner_id == user.id)
         .order_by(ExportJob.created_at.desc()).limit(50)
@@ -54,7 +53,15 @@ def create_export(payload: ExportCreate, demo_id: str, request: Request, db: Ses
     demo = owned_demo(db, demo_id, user)
     if not demo.current_revision_id:
         raise HTTPException(status_code=400, detail="publish the demo before exporting")
-    job = ExportJob(owner_id=user.id, demo_id=demo.id, revision_id=demo.current_revision_id, kind=payload.kind)
+    reserved_bytes = estimate_export_bytes(demo, payload.kind)
+    enforce(db, demo.organization_id, "monthly_exports")
+    if payload.kind == "mp4":
+        enforce(db, demo.organization_id, "monthly_video_minutes", estimate_video_minutes(demo))
+    enforce(db, demo.organization_id, "storage_bytes", reserved_bytes)
+    job = ExportJob(
+        owner_id=user.id, demo_id=demo.id, revision_id=demo.current_revision_id,
+        kind=payload.kind, quota_reserved_bytes=reserved_bytes,
+    )
     db.add(job)
     db.flush()
     write_audit(db, user, "export.created", "export", job.id, f"{demo.title} · {job.kind}", demo.organization_id,

@@ -247,6 +247,7 @@ def create_invitation(organization_id: str, payload: InvitationCreate, request: 
     existing_user = db.scalar(select(User).where(User.email == email, User.deleted_at.is_(None)))
     if existing_user and organization_membership(db, existing_user, organization_id):
         raise HTTPException(status_code=409, detail="user is already an organization member")
+    enforce(db, organization_id, "members")
     token = random_token(32)
     invitation = OrganizationInvitation(
         organization_id=organization_id, email=email, role=payload.role,

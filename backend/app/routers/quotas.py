@@ -6,8 +6,9 @@ from app.dependencies import admin_user,current_user
 from app.models import Organization,OrganizationMember,OrganizationQuotaAssignment,PlatformQuotaPolicy,QuotaPlan,User
 from app.quota import DEFAULT_LIMITS,effective_plan,quota_summary
 from app.quota_analytics import collect_quota_usage,operations_overview,plan_statistics,space_history
+from app.quota_capabilities import quota_capabilities
 from app.quota_policy import platform_limits,preview,validate_limits,policy_values,normalized_policy,impact
-from app.services import current_organization_id,write_audit
+from app.services import current_organization_id,require_organization_role,viewable_demo,write_audit
 
 router=APIRouter(tags=["quotas"])
 
@@ -25,6 +26,17 @@ def workspace_quotas(db:Session=Depends(get_db),user:User=Depends(current_user))
 @router.get("/api/workspace/quotas/history")
 def workspace_quota_history(days:int=Query(30,ge=1,le=400),db:Session=Depends(get_db),user:User=Depends(current_user)):
     return space_history(db,current_organization_id(db,user),days)
+
+
+@router.get("/api/workspace/capabilities")
+def workspace_capabilities(
+    organization_id:str|None=None,demo_id:str|None=None,
+    db:Session=Depends(get_db),user:User=Depends(current_user),
+):
+    demo=viewable_demo(db,demo_id,user) if demo_id else None
+    target_id=demo.organization_id if demo else organization_id or current_organization_id(db,user)
+    require_organization_role(db,user,target_id,{"owner","admin","editor","viewer"})
+    return quota_capabilities(db,target_id,demo)
 
 @router.get("/api/admin/quota-plans")
 def plans(db:Session=Depends(get_db),_:User=Depends(admin_user)):return [plan_out(x) for x in db.scalars(select(QuotaPlan).order_by(QuotaPlan.is_default.desc(),QuotaPlan.name)).all()]

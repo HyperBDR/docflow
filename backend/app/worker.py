@@ -6,7 +6,7 @@ from celery.schedules import crontab
 from app.config import settings
 from app.database import SessionLocal
 from app.exporters import render_markdown_zip, render_mp4, render_pdf, render_player_images
-from app.models import ExportJob, JobStatus, PublishedRevision, ShareToken, now
+from app.models import Demo, ExportJob, JobStatus, PublishedRevision, ShareToken, now
 from app.storage import storage
 from app.ai_service import run_ai_generation
 from app.in_app_notifications import notify_job_result
@@ -59,6 +59,12 @@ def render_export(job_id: str):
         db.refresh(job)
         if job.status == JobStatus.cancelled:
             return
+        extra_bytes = max(0, len(data) - int(job.quota_reserved_bytes or 0))
+        if extra_bytes:
+            from app.quota import enforce
+            demo = db.get(Demo, job.demo_id)
+            if demo:
+                enforce(db, demo.organization_id, "storage_bytes", extra_bytes)
         extension = {"pdf": "pdf", "mp4": "mp4", "markdown": "zip"}[job.kind]
         result_key = storage.write(f"exports/{job.id}.{extension}", data)
         db.refresh(job)

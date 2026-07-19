@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.ai_models import active_model
 from app.models import AIJob, Demo, JobStatus, User
+from app.quota import enforce
+from app.quota_estimates import estimate_ai_tokens
 from app.worker import celery
 
 
@@ -18,7 +20,13 @@ def enqueue_ai_job(db: Session, demo: Demo, user: User, step_id: str | None = No
     model = active_model(db)
     if not model:
         raise RuntimeError("AI is not configured")
-    job = AIJob(owner_id=user.id, demo_id=demo.id, step_id=step_id, model_config_id=model.id, model=model.model)
+    reservation = estimate_ai_tokens(demo, step_id)
+    enforce(db, demo.organization_id, "monthly_ai_tokens", reservation)
+    job = AIJob(
+        owner_id=user.id, demo_id=demo.id, step_id=step_id,
+        model_config_id=model.id, model=model.model,
+        quota_reserved_tokens=reservation,
+    )
     db.add(job)
     db.commit()
     db.refresh(job)

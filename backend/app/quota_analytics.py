@@ -127,7 +127,8 @@ def live_space_rows(db: Session) -> list[dict]:
             items = []
             for key in DEFAULT_LIMITS:
                 snapshot = snapshots[key]
-                status = "exceeded" if snapshot.limit and snapshot.used >= snapshot.limit else "warning" if snapshot.limit and snapshot.usage_percent >= 80 else "normal"
+                has_limit = snapshot.limit is not None
+                status = "exceeded" if has_limit and snapshot.used >= snapshot.limit else "warning" if has_limit and snapshot.usage_percent >= 80 else "normal"
                 items.append({
                     "key": key, "used": snapshot.used, "limit": snapshot.limit,
                     "percent": round(snapshot.usage_percent, 1), "status": status,

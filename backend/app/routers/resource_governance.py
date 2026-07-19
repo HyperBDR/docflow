@@ -15,6 +15,7 @@ from app.models import (
 )
 from app.services import write_audit
 from app.storage import storage
+from app.quota import enforce
 
 router = APIRouter(prefix="/api/admin/resource-governance", tags=["resource-governance"])
 
@@ -79,6 +80,9 @@ def govern_share(share_id: str, payload: dict, request: Request, db: Session = D
     if not share or not demo or demo.deleted_at:
         raise HTTPException(status_code=404, detail="share link not found")
     before = {"revoked": share.revoked, "expires_at": share.expires_at.isoformat() if share.expires_at else None}
+    expires_at = share.expires_at if not share.expires_at or share.expires_at.tzinfo else share.expires_at.replace(tzinfo=timezone.utc)
+    if share.revoked and payload.get("revoked") is False and (expires_at is None or expires_at > now()):
+        enforce(db, demo.organization_id, "active_shares")
     if "revoked" in payload: share.revoked = bool(payload["revoked"])
     if share.revoked:
         write_audit(db, actor, "share.revoked", "share", share.id, share.name or demo.title,

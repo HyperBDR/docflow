@@ -17,6 +17,7 @@ from app.security import hash_password
 from app.quota import enforce
 from app.services import active_share, current_organization_id, demo_out, next_revision_number, owned_demo, require_organization_role, step_out, viewable_demo, write_audit
 from app.storage import storage
+from app.quota_estimates import estimate_publish_bytes
 
 router = APIRouter(prefix="/api/demos", tags=["demos"])
 
@@ -101,6 +102,8 @@ def delete_demo(demo_id: str, request: Request, db: Session = Depends(get_db), u
 @router.post("/{demo_id}/duplicate", response_model=DemoOut, status_code=201)
 def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     source = owned_demo(db, demo_id, user)
+    enforce(db, source.organization_id, "resources")
+    enforce(db, source.organization_id, "max_steps_per_resource", len(source.steps), current=0)
     duplicate = Demo(
         owner_id=user.id,
         organization_id=source.organization_id,
@@ -193,6 +196,10 @@ def merge_demos(payload: MergeDemos, db: Session = Depends(get_db), user: User =
     if not all(source.steps for source in sources):
         raise HTTPException(status_code=400, detail="empty demos cannot be merged")
     first = sources[0]
+    if any(source.organization_id != first.organization_id for source in sources):
+        raise HTTPException(status_code=400, detail="demos must belong to the same organization")
+    enforce(db, first.organization_id, "resources")
+    enforce(db, first.organization_id, "max_steps_per_resource", sum(len(source.steps) for source in sources), current=0)
     if payload.category_id:
         category = db.get(Category, payload.category_id)
         if not category or category.organization_id != first.organization_id:
@@ -280,6 +287,9 @@ def publish_demo(demo_id: str, request: Request, db: Session = Depends(get_db), 
     demo = owned_demo(db, demo_id, user)
     if not demo.steps:
         raise HTTPException(status_code=400, detail="cannot publish an empty demo")
+    if not active_share(db, demo.id):
+        enforce(db, demo.organization_id, "active_shares")
+    enforce(db, demo.organization_id, "storage_bytes", estimate_publish_bytes(demo))
     revision_id = secrets.token_hex(18)
     steps = []
     for step in sorted(demo.steps, key=lambda item: item.position):
@@ -367,11 +377,11 @@ def list_share_links(demo_id: str, db: Session = Depends(get_db), user: User = D
 @router.post("/{demo_id}/shares", status_code=201)
 def create_share_link(payload: ShareLinkCreate, demo_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
-    enforce(db, demo.organization_id, "active_shares")
     if not demo.current_revision_id:
         raise HTTPException(status_code=400, detail="publish the demo before creating a share link")
     if payload.expires_at and payload.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="expiration must be in the future")
+    enforce(db, demo.organization_id, "active_shares")
     share = ShareToken(
         demo_id=demo.id, revision_id=demo.current_revision_id, token=secrets.token_urlsafe(24),
         name=payload.name.strip(), created_by_id=user.id, expires_at=payload.expires_at,
@@ -391,11 +401,18 @@ def update_share_link(payload: ShareLinkUpdate, demo_id: str, share_id: str, req
     if not share:
         raise HTTPException(status_code=404, detail="share link not found")
     before = {"name": share.name, "expires_at": share.expires_at.isoformat() if share.expires_at else None, "revoked": share.revoked, "password_protected": bool(share.password_hash)}
+    current = datetime.now(timezone.utc)
+    previous_expiry = share.expires_at if not share.expires_at or share.expires_at.tzinfo else share.expires_at.replace(tzinfo=timezone.utc)
+    was_active = not share.revoked and (previous_expiry is None or previous_expiry > current)
     values = payload.model_dump(exclude_unset=True)
     if "name" in values: share.name = (values["name"] or "").strip()
     if "expires_at" in values: share.expires_at = values["expires_at"]
     if "password" in values: share.password_hash = hash_password(values["password"]) if values["password"] else None
     if "revoked" in values: share.revoked = values["revoked"]
+    next_expiry = share.expires_at if not share.expires_at or share.expires_at.tzinfo else share.expires_at.replace(tzinfo=timezone.utc)
+    will_be_active = not share.revoked and (next_expiry is None or next_expiry > current)
+    if not was_active and will_be_active:
+        enforce(db, demo.organization_id, "active_shares")
     write_audit(db, user, "share.updated", "share", share.id, share.name or demo.title, demo.organization_id,
                 before=before, after={"name": share.name, "expires_at": share.expires_at.isoformat() if share.expires_at else None, "revoked": share.revoked, "password_protected": bool(share.password_hash)}, request=request)
     db.commit(); db.refresh(share)

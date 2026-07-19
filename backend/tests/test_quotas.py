@@ -1,3 +1,23 @@
+from unittest.mock import patch
+
+from app.database import SessionLocal
+from app.models import Demo, PublishedRevision, Step
+
+
+def assign_limits(client, organization_id: str, **overrides):
+    plans = client.get('/api/admin/quota-plans').json()
+    if not plans:
+        client.get('/api/workspace/quotas')
+        plans = client.get('/api/admin/quota-plans').json()
+    plan = plans[0]
+    response = client.put(
+        f'/api/admin/organizations/{organization_id}/quota',
+        json={'plan_id': plan['id'], 'overrides': overrides},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def test_workspace_quota_summary_and_admin_override(authenticated):
     summary=authenticated.get('/api/workspace/quotas')
     assert summary.status_code==200,summary.text
@@ -83,3 +103,111 @@ def test_platform_quota_limits_preview_confirmation_and_validation(authenticated
     assert invalid.json()['code']=='quota.platform_limit_exceeded'
     valid=authenticated.post('/api/admin/quota-plans',json={'name':'Within boundary','limits':{'resources':1}})
     assert valid.status_code==201,valid.text
+
+
+def test_capabilities_recover_immediately_after_quota_increase(authenticated):
+    demo = authenticated.post('/api/demos', json={'title': 'Quota recovery'}).json()
+    organization_id = demo['organization_id']
+    assign_limits(authenticated, organization_id, monthly_ai_tokens=0, max_steps_per_resource=0)
+
+    blocked = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo['id']})
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()['actions']['use_ai']['allowed'] is False
+    assert blocked.json()['actions']['record_step']['allowed'] is False
+    assert blocked.json()['actions']['use_ai']['blockers'][0]['code'] == 'quota.monthly_ai_tokens_exceeded'
+
+    assign_limits(authenticated, organization_id, monthly_ai_tokens=10_000, max_steps_per_resource=20)
+    restored = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo['id']}).json()
+    assert restored['actions']['use_ai']['allowed'] is True
+    assert restored['actions']['record_step']['allowed'] is True
+
+
+def test_duplicate_and_merge_respect_resource_and_step_quotas(authenticated):
+    first = authenticated.post('/api/demos', json={'title': 'First'}).json()
+    second = authenticated.post('/api/demos', json={'title': 'Second'}).json()
+    organization_id = first['organization_id']
+    assign_limits(authenticated, organization_id, resources=2)
+
+    duplicate = authenticated.post(f"/api/demos/{first['id']}/duplicate")
+    assert duplicate.status_code == 403
+    assert duplicate.json()['code'] == 'quota.resources_exceeded'
+
+    db = SessionLocal()
+    try:
+        for index, demo_id in enumerate([first['id'], second['id']]):
+            db.add(Step(
+                demo_id=demo_id, event_id=f'quota-step-{index}', position=0,
+                title='Step', body='', asset_key=f'missing-{index}', viewport_width=100, viewport_height=100,
+                hotspot={}, redactions=[], duration=3,
+            ))
+        db.commit()
+    finally:
+        db.close()
+    assign_limits(authenticated, organization_id, resources=100, max_steps_per_resource=1)
+    merged = authenticated.post('/api/demos/merge', json={'demo_ids': [first['id'], second['id']], 'title': 'Merged'})
+    assert merged.status_code == 403
+    assert merged.json()['code'] == 'quota.max_steps_per_resource_exceeded'
+
+
+def test_export_list_is_read_only_and_creation_recovers_after_increase(authenticated):
+    demo_data = authenticated.post('/api/demos', json={'title': 'Export quota'}).json()
+    organization_id = demo_data['organization_id']
+    db = SessionLocal()
+    try:
+        demo = db.get(Demo, demo_data['id'])
+        revision = PublishedRevision(demo_id=demo.id, number=1, snapshot={'title': demo.title, 'steps': []})
+        db.add(revision); db.flush(); demo.current_revision_id = revision.id; db.commit()
+    finally:
+        db.close()
+
+    assign_limits(authenticated, organization_id, monthly_exports=0)
+    history = authenticated.get('/api/exports', params={'demo_id': demo_data['id']})
+    assert history.status_code == 200, history.text
+    blocked = authenticated.post(f"/api/exports/{demo_data['id']}", json={'kind': 'pdf'})
+    assert blocked.status_code == 403
+    assert blocked.json()['code'] == 'quota.monthly_exports_exceeded'
+
+    assign_limits(authenticated, organization_id, monthly_exports=1)
+    with patch('app.routers.exports.celery.send_task'):
+        created = authenticated.post(f"/api/exports/{demo_data['id']}", json={'kind': 'pdf'})
+    assert created.status_code == 202, created.text
+    exhausted = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo_data['id']}).json()
+    assert exhausted['actions']['export']['allowed'] is False
+
+    assign_limits(authenticated, organization_id, monthly_exports=2)
+    restored = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo_data['id']}).json()
+    assert restored['actions']['export']['allowed'] is True
+
+
+def test_member_invites_and_share_restore_follow_live_quota(authenticated):
+    team = authenticated.post('/api/organizations', json={'name': 'Quota team'}).json()
+    assign_limits(authenticated, team['id'], members=1)
+    blocked_invite = authenticated.post(
+        f"/api/organizations/{team['id']}/invitations",
+        json={'email': 'member@example.com', 'role': 'editor'},
+    )
+    assert blocked_invite.status_code == 403
+    assert blocked_invite.json()['code'] == 'quota.members_exceeded'
+    assign_limits(authenticated, team['id'], members=2)
+    assert authenticated.post(
+        f"/api/organizations/{team['id']}/invitations",
+        json={'email': 'member@example.com', 'role': 'editor'},
+    ).status_code == 201
+
+    authenticated.post(f"/api/organizations/{team['id']}/switch")
+    demo_data = authenticated.post('/api/demos', json={'title': 'Share quota'}).json()
+    db = SessionLocal()
+    try:
+        demo = db.get(Demo, demo_data['id'])
+        revision = PublishedRevision(demo_id=demo.id, number=1, snapshot={'title': demo.title, 'steps': []})
+        db.add(revision); db.flush(); demo.current_revision_id = revision.id; db.commit()
+    finally:
+        db.close()
+    assign_limits(authenticated, team['id'], active_shares=1)
+    share = authenticated.post(f"/api/demos/{demo_data['id']}/shares", json={'name': 'Review'}).json()
+    assert authenticated.patch(f"/api/demos/{demo_data['id']}/shares/{share['id']}", json={'revoked': True}).status_code == 200
+    assign_limits(authenticated, team['id'], active_shares=0)
+    blocked_restore = authenticated.patch(f"/api/demos/{demo_data['id']}/shares/{share['id']}", json={'revoked': False})
+    assert blocked_restore.status_code == 403
+    assign_limits(authenticated, team['id'], active_shares=1)
+    assert authenticated.patch(f"/api/demos/{demo_data['id']}/shares/{share['id']}", json={'revoked': False}).status_code == 200
