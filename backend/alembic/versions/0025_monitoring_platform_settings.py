@@ -1,13 +1,13 @@
 """Runtime monitoring and quota collection settings.
 
-Revision ID: 0025_monitoring_platform_settings
+Revision ID: 0025_monitoring_settings
 Revises: 0024_demo_ai_context
 """
 from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0025_monitoring_platform_settings"
+revision = "0025_monitoring_settings"
 down_revision = "0024_demo_ai_context"
 branch_labels = None
 depends_on = None
