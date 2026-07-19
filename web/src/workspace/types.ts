@@ -66,3 +66,10 @@ export type WorkspaceQuotaMetricKey='storage_bytes'|'resources'|'max_steps_per_r
 export type WorkspaceQuotaItem={key:WorkspaceQuotaMetricKey;used:number;limit:number|null;percent:number;status:'normal'|'warning'|'exceeded';enforcement:'hard'|'soft'}
 export type WorkspaceQuota={organization_id:string;organization_kind:'personal'|'team';can_manage_plan:boolean;plan:{id:string;name:string;description:string};items:WorkspaceQuotaItem[];period:{starts_at:string;resets_at:string};has_overrides:boolean}
 export type WorkspaceQuotaHistory={organization_id:string;points:{date:string;metrics:Partial<Record<WorkspaceQuotaMetricKey,{used:number;limit:number|null;percent:number}>>}[]}
+export type QuotaActionKey='create_resource'|'duplicate_resource'|'merge_resources'|'record_step'|'use_ai'|'create_share'|'publish'|'export'|'export_video'|'invite_member'
+export type QuotaBlocker={metric:WorkspaceQuotaMetricKey;code:string;used:number;limit:number;remaining:number;resets_at:string}
+export type QuotaActionCapability={allowed:boolean;blockers:QuotaBlocker[]}
+export type WorkspaceCapabilities={
+  organization_id:string;generated_at:string;plan:{id:string;name:string;description:string};period:{starts_at:string;resets_at:string}
+  items:WorkspaceQuotaItem[];actions:Record<QuotaActionKey,QuotaActionCapability>
+}

@@ -1,6 +1,7 @@
 import i18n from './i18n'
 import type { AdminDownload, AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminShare, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, PublicPlatformConfig, QuotaPlan, QuotaSummary, RecycleItem, ResourceGovernance, ShareLink, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 import type { PlatformQuotaLimits, PlatformQuotaPreview, QuotaMetricKey, QuotaOverview, QuotaPlanStatistics, QuotaSpaceHistory } from './quota/types'
+import type { WorkspaceCapabilities } from './workspace/types'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -134,6 +135,7 @@ export const api = {
   purgeTeamSpace: (id: string) => request<void>(`/api/admin/recycle-bin/team-spaces/${id}`, { method: 'DELETE' }),
   demos: () => request<Demo[]>('/api/demos'),
   demo: (id: string) => request<Demo>(`/api/demos/${id}`),
+  quotaCapabilities: (demoId?: string, organizationId?: string) => request<WorkspaceCapabilities>(`/api/workspace/capabilities?${new URLSearchParams({ ...(demoId ? { demo_id: demoId } : {}), ...(organizationId ? { organization_id: organizationId } : {}) })}`),
   createDemo: (title: string, categoryId?: string, contentLocale?: Locale) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title, category_id: categoryId || null, content_locale: contentLocale || 'zh-CN' }) }),
   updateDemo: (id: string, values: Partial<Demo> & { tag_ids?: string[] }) => request<Demo>(`/api/demos/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
   deleteDemo: (id: string) => request<void>(`/api/demos/${id}`, { method: 'DELETE' }),

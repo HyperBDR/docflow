@@ -2,6 +2,7 @@ import { captureDom, captureWarnings, normalized, pageContext, passwordRects, ta
 import { browserLocale, tr } from './locale'
 import type { CapturedSnapshot, Locale, RecordingMode } from './types'
 import { isConfiguredWebPage } from './config'
+import { quotaAllowed, quotaMessage, type WorkspaceCapabilities } from './quota'
 
 type RecorderState = {
   active?: boolean
@@ -11,6 +12,7 @@ type RecorderState = {
   steps?: number
   mode?: RecordingMode
   aiEnabled?: boolean
+  error?: string
   locale?: Locale
   contentLocale?: Locale
 }
@@ -108,15 +110,21 @@ function showRecordingSetup(message: {
   setupHost = host
   let selectedMode: RecordingMode = message.defaultMode || 'html'
   let selectedAI = Boolean(message.aiAvailable && message.defaultAI)
+  let capabilities: WorkspaceCapabilities | null = null
+  let quotaLoading = true
+  let quotaError = ''
+  let quotaRequest = 0
   let tutorialIndex = 0
   let setupView: 'config' | 'tutorial' = 'config'
   const availableSpaces = [...(message.spaces || [])].sort((left, right) => Number(left.kind === 'personal') - Number(right.kind === 'personal'))
   let selectedOrganizationId = availableSpaces.some(space => space.id === message.organizationId) ? message.organizationId! : availableSpaces[0]?.id || ''
   let diagnostics = message.diagnostics
   let resizeTimer: number | undefined
+  let quotaTimer: number | undefined
   let onWindowResize = () => {}
   const closeSetup = () => {
     window.clearTimeout(resizeTimer)
+    window.clearInterval(quotaTimer)
     window.removeEventListener('resize', onWindowResize)
     host.remove()
     if (setupHost === host) setupHost = null
@@ -133,6 +141,7 @@ function showRecordingSetup(message: {
     .modes{display:grid;grid-template-columns:1fr 1fr;gap:16px}.mode{position:relative;min-height:196px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px 22px;border:1px solid #dfe3eb;border-radius:17px;background:#fff;text-align:center;cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .2s,background .2s}.mode:hover{border-color:#c9c5ff;transform:translateY(-1px)}.mode.active{border-color:#7468f4;box-shadow:0 12px 30px #635bff22,0 0 0 3px #635bff16;background:linear-gradient(145deg,#fff 0%,#f8f6ff 46%,#ece9ff 100%)}.mode svg,.step-icon svg,.ai-icon svg,.space-icon svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mode>span:first-child{width:62px;height:62px;display:grid;place-items:center;border-radius:18px;color:#554ae8;background:linear-gradient(145deg,#eeedff,#dfdcff);box-shadow:0 8px 20px #635bff20}.mode>span:first-child svg{width:31px;height:31px}.mode>span:nth-child(2){display:block}.mode strong{display:block;margin-bottom:6px;font-size:15px;text-align:center}.mode small{display:block;max-width:260px;color:#748095;font-size:12px;line-height:1.5;text-align:center}.badge{position:absolute;right:13px;top:12px;padding:4px 8px;border-radius:10px;color:#4f46e5;background:#e8e6ff;font-size:9px;font-style:normal;font-weight:750}
     .config-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:16px;padding-top:2px}.space-field{min-width:0;margin:0;padding:0 10px 9px;border:1px solid #d9dee8;border-radius:11px}.space-field legend{margin-left:auto;padding:0 7px;color:#69758a;background:#fff;font-size:11px;font-weight:750}.space-dropdown{position:relative}.space-trigger{width:100%;height:42px;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:9px;padding:4px 1px;border:0;color:#344054;background:#fff;font:600 12px inherit;text-align:left;cursor:pointer}.space-trigger:disabled{cursor:not-allowed;opacity:.7}.space-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#5c52df;background:#eeedff}.space-icon svg{width:17px;height:17px}.space-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chevron{color:#8a94a6;font-size:11px}.space-menu{position:absolute;z-index:4;left:-10px;right:-10px;bottom:calc(100% + 10px);max-height:210px;overflow:auto;padding:6px;border:1px solid #dfe3eb;border-radius:11px;background:#fff;box-shadow:0 14px 35px #1820332e}.space-menu[hidden]{display:none}.space-option{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px;padding:7px;border:0;border-radius:8px;color:#344054;background:transparent;text-align:left;cursor:pointer}.space-option:hover,.space-option.active{background:#f3f1ff}.space-option.group-start{margin-top:5px;padding-top:10px;border-top:1px solid #edf0f4;border-radius:0 0 8px 8px}.space-option div{min-width:0}.space-option strong,.space-option small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.space-option strong{font-size:11px}.space-option small{margin-top:2px;color:#8a94a6;font-size:9px}
     .ai-compact{height:44px;display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid #e3e6ed;border-radius:10px;background:#f8f9fc}.ai-compact>span{display:flex;align-items:center;gap:7px;color:#465267;font-size:11px;font-weight:700;white-space:nowrap}.ai-icon{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;color:#7357df;background:#eee9ff}.ai-icon svg{width:16px;height:16px}.switch{position:relative;width:42px;height:24px}.switch input{position:absolute;opacity:0}.switch span{position:absolute;inset:0;border-radius:20px;background:#cbd2dd;transition:.2s}.switch span:after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0003;transition:.2s}.switch input:checked+span{background:#635bff}.switch input:checked+span:after{transform:translateX(18px)}.switch input:disabled+span{opacity:.45}
+    .quota-note{display:flex;align-items:flex-start;gap:8px;margin-top:-7px;padding:10px 12px;border:1px solid #ead9a3;border-radius:10px;color:#72581e;background:#fffaf0;font-size:11px;font-weight:650;line-height:1.45;white-space:pre-line}.quota-note i{width:7px;height:7px;flex:0 0 auto;margin-top:4px;border-radius:50%;background:#d89a24;box-shadow:0 0 0 4px #d89a2418}
     .actions{display:flex;justify-content:flex-end;gap:9px;padding:16px 32px 22px;border-top:1px solid #edf0f4}.btn{min-width:106px;padding:11px 16px;border:1px solid #d8dde7;border-radius:10px;background:#fff;color:#38445a;font:600 12px inherit;cursor:pointer}.btn.primary{border-color:#635bff;background:#635bff;color:#fff}.btn:hover{filter:brightness(.98)}
     .tutorial{padding:6px 26px 24px}.progress{display:flex;gap:6px;margin:0 0 19px}.progress i{height:4px;flex:1;border-radius:4px;background:#e5e7ec}.progress i.done{background:#635bff}.step-card{min-height:205px;display:grid;place-items:center;align-content:center;gap:14px;padding:28px;border:1px solid #e2e5ec;border-radius:16px;text-align:center;background:linear-gradient(145deg,#fafaff,#f5f6fa);animation:enter .25s ease}.step-icon{width:60px;height:60px;display:grid;place-items:center;border-radius:18px;color:#5b50e5;background:#eae8ff;box-shadow:0 8px 24px #635bff20}.step-icon svg{width:29px;height:29px}.step-card h3{margin:0;font-size:17px}.step-card p{max-width:450px}.step-number{color:#8a94a6;font-size:10px;font-weight:700;letter-spacing:.08em}@keyframes enter{from{opacity:.2;transform:translateY(5px)}}
     @media(max-width:620px){.modes{grid-template-columns:1fr}.mode{min-height:178px}.config-row{grid-template-columns:1fr}.ai-compact{justify-content:space-between}.diagnostics{width:calc(100% - 36px)}.diagnostic{grid-template-columns:32px 1fr}.diagnostic button{grid-column:2;width:max-content}.modal{border-radius:15px}.head,.body,.tutorial{padding-left:18px;padding-right:18px}.actions{padding-left:18px;padding-right:18px}}
@@ -147,6 +156,12 @@ function showRecordingSetup(message: {
 
   const renderConfig = () => {
     setupView = 'config'
+    const primaryAction = message.demoId ? 'record_step' : 'create_resource'
+    const recordAllowed = !quotaLoading && !quotaError && quotaAllowed(capabilities, primaryAction) && quotaAllowed(capabilities, 'record_step')
+    const aiAllowed = !quotaLoading && !quotaError && Boolean(message.aiAvailable) && quotaAllowed(capabilities, 'use_ai')
+    if (!aiAllowed) selectedAI = false
+    const recordQuotaMessage = quotaLoading ? tr(locale, 'quotaChecking') : quotaError || (!quotaAllowed(capabilities, primaryAction) ? quotaMessage(capabilities, primaryAction, locale) : !quotaAllowed(capabilities, 'record_step') ? quotaMessage(capabilities, 'record_step', locale) : '')
+    const aiQuotaMessage = !message.aiAvailable ? tr(locale, 'aiUnavailable') : quotaLoading ? tr(locale, 'quotaChecking') : quotaError || (!quotaAllowed(capabilities, 'use_ai') ? quotaMessage(capabilities, 'use_ai', locale) : tr(locale, 'aiDescription'))
     const selectedSpace = availableSpaces.find(space => space.id === selectedOrganizationId)
     const spaceOptions = availableSpaces.map((space, index) => `<button class="space-option ${space.id === selectedOrganizationId ? 'active' : ''} ${space.kind === 'personal' && index > 0 && availableSpaces[index - 1].kind !== 'personal' ? 'group-start' : ''}" data-space-id="${escapeHtml(space.id)}"><span class="space-icon">${icon(space.kind === 'team' ? 'team' : 'user')}</span><div><strong>${escapeHtml(space.name)}</strong><small>${tr(locale, space.kind === 'team' ? 'teamSpace' : 'personalSpace')}</small></div></button>`).join('')
     const resizeWarning = Boolean(diagnostics?.width && diagnostics?.height && (Math.abs(diagnostics.width - diagnostics.recommendedWidth) > 48 || Math.abs(diagnostics.height - diagnostics.recommendedHeight) > 48))
@@ -156,8 +171,8 @@ function showRecordingSetup(message: {
       <button class="mode ${selectedMode === 'html' ? 'active' : ''}" data-mode="html"><span>${icon('clone')}</span><span><strong>${tr(locale, 'htmlTitle')}</strong><small>${tr(locale, 'htmlDescription')}</small></span><em class="badge">${tr(locale, 'htmlBadge')}</em></button>
       <button class="mode ${selectedMode === 'screenshot' ? 'active' : ''}" data-mode="screenshot"><span>${icon('image')}</span><span><strong>${tr(locale, 'screenshotDemoTitle')}</strong><small>${tr(locale, 'screenshotDescription')}</small></span></button></div>
       <div class="config-row"><fieldset class="space-field"><legend>${tr(locale, 'saveTo')}</legend><div class="space-dropdown"><button id="space-trigger" class="space-trigger" ${message.lockOrganization ? 'disabled' : ''}><span class="space-icon">${icon(selectedSpace?.kind === 'personal' ? 'user' : 'team')}</span><strong>${escapeHtml(selectedSpace?.name || tr(locale, 'noAvailableSpace'))}</strong><span class="chevron">⌄</span></button><div id="space-menu" class="space-menu" hidden>${spaceOptions}</div></div></fieldset>
-      <div class="ai-compact" title="${message.aiAvailable ? escapeHtml(tr(locale, 'aiDescription')) : escapeHtml(tr(locale, 'aiUnavailable'))}"><span><i class="ai-icon">${icon('ai')}</i>${tr(locale, 'enhanceWithAI')}</span><label class="switch"><input id="ai-toggle" type="checkbox" ${selectedAI ? 'checked' : ''} ${message.aiAvailable ? '' : 'disabled'}><span></span></label></div></div></div>
-      <div class="actions"><button class="btn" id="cancel">${tr(locale, 'cancel')}</button><button class="btn primary" id="continue">${tr(locale, 'startSetup')}</button></div>${diagnosticCards ? `<div class="diagnostics">${diagnosticCards}</div>` : ''}`
+      <div class="ai-compact" title="${escapeHtml(aiQuotaMessage)}"><span><i class="ai-icon">${icon('ai')}</i>${tr(locale, 'enhanceWithAI')}</span><label class="switch"><input id="ai-toggle" type="checkbox" ${selectedAI ? 'checked' : ''} ${aiAllowed ? '' : 'disabled'}><span></span></label></div></div>${recordQuotaMessage ? `<div class="quota-note"><i></i><span>${escapeHtml(recordQuotaMessage)}</span></div>` : ''}</div>
+      <div class="actions"><button class="btn" id="cancel">${tr(locale, 'cancel')}</button><button class="btn primary" id="continue" ${recordAllowed ? '' : 'disabled'} title="${escapeHtml(recordQuotaMessage)}">${tr(locale, 'startSetup')}</button></div>${diagnosticCards ? `<div class="diagnostics">${diagnosticCards}</div>` : ''}`
     view.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => { selectedMode = button.dataset.mode as RecordingMode; renderConfig() }))
     view.querySelector<HTMLButtonElement>('#resize-window')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement
@@ -178,7 +193,7 @@ function showRecordingSetup(message: {
     view.querySelector<HTMLInputElement>('#ai-toggle')?.addEventListener('change', event => { selectedAI = (event.currentTarget as HTMLInputElement).checked })
     const spaceMenu = view.querySelector<HTMLElement>('#space-menu')
     view.querySelector('#space-trigger')?.addEventListener('click', () => { if (spaceMenu) spaceMenu.hidden = !spaceMenu.hidden })
-    view.querySelectorAll<HTMLButtonElement>('[data-space-id]').forEach(button => button.addEventListener('click', () => { selectedOrganizationId = button.dataset.spaceId || selectedOrganizationId; renderConfig() }))
+    view.querySelectorAll<HTMLButtonElement>('[data-space-id]').forEach(button => button.addEventListener('click', () => { selectedOrganizationId = button.dataset.spaceId || selectedOrganizationId; void refreshQuota() }))
     view.querySelector('#cancel')?.addEventListener('click', closeSetup)
     view.querySelector('#continue')?.addEventListener('click', async () => {
       const stored = await chrome.storage.local.get('recordingTutorialSeen')
@@ -186,6 +201,20 @@ function showRecordingSetup(message: {
       if (tutorialState?.[selectedMode]) { await startRecording(); return }
       tutorialIndex = 0; renderTutorial()
     })
+  }
+
+  const refreshQuota = async () => {
+    const requestId = ++quotaRequest
+    const requestedOrganizationId = selectedOrganizationId
+    quotaLoading = true; quotaError = ''; capabilities = null
+    if (setupView === 'config') renderConfig()
+    const result = await chrome.runtime.sendMessage({ type: 'GET_QUOTA_CAPABILITIES', organizationId: requestedOrganizationId, demoId: message.demoId || '' })
+    if (requestId !== quotaRequest || requestedOrganizationId !== selectedOrganizationId) return
+    quotaLoading = false
+    if (result?.error) quotaError = result.error
+    else capabilities = result as WorkspaceCapabilities
+    if (!message.aiAvailable || !quotaAllowed(capabilities, 'use_ai')) selectedAI = false
+    if (setupView === 'config') renderConfig()
   }
 
   const renderTutorial = () => {
@@ -219,6 +248,8 @@ function showRecordingSetup(message: {
   window.addEventListener('resize', onWindowResize)
   renderConfig()
   ;(document.documentElement || document.body).appendChild(host)
+  void refreshQuota()
+  quotaTimer = window.setInterval(() => { if (setupView === 'config') void refreshQuota() }, 15000)
 }
 
 function ensureHud() {
@@ -325,7 +356,7 @@ function applyState(state: RecorderState) {
   active = Boolean(state.active); paused = Boolean(state.paused); capturing = Boolean(state.capturing)
   phase = state.phase || ''; steps = Number(state.steps || 0); mode = state.mode || 'html'
   aiEnabled = Boolean(state.aiEnabled); locale = state.locale || locale; contentLocale = state.contentLocale || contentLocale
-  if (!capturing) lastError = ''
+  lastError = state.error ? `${tr(locale, 'captureFailed')}: ${state.error}` : capturing ? lastError : ''
   renderHud()
   if (active && !paused && mode === 'html') window.setTimeout(refreshSnapshot, document.readyState === 'complete' ? 0 : 500)
   else currentSnapshot = null

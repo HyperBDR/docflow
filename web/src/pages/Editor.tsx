@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { API_URL, ApiError, api } from '../api'
@@ -13,6 +13,9 @@ import { useToast } from '../components/toast'
 import { prepareExtensionRecording } from '../extensionBridge'
 import { prepareScreenshot, ScreenshotPreparationError } from '../screenshotUpload'
 import type { AIJob, Demo, ExportJob, HotspotData, Rect, SelectorInfo, Step } from '../types'
+import type { QuotaActionKey, WorkspaceCapabilities } from '../workspace/types'
+import { quotaAllowed, quotaGuardTitle } from '../quota/guards'
+import QuotaGuard from '../components/quota/QuotaGuard'
 
 type InspectorTab = 'content' | 'hotspot' | 'tooltip' | 'theme' | 'animation' | 'ai'
 type CanvasMode = 'preview' | 'edit'
@@ -100,7 +103,7 @@ function eventId() {
 }
 
 export default function Editor() {
-  const { t } = useTranslation('editor')
+  const { t, i18n } = useTranslation('editor')
   const toast = useToast()
   const { id = '' } = useParams()
   const [demo, setDemo] = useState<Demo | null>(null)
@@ -129,6 +132,7 @@ export default function Editor() {
   const [loadError, setLoadError] = useState('')
   const [recorderBusy, setRecorderBusy] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [capabilities, setCapabilities] = useState<WorkspaceCapabilities | null>(null)
   const selected = useMemo(() => demo?.steps.find(step => step.id === selectedId) || demo?.steps[0], [demo, selectedId])
   const selectedHotspot = useMemo(() => selected?.hotspots.find(item => item.id === selectedHotspotId) || selected?.hotspots[0], [selected, selectedHotspotId])
   const aiChangeReport = aiJob?.result?.changes as AIChangeReport | undefined
@@ -142,11 +146,20 @@ export default function Editor() {
     ai: t('ai.generate'),
   })[tab], [tab, t])
 
+  const refreshCapabilities = useCallback(() => api.quotaCapabilities(id).then(value => { setCapabilities(value); return value }), [id])
+
   useEffect(() => {
-    Promise.all([api.demo(id), api.latestAI(id), api.exports(id).catch(() => [])]).then(([value, latest, exportJobs]) => {
+    Promise.all([api.demo(id), api.latestAI(id), api.exports(id).catch(() => []), refreshCapabilities()]).then(([value, latest, exportJobs]) => {
       setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null); setAIJob(latest); setJobs(exportJobs)
     }).catch(value => setLoadError(value.message))
-  }, [id])
+  }, [id, refreshCapabilities])
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void refreshCapabilities().catch(() => undefined) }
+    const timer = window.setInterval(refresh, 15000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
+  }, [refreshCapabilities])
   useEffect(() => {
     const panel = inspectorPanelRef.current
     if (!panel) return
@@ -172,12 +185,23 @@ export default function Editor() {
       const next = await api.aiJob(aiJob.id)
       setAIJob(next)
       if (next.status === 'complete') {
-        const fresh = await api.demo(id); setDemo(fresh); toast.success(t('messages.aiComplete'), { dedupeKey: next.id })
+        const fresh = await api.demo(id); setDemo(fresh); void refreshCapabilities(); toast.success(t('messages.aiComplete'), { dedupeKey: next.id })
       }
       if (next.status === 'failed' || next.status === 'cancelled') toast.error(next.error_code ? t(`common:errors.codes.${next.error_code}`) : t('messages.aiFailed'), { dedupeKey: next.id, persistent: next.status === 'failed', action: { label: t('common:actions.view'), href: '/tasks' } })
     }, 1800)
     return () => clearInterval(timer)
   }, [aiJob?.id, aiJob?.status, id])
+
+  async function guardQuota(action: QuotaActionKey) {
+    let live = capabilities
+    try { live = await refreshCapabilities() } catch { /* mutation API remains authoritative */ }
+    if (quotaAllowed(live, action)) return true
+    toast.warning(quotaGuardTitle(live, action, t, i18n.language))
+    return false
+  }
+
+  const can = (action: QuotaActionKey) => quotaAllowed(capabilities, action)
+  const quotaTitle = (action: QuotaActionKey) => quotaGuardTitle(capabilities, action, t, i18n.language)
   useEffect(() => {
     if (detailMode !== 'present' || !demo || !presentationReady) return
     const handler = (event: KeyboardEvent) => {
@@ -266,6 +290,7 @@ export default function Editor() {
   }
   async function upload(file: File) {
     if (uploadBusy) return
+    if (!await guardQuota('record_step')) return
     setUploadBusy(true)
     try {
       const screenshot = await prepareScreenshot(file)
@@ -273,6 +298,7 @@ export default function Editor() {
       const form = new FormData(); form.append('meta', JSON.stringify(meta)); form.append('screenshot', screenshot.file)
       const step = await api.uploadStep(id, form)
       setDemo(current => current ? { ...current, steps: [...current.steps, step] } : current); setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null)
+      void refreshCapabilities()
       toast.success(t(screenshot.compressed ? 'messages.screenshotCompressed' : 'messages.screenshotAdded'))
     } catch (value) {
       if (value instanceof ScreenshotPreparationError) toast.error(t(value.code === 'too_large' ? 'messages.screenshotTooLarge' : 'messages.screenshotInvalid'))
@@ -284,8 +310,9 @@ export default function Editor() {
   }
   async function publish() {
     if (exportAction) return
+    if (!await guardQuota('publish')) return
     setExportAction('publish')
-    try { setDemo(await api.publish(id)); toast.success(t('messages.published')) }
+    try { setDemo(await api.publish(id)); void refreshCapabilities(); toast.success(t('messages.published')) }
     catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
@@ -310,22 +337,32 @@ export default function Editor() {
   }
   async function startExport(kind: ExportJob['kind']) {
     if (exportAction) return
+    if (!await guardQuota('publish')) return
     setExportAction(kind)
     try {
       // Export the current editor state instead of a potentially stale
       // published revision, so timing/Zoom changes take effect immediately.
       setDemo(await api.publish(id))
+      const live = await refreshCapabilities()
+      const quotaAction = kind === 'mp4' ? 'export_video' : 'export'
+      if (!quotaAllowed(live, quotaAction)) {
+        toast.warning(quotaGuardTitle(live, quotaAction, t, i18n.language))
+        return
+      }
       const job = await api.createExport(id, kind)
       setJobs(current => [job, ...current.filter(item => item.kind !== kind)])
+      void refreshCapabilities()
       toast.task(t('messages.exportCreated'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } })
     } catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
   async function generateAI(stepId?: string) {
-    try { const job = await api.generateAI(id, stepId); setAIJob(job); setTab('ai'); toast.task(t('workspace:toast.aiSubmitted'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } }) } catch (value) { toast.error((value as Error).message) }
+    if (!await guardQuota('use_ai')) return
+    try { const job = await api.generateAI(id, stepId); setAIJob(job); setTab('ai'); void refreshCapabilities(); toast.task(t('workspace:toast.aiSubmitted'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } }) } catch (value) { toast.error((value as Error).message) }
   }
   async function prepareRecorder() {
     if (!demo || recorderBusy) return
+    if (!await guardQuota('record_step')) return
     setRecorderBusy(true)
     try { await prepareExtensionRecording(demo.id); toast.success(t('messages.recorderReady')) }
     catch (value) { toast.error((value as Error).message === 'extension_not_detected' ? t('messages.extensionNotDetected') : t('messages.recorderFailed')) }
@@ -472,8 +509,8 @@ export default function Editor() {
           <button className="topbar-action icon-button compact-action" title={t('top.fullscreen')} onClick={() => document.documentElement.requestFullscreen()}><Icon name="layout" /></button>
         </> : <><button className="topbar-action icon-button" onClick={() => { setDetailMode('present'); setCanvasMode('preview'); setPresentationReady(false); window.history.replaceState(null, '', window.location.pathname) }}><Icon name="play" />{t('top.present')}</button><button className={`topbar-action icon-button ${focusMode ? 'active' : ''}`} onClick={() => { setFocusMode(value => !value); setMobilePanel(null) }} title={t(focusMode ? 'mobileDock.exitFocus' : 'mobileDock.focus')}><Icon name="layout" />{t(focusMode ? 'mobileDock.exitFocus' : 'mobileDock.focus')}</button></>}
         {demo.share_url && <a className="topbar-action button icon-button compact-action" href={demo.share_url} target="_blank" rel="noreferrer" title={t('top.publicLink')}><Icon name="share" /></a>}
-        {detailMode === 'edit' && <button className="topbar-action icon-button" disabled={recorderBusy} onClick={prepareRecorder}>{recorderBusy ? <span className="action-spinner" /> : <Icon name="record" />}{t(recorderBusy ? 'top.preparingRecorder' : 'top.continueRecording')}</button>}
-        {detailMode === 'edit' && demo.ai_enabled && <button className="topbar-action icon-button" onClick={() => generateAI()}><Icon name="ai" />{t('top.aiOptimize')}</button>}
+        {detailMode === 'edit' && <QuotaGuard message={!can('record_step') ? quotaTitle('record_step') : ''}><button className="topbar-action icon-button" disabled={recorderBusy || !can('record_step')} onClick={prepareRecorder}>{recorderBusy ? <span className="action-spinner" /> : <Icon name="record" />}{t(recorderBusy ? 'top.preparingRecorder' : 'top.continueRecording')}</button></QuotaGuard>}
+        {detailMode === 'edit' && demo.ai_enabled && <QuotaGuard message={!can('use_ai') ? quotaTitle('use_ai') : ''}><button className="topbar-action icon-button" disabled={!can('use_ai')} onClick={() => generateAI()}><Icon name="ai" />{t('top.aiOptimize')}</button></QuotaGuard>}
         <LanguageSwitcher account /><HelpLink/>
         <button className={`primary icon-button publish-action ${exportCenterOpen ? 'active' : ''} ${actionBusy ? 'action-pending' : ''}`} aria-busy={actionBusy} disabled={actionBusy} onClick={() => setExportCenterOpen(value => !value)}>{actionBusy ? <span className="action-spinner" /> : <Icon name="share" />}{actionBusy ? t('top.processing') : t('top.shareExport')}</button>
       </div>
@@ -495,16 +532,16 @@ export default function Editor() {
           <section>
             <div className="export-section-heading"><span><Icon name="link" />{t('export.shareLink')}</span></div>
             {demo.share_url ? <div className="share-link-card"><span title={demo.share_url}>{demo.share_url}</span><button className={`icon-button ${exportAction === 'copy-share' ? 'action-pending' : ''}`} aria-busy={exportAction === 'copy-share'} disabled={actionBusy} onClick={copyShareLink}>{exportAction === 'copy-share' ? <span className="action-spinner" /> : <Icon name="copy" />}{exportAction === 'copy-share' ? t('export.copying') : t('common:actions.copy')}</button><a className="icon-button" href={demo.share_url} target="_blank" rel="noreferrer"><Icon name="play" />{t('common:actions.open')}</a></div> : <div className="export-empty-note"><Icon name="link" /><span>{t('export.unpublished')}</span></div>}
-            <button className={`publish-version-button icon-button ${exportAction === 'publish' ? 'action-pending' : ''}`} aria-busy={exportAction === 'publish'} disabled={actionBusy} onClick={publish}>{exportAction === 'publish' ? <span className="action-spinner" /> : <Icon name="publish" />}{exportAction === 'publish' ? t('export.publishing') : demo.status === 'published' ? t('export.updatePublished') : t('export.publishCreate')}</button>
-            <ShareLinkManager demo={demo}/>
+            <QuotaGuard fill message={!can('publish') ? quotaTitle('publish') : ''}><button className={`publish-version-button icon-button ${exportAction === 'publish' ? 'action-pending' : ''}`} aria-busy={exportAction === 'publish'} disabled={actionBusy || !can('publish')} onClick={publish}>{exportAction === 'publish' ? <span className="action-spinner" /> : <Icon name="publish" />}{exportAction === 'publish' ? t('export.publishing') : demo.status === 'published' ? t('export.updatePublished') : t('export.publishCreate')}</button></QuotaGuard>
+            <ShareLinkManager demo={demo} capabilities={capabilities} onQuotaChanged={() => void refreshCapabilities()}/>
           </section>
 
           <section>
             <div className="export-section-heading"><span><Icon name="download" />{t('export.formats')}</span><small>{t('export.syncHint')}</small></div>
             <div className="export-format-grid">
-              <button className={exportAction === 'pdf' ? 'action-pending' : ''} aria-busy={exportAction === 'pdf'} disabled={actionBusy || !demo.steps.length} onClick={() => startExport('pdf')}><span><Icon name="text" /></span><div><strong>{exportAction === 'pdf' ? t('export.creatingPdf') : 'PDF'}</strong><small>{exportAction === 'pdf' ? t('export.syncing') : t('export.pdfHint')}</small></div>{exportAction === 'pdf' ? <i className="action-spinner" /> : <Icon name="download" />}</button>
-              <button className={exportAction === 'mp4' ? 'action-pending' : ''} aria-busy={exportAction === 'mp4'} disabled={actionBusy || !demo.steps.length} onClick={() => startExport('mp4')}><span><Icon name="play" /></span><div><strong>{exportAction === 'mp4' ? t('export.creatingVideo') : t('export.video')}</strong><small>{exportAction === 'mp4' ? t('export.syncing') : t('export.videoHint')}</small></div>{exportAction === 'mp4' ? <i className="action-spinner" /> : <Icon name="download" />}</button>
-              <button className={exportAction === 'markdown' ? 'action-pending' : ''} aria-busy={exportAction === 'markdown'} disabled={actionBusy || !demo.steps.length} onClick={() => startExport('markdown')}><span><Icon name="image" /></span><div><strong>{exportAction === 'markdown' ? t('export.creatingPackage') : t('export.package')}</strong><small>{exportAction === 'markdown' ? t('export.syncing') : t('export.packageHint')}</small></div>{exportAction === 'markdown' ? <i className="action-spinner" /> : <Icon name="download" />}</button>
+              <QuotaGuard fill message={!can('export') ? quotaTitle('export') : ''}><button className={exportAction === 'pdf' ? 'action-pending' : ''} aria-busy={exportAction === 'pdf'} disabled={actionBusy || !demo.steps.length || !can('export')} onClick={() => startExport('pdf')}><span><Icon name="text" /></span><div><strong>{exportAction === 'pdf' ? t('export.creatingPdf') : 'PDF'}</strong><small>{exportAction === 'pdf' ? t('export.syncing') : t('export.pdfHint')}</small></div>{exportAction === 'pdf' ? <i className="action-spinner" /> : <Icon name="download" />}</button></QuotaGuard>
+              <QuotaGuard fill message={!can('export_video') ? quotaTitle('export_video') : ''}><button className={exportAction === 'mp4' ? 'action-pending' : ''} aria-busy={exportAction === 'mp4'} disabled={actionBusy || !demo.steps.length || !can('export_video')} onClick={() => startExport('mp4')}><span><Icon name="play" /></span><div><strong>{exportAction === 'mp4' ? t('export.creatingVideo') : t('export.video')}</strong><small>{exportAction === 'mp4' ? t('export.syncing') : t('export.videoHint')}</small></div>{exportAction === 'mp4' ? <i className="action-spinner" /> : <Icon name="download" />}</button></QuotaGuard>
+              <QuotaGuard fill message={!can('export') ? quotaTitle('export') : ''}><button className={exportAction === 'markdown' ? 'action-pending' : ''} aria-busy={exportAction === 'markdown'} disabled={actionBusy || !demo.steps.length || !can('export')} onClick={() => startExport('markdown')}><span><Icon name="image" /></span><div><strong>{exportAction === 'markdown' ? t('export.creatingPackage') : t('export.package')}</strong><small>{exportAction === 'markdown' ? t('export.syncing') : t('export.packageHint')}</small></div>{exportAction === 'markdown' ? <i className="action-spinner" /> : <Icon name="download" />}</button></QuotaGuard>
               <button className={exportAction === 'copy-markdown' ? 'action-pending' : ''} aria-busy={exportAction === 'copy-markdown'} disabled={actionBusy || !demo.share_url} onClick={copyMarkdown}><span><Icon name="copy" /></span><div><strong>{exportAction === 'copy-markdown' ? t('export.copyingMarkdown') : t('export.copyMarkdown')}</strong><small>{exportAction === 'copy-markdown' ? t('export.fetching') : t('export.copyHint')}</small></div>{exportAction === 'copy-markdown' ? <i className="action-spinner" /> : <Icon name="copy" />}</button>
             </div>
           </section>
@@ -553,7 +590,7 @@ export default function Editor() {
       <aside className="step-list" style={floatingPanelStyle('steps')}>
         <div className="floating-panel-header"><span onPointerDown={event => dragFloatingPanel('steps', event)}><Icon name="move" />{t('mobileDock.steps')}</span><button aria-label={t('common:actions.close')} onClick={() => setMobilePanel(null)}>×</button></div>
         <div className="step-list-scroll">
-          <div className="panel-heading"><span>{t('steps.resources')}</span><small>{demo.steps.length}</small></div><label className={`upload-button icon-button ${uploadBusy ? 'uploading' : ''}`} aria-busy={uploadBusy} aria-disabled={uploadBusy}>{uploadBusy ? <span className="action-spinner" /> : <Icon name="image" />}{t(uploadBusy ? 'steps.uploadingScreenshot' : 'steps.addScreenshot')}<input disabled={uploadBusy} type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file) }} /></label>
+          <div className="panel-heading"><span>{t('steps.resources')}</span><small>{demo.steps.length}</small></div><QuotaGuard fill message={!can('record_step') ? quotaTitle('record_step') : ''}><label className={`upload-button icon-button ${uploadBusy ? 'uploading' : ''}`} aria-busy={uploadBusy} aria-disabled={uploadBusy || !can('record_step')}>{uploadBusy ? <span className="action-spinner" /> : <Icon name="image" />}{t(uploadBusy ? 'steps.uploadingScreenshot' : 'steps.addScreenshot')}<input disabled={uploadBusy || !can('record_step')} type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file) }} /></label></QuotaGuard>
           {demo.steps.map((step, index) => <button className={`step-item ${selected?.id === step.id ? 'active' : ''}`} title={step.title || t('steps.step', { index: index + 1 })} key={step.id} onClick={() => { setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null) }}><span>{index + 1}</span><img src={step.image_url} alt="" /><div><strong>{t('steps.step', { index: index + 1 })}</strong><small>{step.render_mode === 'dom' ? 'HTML Clone' : t('steps.screenshot')}</small></div></button>)}
         </div>
         <div className="floating-panel-resize-handle" role="separator" aria-label={t('mobileDock.resize')} title={t('mobileDock.resize')} onPointerDown={event => resizeFloatingPanel('steps', event)} />
@@ -601,7 +638,7 @@ export default function Editor() {
           <InspectorSection icon="clock" title={t('content.timing')} description={t('content.timingDescription')}>
             <label>{t('content.duration')}<input type="number" min="1" max="15" step=".5" value={selected.duration} onChange={event => patchStep(selected.id, { duration: Number(event.target.value) })} /></label>
           </InspectorSection>
-          {demo.ai_enabled && <InspectorSection icon="ai" title={t('content.smartCopy')} description={t('content.smartCopyDescription')}><button className="icon-button" onClick={() => generateAI(selected.id)}><Icon name="ai" />{t('content.regenerate')}</button></InspectorSection>}
+          {demo.ai_enabled && <InspectorSection icon="ai" title={t('content.smartCopy')} description={t('content.smartCopyDescription')}><QuotaGuard fill message={!can('use_ai') ? quotaTitle('use_ai') : ''}><button className="icon-button" disabled={!can('use_ai')} onClick={() => generateAI(selected.id)}><Icon name="ai" />{t('content.regenerate')}</button></QuotaGuard></InspectorSection>}
         </div>}
         {tab === 'hotspot' && <div className="inspector-body">
           <InspectorSection icon="target" title={t('hotspot.objects')} description={t('hotspot.objectsDescription')}>
@@ -685,7 +722,7 @@ export default function Editor() {
         </div>}
         {tab === 'ai' && <div className="inspector-body">
           <InspectorSection icon="ai" title={t('ai.generate')} description={t('ai.generateDescription')}>
-            <button className="primary icon-button" disabled={Boolean(aiJob && ['queued','running'].includes(aiJob.status))} onClick={() => generateAI()}><Icon name="ai" />{t('ai.generateAll')}</button>
+            <QuotaGuard fill message={!can('use_ai') ? quotaTitle('use_ai') : ''}><button className="primary icon-button" disabled={!can('use_ai') || Boolean(aiJob && ['queued','running'].includes(aiJob.status))} onClick={() => generateAI()}><Icon name="ai" />{t('ai.generateAll')}</button></QuotaGuard>
             <p className="field-note">{t('ai.background')}</p>
           </InspectorSection>
           {aiJob && <InspectorSection icon="settings" title={t('ai.recent')}><div className={`ai-job ${aiJob.status}`}><strong>{aiJob.status === 'complete' ? t('ai.complete') : aiJob.status === 'failed' ? t('ai.failed') : aiJob.status === 'cancelled' ? t('common:status.cancelled') : t('ai.running')}</strong><span>{aiJob.progress}% · {aiJob.model}</span>{aiJob.status === 'complete' && aiJob.can_revert && <button onClick={async () => { setAIJob(await api.revertAI(aiJob.id)); setDemo(await api.demo(id)) }}>{t('ai.revert')}</button>}</div></InspectorSection>}

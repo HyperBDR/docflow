@@ -1,10 +1,25 @@
 import type { Credentials, Locale, Recording, RecordingMode, RecordingTarget } from './types'
 import { browserLocale } from './locale'
+import { quotaAllowed, quotaApiError, quotaMessage, type QuotaAction, type WorkspaceCapabilities } from './quota'
 import { configuredApiUrl, configuredWebUrl, isConfiguredWebPage, isRecordableUrl } from './config'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
 let recording: Recording | null = null
 let queue: Promise<void> = Promise.resolve()
+
+async function loadCapabilities(auth: Credentials, organizationId = '', demoId = ''): Promise<WorkspaceCapabilities> {
+  const params = new URLSearchParams({ ...(organizationId ? { organization_id: organizationId } : {}), ...(demoId ? { demo_id: demoId } : {}) })
+  const response = await fetch(`${auth.api}/api/workspace/capabilities?${params}`, { headers: { Authorization: `Bearer ${auth.token}` } })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Could not check workspace quota' }))
+    throw new Error(String(error.detail || 'Could not check workspace quota'))
+  }
+  return response.json() as Promise<WorkspaceCapabilities>
+}
+
+function requireQuota(value: WorkspaceCapabilities, action: QuotaAction, locale: Locale) {
+  if (!quotaAllowed(value, action)) throw new Error(quotaMessage(value, action, locale))
+}
 
 async function savedRecording(): Promise<SavedRecording | undefined> {
   return (await chrome.storage.session.get('recording')).recording as SavedRecording | undefined
@@ -23,7 +38,7 @@ function statePayload(state: Recording, active = true) {
   return {
     type: 'RECORDING_STATE', active, paused: state.paused,
     capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode,
-    aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale,
+    aiEnabled: state.aiEnabled, error: state.error || '', locale: state.locale, contentLocale: state.contentLocale,
     trackedTabs: state.trackedTabIds.length,
   }
 }
@@ -253,7 +268,9 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
   if (!upload.ok) {
     const error = await upload.json().catch(() => ({ detail: '上传失败' }))
     await chrome.action.setBadgeText({ tabId: state.activeTabId, text: '!' })
-    throw new Error(error.detail)
+    const failure = new Error(quotaApiError(error, state.locale)) as Error & { quota?: boolean }
+    failure.quota = String(error.code || '').startsWith('quota.')
+    throw failure
   }
   return upload.json() as Promise<{ id: string }>
 }
@@ -262,11 +279,27 @@ async function recordStep(data: Record<string, any>, snapshot: Record<string, an
   const pageUrl = String(data.page_context?.url || '')
   const enriched = state.mode === 'html' ? await enrichSnapshot(snapshot, pageUrl) : undefined
   await uploadStep(data, enriched, screenshotOverride, state)
+  state.error = ''
+  await persist(state); await notify(state)
 }
 
 async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording, sourceTabId: number) {
   const sourceTab = await chrome.tabs.get(sourceTabId)
   if (!sourceTab.active || !state.trackedTabIds.includes(sourceTabId)) return { ignored: true, steps: state.steps }
+  const auth: Credentials = { api: state.api, token: state.token }
+  const live = await loadCapabilities(auth, '', state.demoId).catch(() => null)
+  if (live) {
+    if (!quotaAllowed(live, 'record_step')) {
+      state.paused = true
+      state.error = quotaMessage(live, 'record_step', state.locale)
+      await persist(state); await notify(state)
+      throw new Error(state.error)
+    }
+    if (state.aiEnabled && !quotaAllowed(live, 'use_ai')) {
+      state.aiEnabled = false
+      await persist(state); await notify(state)
+    }
+  }
   state.activeTabId = sourceTabId
   state.capturing = true; state.phase = 'uploading'
   await persist(state); await notify(state)
@@ -288,6 +321,10 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
   const task = queue.then(() => recordStep(data, synchronizedSnapshot, state, captured.screenshot))
   queue = task.catch(async error => {
     console.warn('DocFlow step upload:', error)
+    state.steps = Math.max(0, state.steps - 1)
+    state.error = (error as Error).message
+    if ((error as Error & { quota?: boolean }).quota) state.paused = true
+    await persist(state); await notify(state)
     try {
       await chrome.action.setBadgeText({ tabId: sourceTabId, text: '!' })
       await chrome.action.setBadgeBackgroundColor({ tabId: sourceTabId, color: '#dc2626' })
@@ -301,6 +338,7 @@ async function pause() {
   if (!state?.active) return null
   await queue
   state.paused = !state.paused
+  if (!state.paused) state.error = ''
   state.capturing = false
   state.phase = ''
   await persist(state); await notify(state)
@@ -323,7 +361,10 @@ async function stop(open = true) {
   } catch (error) { console.warn('DocFlow final slide:', error) }
   if (state.aiEnabled) {
     try {
-      await fetch(`${state.api}/api/demos/${state.demoId}/ai/generate`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } })
+      const live = await loadCapabilities({ api: state.api, token: state.token }, '', state.demoId)
+      if (quotaAllowed(live, 'use_ai')) {
+        await fetch(`${state.api}/api/demos/${state.demoId}/ai/generate`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` } })
+      }
     } catch { /* AI is optional */ }
   }
   await auditRecording(state, 'completed')
@@ -367,7 +408,7 @@ function automaticTitle(tab: chrome.tabs.Tab, locale: Locale) {
   return `${base} · ${date}`.slice(0, 200)
 }
 
-async function createAutomaticDemo(auth: Credentials, tab: chrome.tabs.Tab, contentLocale: Locale) {
+async function createAutomaticDemo(auth: Credentials, tab: chrome.tabs.Tab, contentLocale: Locale, uiLocale: Locale) {
   const response = await fetch(`${auth.api}/api/demos`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
@@ -375,7 +416,7 @@ async function createAutomaticDemo(auth: Credentials, tab: chrome.tabs.Tab, cont
   })
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Could not create a recording draft' }))
-    throw new Error(error.detail || 'Could not create a recording draft')
+    throw new Error(quotaApiError(error, uiLocale))
   }
   return response.json() as Promise<{ id: string }>
 }
@@ -483,6 +524,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return { installed: true, connected: false }
     }
     if (message.type === 'SET_TARGET_FROM_WEB') return selectTargetFromWeb(String(message.demoId || ''), sender)
+    if (message.type === 'GET_QUOTA_CAPABILITIES') {
+      const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
+      if (!auth) throw new Error('Extension connection expired')
+      return loadCapabilities(auth, String(message.organizationId || ''), String(message.demoId || ''))
+    }
     if (message.type === 'RESIZE_RECORDING_WINDOW') return resizeRecordingWindow(sender)
     if (message.type === 'CLOSE_OTHER_RECORDING_TABS') return closeOtherRecordingTabs(sender)
     if (message.type === 'OPEN_SETUP') {
@@ -505,11 +551,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = sender.tab
       if (!auth || !tab?.id || !isRecordableUrl(tab.url)) throw new Error('Please open a recordable business page first.')
       const contentLocale = (message.contentLocale || message.locale || browserLocale()) as Locale
-      await switchRecordingOrganization(auth, String(message.organizationId || ''))
+      const uiLocale = (message.locale || browserLocale()) as Locale
+      const organizationId = String(message.organizationId || '')
+      await switchRecordingOrganization(auth, organizationId)
       let demoId = String(message.demoId || '')
+      const live = await loadCapabilities(auth, organizationId, demoId)
+      requireQuota(live, demoId ? 'record_step' : 'create_resource', uiLocale)
+      requireQuota(live, 'record_step', uiLocale)
+      if (message.aiEnabled) requireQuota(live, 'use_ai', uiLocale)
       let autoCreated = false
       if (!demoId) {
-        demoId = (await createAutomaticDemo(auth, tab, contentLocale)).id
+        demoId = (await createAutomaticDemo(auth, tab, contentLocale, uiLocale)).id
         autoCreated = true
       } else await validateRecordingTarget(auth, demoId)
       try {

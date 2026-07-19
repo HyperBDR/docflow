@@ -17,6 +17,7 @@ export type Recording = {
   steps: number
   mode: RecordingMode
   aiEnabled: boolean
+  error?: string
   locale: Locale
   contentLocale: Locale
   autoCreated: boolean

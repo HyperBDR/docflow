@@ -7,6 +7,7 @@
   "organization": { "label": "Current space", "personalGroup": "Personal spaces", "teamGroup": "Team spaces", "manage": "Manage current team space", "create": "Create team space", "createTitle": "Create a team space", "createHelp": "Team spaces separate members, resources, and permissions. A platform administrator creates the space and assigns its owner.", "name": "Team space name", "placeholder": "For example: Marketing team", "createAction": "Create and switch", "creating": "Creating…" },
   "status": { "draft": "Draft", "published": "Published", "queued": "Queued", "running": "Processing", "complete": "Complete", "failed": "Failed", "cancelled": "Cancelled", "loading": "Loading…", "creating": "Creating" },
   "contentLanguage": { "label": "Demo content language", "description": "Controls the language used by future AI generation and newly recorded steps. Existing content will not be changed.", "zh-CN": "Simplified Chinese", "en": "English" },
+  "quotaGuard": { "usage": "Currently used: {{used}} / {{limit}}. Access resumes automatically after the quota is increased." },
   "errors": {
     "requestFailed": "The request failed. Please try again.",
     "operationFailed": "Operation failed",
