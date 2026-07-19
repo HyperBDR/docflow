@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Organization, OrganizationMember, OrganizationQuotaAssignment, QuotaPlan, QuotaUsageSnapshot, User
+from app.platform_settings import monitoring_runtime_config
 from app.in_app_notifications import create_notification, notify_admins, organization_manager_ids
 from app.quota import DEFAULT_LIMITS, SOFT, effective_plan, quota_summary, usage
 
@@ -233,6 +234,7 @@ def operations_overview(
         **item_totals,
     }
     latest = db.scalar(select(func.max(QuotaUsageSnapshot.collected_at)))
+    runtime = monitoring_runtime_config(db)
     return {
         "summary": summary,
         "spaces": rows,
@@ -243,6 +245,9 @@ def operations_overview(
         "ranking": sorted(rows, key=lambda row: (row["growth_percent"], next((item["percent"] for item in row["items"] if item["key"] == metric), 0)), reverse=True)[:10],
         "filters": {"days": days, "metric": metric, "kind": kind, "plan_id": plan_id, "health": health},
         "collected_at": latest,
+        "automatic_collection": runtime.quota_enabled,
+        "interval_seconds": runtime.quota_interval_seconds,
+        "next_collection_at": latest + timedelta(seconds=runtime.quota_interval_seconds) if latest and runtime.quota_enabled else None,
     }
 
 

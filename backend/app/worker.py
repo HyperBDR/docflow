@@ -1,12 +1,14 @@
 import io
 import traceback
+from datetime import datetime, timezone
 from celery import Celery
-from celery.schedules import crontab
+from sqlalchemy import func, select
 
 from app.config import settings
 from app.database import SessionLocal
 from app.exporters import render_markdown_zip, render_mp4, render_pdf, render_player_images
-from app.models import Demo, ExportJob, JobStatus, PublishedRevision, ShareToken, now
+from app.models import Demo, ExportJob, JobStatus, MonitoringSnapshot, PublishedRevision, QuotaUsageSnapshot, ShareToken, now
+from app.platform_settings import monitoring_runtime_config
 from app.storage import storage
 from app.ai_service import run_ai_generation
 from app.in_app_notifications import notify_job_result
@@ -16,12 +18,12 @@ celery.conf.update(
     task_track_started=True, task_time_limit=1200, result_expires=3600,
     beat_schedule={
         "collect-platform-monitoring": {
-            "task": "docflow.collect_monitoring",
-            "schedule": max(30, settings.monitoring_interval_seconds),
+            "task": "docflow.collect_monitoring_scheduled",
+            "schedule": 30,
         },
-        "collect-daily-quota-usage": {
-            "task": "docflow.collect_quota_usage",
-            "schedule": crontab(hour=0, minute=10),
+        "collect-quota-usage": {
+            "task": "docflow.collect_quota_usage_scheduled",
+            "schedule": 30,
         },
     },
 )
@@ -118,6 +120,47 @@ def collect_daily_quota_usage():
     from app.quota_analytics import collect_quota_usage
     db = SessionLocal()
     try:
+        return collect_quota_usage(db)
+    finally:
+        db.close()
+
+
+def _collection_due(latest: datetime | None, interval_seconds: int, current: datetime | None = None) -> bool:
+    if latest is None:
+        return True
+    moment = current or datetime.now(timezone.utc)
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
+    return (moment - latest).total_seconds() >= interval_seconds
+
+
+@celery.task(name="docflow.collect_monitoring_scheduled")
+def collect_scheduled_monitoring():
+    from app.monitoring.collector import collect_monitoring
+    db = SessionLocal()
+    try:
+        config = monitoring_runtime_config(db)
+        if not config.monitoring_enabled:
+            return {"skipped": "disabled"}
+        latest = db.scalar(select(func.max(MonitoringSnapshot.collected_at)))
+        if not _collection_due(latest, config.monitoring_interval_seconds):
+            return {"skipped": "not_due"}
+        return collect_monitoring(db)
+    finally:
+        db.close()
+
+
+@celery.task(name="docflow.collect_quota_usage_scheduled")
+def collect_scheduled_quota_usage():
+    from app.quota_analytics import collect_quota_usage
+    db = SessionLocal()
+    try:
+        config = monitoring_runtime_config(db)
+        if not config.quota_enabled:
+            return {"skipped": "disabled"}
+        latest = db.scalar(select(func.max(QuotaUsageSnapshot.collected_at)))
+        if not _collection_due(latest, config.quota_interval_seconds):
+            return {"skipped": "not_due"}
         return collect_quota_usage(db)
     finally:
         db.close()

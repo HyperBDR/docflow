@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import admin_user
-from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings, User
+from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings, MonitoringPlatformSettings, User
 from app.monitoring.notifications import send_test_email, smtp_error_detail
 from app.oauth.google import redirect_uri, validate_connectivity
-from app.platform_settings import email_runtime_config, general_runtime_config, google_runtime_config
-from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, GeneralSettingsOut, GeneralSettingsUpdate, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut
+from app.platform_settings import SUPPORTED_MONITORING_RANGES, email_runtime_config, general_runtime_config, google_runtime_config, monitoring_runtime_config
+from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, GeneralSettingsOut, GeneralSettingsUpdate, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut, MonitoringSettingsUpdate
 from app.secrets import encrypt_secret
 from app.services import write_audit
 
@@ -121,9 +121,60 @@ def test_email_settings(payload: EmailTestInput, db: Session = Depends(get_db), 
     return {"status": "sent"}
 
 
+def _monitoring_out(db: Session) -> MonitoringSettingsOut:
+    config = monitoring_runtime_config(db)
+    return MonitoringSettingsOut(
+        automatic_collection=config.monitoring_enabled,
+        interval_seconds=config.monitoring_interval_seconds,
+        quota_automatic_collection=config.quota_enabled,
+        quota_interval_seconds=config.quota_interval_seconds,
+        retention_days=config.retention_days,
+        raw_ranges=config.raw_ranges,
+        supported_ranges=list(SUPPORTED_MONITORING_RANGES),
+        updated_at=config.updated_at,
+    )
+
+
 @router.get("/monitoring", response_model=MonitoringSettingsOut)
-def get_monitoring_settings(_: User = Depends(admin_user)):
-    return MonitoringSettingsOut(interval_seconds=max(30, settings.monitoring_interval_seconds), retention_days=settings.monitoring_retention_days)
+def get_monitoring_settings(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return _monitoring_out(db)
+
+
+@router.patch("/monitoring", response_model=MonitoringSettingsOut)
+def update_monitoring_settings(payload: MonitoringSettingsUpdate, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    current = monitoring_runtime_config(db)
+    before = {
+        "automatic_collection": current.monitoring_enabled,
+        "interval_seconds": current.monitoring_interval_seconds,
+        "quota_automatic_collection": current.quota_enabled,
+        "quota_interval_seconds": current.quota_interval_seconds,
+        "retention_days": current.retention_days,
+        "raw_ranges": current.raw_ranges,
+    }
+    ranges = [item for item in SUPPORTED_MONITORING_RANGES if item in set(payload.raw_ranges)]
+    value = db.get(MonitoringPlatformSettings, "default")
+    if not value:
+        value = MonitoringPlatformSettings(id="default")
+        db.add(value)
+    value.monitoring_enabled = payload.automatic_collection
+    value.monitoring_interval_seconds = payload.interval_seconds
+    value.quota_enabled = payload.quota_automatic_collection
+    value.quota_interval_seconds = payload.quota_interval_seconds
+    value.retention_days = payload.retention_days
+    value.raw_ranges = ranges
+    value.updated_by_id = actor.id
+    after = {
+        "automatic_collection": value.monitoring_enabled,
+        "interval_seconds": value.monitoring_interval_seconds,
+        "quota_automatic_collection": value.quota_enabled,
+        "quota_interval_seconds": value.quota_interval_seconds,
+        "retention_days": value.retention_days,
+        "raw_ranges": value.raw_ranges,
+    }
+    db.flush()
+    write_audit(db, actor, "platform_monitoring.updated", "platform_settings", value.id, "Monitoring and data settings", before=before, after=after, request=request)
+    db.commit()
+    return _monitoring_out(db)
 
 
 def _google_out(db: Session) -> GoogleAuthSettingsOut:

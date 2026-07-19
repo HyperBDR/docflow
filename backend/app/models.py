@@ -647,6 +647,21 @@ class GeneralPlatformSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class MonitoringPlatformSettings(Base):
+    """Runtime-configurable monitoring and quota collection policy."""
+    __tablename__ = "monitoring_platform_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    monitoring_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    monitoring_interval_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    quota_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    quota_interval_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    retention_days: Mapped[int] = mapped_column(Integer, default=7)
+    raw_ranges: Mapped[list] = mapped_column(JSON, default=lambda: ["1h", "6h", "24h", "7d"])
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class GoogleAuthSettings(Base):
     """Singleton Google OpenID Connect configuration."""
     __tablename__ = "google_auth_settings"

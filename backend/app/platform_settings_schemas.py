@@ -38,8 +38,22 @@ class EmailTestInput(BaseModel):
 class MonitoringSettingsOut(BaseModel):
     automatic_collection: bool = True
     interval_seconds: int
+    quota_automatic_collection: bool = True
+    quota_interval_seconds: int
     retention_days: int
     raw_ranges: list[str] = Field(default_factory=lambda: ["1h", "6h", "24h", "7d"])
+    supported_ranges: list[str] = Field(default_factory=lambda: ["1h", "6h", "24h", "7d"])
+    min_interval_seconds: int = 30
+    updated_at: datetime | None = None
+
+
+class MonitoringSettingsUpdate(BaseModel):
+    automatic_collection: bool = True
+    interval_seconds: int = Field(default=60, ge=30, le=86400)
+    quota_automatic_collection: bool = True
+    quota_interval_seconds: int = Field(default=300, ge=30, le=86400)
+    retention_days: int = Field(default=7, ge=1, le=365)
+    raw_ranges: list[Literal["1h", "6h", "24h", "7d"]] = Field(default_factory=lambda: ["1h", "6h", "24h", "7d"], min_length=1)
 
 
 class GeneralSettingsUpdate(BaseModel):

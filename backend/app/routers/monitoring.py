@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import get_db
 from app.dependencies import admin_user
 from app.models import AlertEvent, AlertRule, MonitoringSnapshot, NotificationChannel, User, now
+from app.platform_settings import monitoring_runtime_config
 from app.monitoring.alert_engine import ensure_default_rules
 from app.monitoring.notifications import test_channel
 from app.monitoring_schemas import (
@@ -121,12 +121,13 @@ def _channel_out(channel: NotificationChannel) -> NotificationChannelOut:
 
 @router.get("/overview", response_model=MonitoringOverview)
 def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    runtime = monitoring_runtime_config(db)
     latest = {key: _latest(db, key) for key in ["postgres", "redis", "storage", "worker", "api", "jobs", "ai"]}
     updated_at = max((item.collected_at for item in latest.values() if item), default=None)
     current_time = now()
     if updated_at and updated_at.tzinfo is None:
         current_time = current_time.replace(tzinfo=None)
-    stale = not updated_at or updated_at < current_time - timedelta(seconds=max(180, settings.monitoring_interval_seconds * 3))
+    stale = runtime.monitoring_enabled and (not updated_at or updated_at < current_time - timedelta(seconds=max(180, runtime.monitoring_interval_seconds * 3)))
     services = [_service(latest.get(key), key, stale) for key in ["postgres", "redis", "storage", "worker"]]
     statuses = [item.status for item in services] + [item.status for key in ["api", "jobs", "ai"] if (item := latest.get(key))]
     overall = "critical" if "critical" in statuses else "warning" if "warning" in statuses or "unknown" in statuses else "healthy"
@@ -159,7 +160,7 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         AlertEvent.status.in_(["active", "acknowledged"])
     ).group_by(AlertEvent.severity)).all()
     thresholds = {rule.metric_key: rule.threshold for rule in db.scalars(select(AlertRule).where(AlertRule.enabled.is_(True))).all()}
-    interval = max(30, settings.monitoring_interval_seconds)
+    interval = runtime.monitoring_interval_seconds
     return MonitoringOverview(
         overall_status=overall, services=services,
         api=latest["api"].metrics if latest["api"] else {},
@@ -168,8 +169,9 @@ def overview(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         ai=latest["ai"].metrics if latest["ai"] else {},
         active_alerts={severity: count for severity, count in active},
         trend=points, thresholds=thresholds, updated_at=updated_at,
-        next_collection_at=updated_at + timedelta(seconds=interval) if updated_at else None,
-        interval_seconds=interval, collector_stale=stale,
+        next_collection_at=updated_at + timedelta(seconds=interval) if updated_at and runtime.monitoring_enabled else None,
+        interval_seconds=interval, automatic_collection=runtime.monitoring_enabled,
+        raw_ranges=runtime.raw_ranges, collector_stale=stale,
     )
 
 

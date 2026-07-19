@@ -17,6 +17,8 @@ export type MonitoringOverview = {
   updated_at?: string | null
   next_collection_at?: string | null
   interval_seconds: number
+  automatic_collection: boolean
+  raw_ranges: string[]
   collector_stale: boolean
 }
 export type MetricHistoryPoint = { collected_at: string; status: HealthStatus; values: Record<string, number> }

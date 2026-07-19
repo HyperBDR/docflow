@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import AIJob, AIModelConfig, AIUsageRecord, AlertEvent, ExportJob, JobStatus, MonitoringSnapshot, Organization, OrganizationQuotaAssignment, QuotaPlan, QuotaUsageSnapshot, StorageConfig, now
+from app.platform_settings import monitoring_runtime_config
 from app.monitoring.alert_engine import evaluate_rules
 from app.monitoring.request_metrics import read_http_metrics
 from app.storage import storage, target_from_model
@@ -150,7 +151,8 @@ def collect_monitoring(db: Session) -> dict[str, float]:
     for item in [postgres, redis_snapshot, storage_snapshot, api_snapshot, job_snapshot, ai_snapshot, worker_snapshot, quota_snapshot]:
         item.collected_at = collected_at
         db.add(item)
-    db.execute(delete(MonitoringSnapshot).where(MonitoringSnapshot.collected_at < collected_at - timedelta(days=settings.monitoring_retention_days)))
+    retention_days = monitoring_runtime_config(db).retention_days
+    db.execute(delete(MonitoringSnapshot).where(MonitoringSnapshot.collected_at < collected_at - timedelta(days=retention_days)))
     db.commit()
 
     observations = {

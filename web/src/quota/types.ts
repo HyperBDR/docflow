@@ -24,6 +24,9 @@ export type QuotaOverview = {
   ranking: QuotaSpace[]
   filters: { days: number; metric: QuotaMetricKey; kind: string; plan_id: string; health: string }
   collected_at?: string | null
+  automatic_collection: boolean
+  interval_seconds: number
+  next_collection_at?: string | null
 }
 export type QuotaSpaceHistory = { organization_id: string; points: { date: string; metrics: Partial<Record<QuotaMetricKey, { used: number; limit: number | null; percent: number }>> }[] }
 export type PlatformQuotaImpact = {

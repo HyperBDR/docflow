@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings
+from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings, MonitoringPlatformSettings
 from app.secrets import decrypt_secret
 
 
@@ -56,6 +56,43 @@ class GeneralRuntimeConfig:
 def general_runtime_config(db: Session) -> GeneralRuntimeConfig:
     value = db.get(GeneralPlatformSettings, "default")
     return GeneralRuntimeConfig(help_url=value.help_url, upgrade_url=value.upgrade_url, updated_at=value.updated_at) if value else GeneralRuntimeConfig(help_url="", upgrade_url="")
+
+
+SUPPORTED_MONITORING_RANGES = ("1h", "6h", "24h", "7d")
+
+
+@dataclass(frozen=True)
+class MonitoringRuntimeConfig:
+    monitoring_enabled: bool
+    monitoring_interval_seconds: int
+    quota_enabled: bool
+    quota_interval_seconds: int
+    retention_days: int
+    raw_ranges: list[str]
+    updated_at: object | None = None
+
+
+def monitoring_runtime_config(db: Session) -> MonitoringRuntimeConfig:
+    value = db.get(MonitoringPlatformSettings, "default")
+    if value:
+        ranges = [item for item in SUPPORTED_MONITORING_RANGES if item in (value.raw_ranges or [])]
+        return MonitoringRuntimeConfig(
+            monitoring_enabled=value.monitoring_enabled,
+            monitoring_interval_seconds=max(30, min(86400, value.monitoring_interval_seconds)),
+            quota_enabled=value.quota_enabled,
+            quota_interval_seconds=max(30, min(86400, value.quota_interval_seconds)),
+            retention_days=max(1, min(365, value.retention_days)),
+            raw_ranges=ranges or list(SUPPORTED_MONITORING_RANGES),
+            updated_at=value.updated_at,
+        )
+    return MonitoringRuntimeConfig(
+        monitoring_enabled=True,
+        monitoring_interval_seconds=max(30, min(86400, settings.monitoring_interval_seconds)),
+        quota_enabled=True,
+        quota_interval_seconds=300,
+        retention_days=max(1, min(365, settings.monitoring_retention_days)),
+        raw_ranges=list(SUPPORTED_MONITORING_RANGES),
+    )
 
 
 @dataclass(frozen=True)

@@ -30,9 +30,12 @@
   },
   "monitoring": {
     "statusTitle": "自动监控采集", "statusHint": "独立 Monitor 调度器定时下发任务，由 Worker 完成采集和告警判断。",
-    "interval": "采集间隔", "seconds": "{{count}} 秒", "intervalHint": "生产环境持续自动执行，无需人工点击采集。",
-    "retention": "原始数据保留", "days": "{{count}} 天", "retentionHint": "过期分钟快照由采集器自动清理。",
-    "ranges": "可查询范围", "rangesHint": "详情图表会根据时间范围自动降采样。",
+    "policyTitle": "自动采集策略", "policyHint": "监控与配额分别设置周期；保存后最迟 30 秒内由调度器自动应用。", "systemCollection": "系统监控采集", "systemCollectionHint": "采集服务健康、API、任务、存储和 AI 指标并计算告警。", "quotaCollection": "配额用量采集", "quotaCollectionHint": "刷新各空间当天的配额快照，用于运营概览和趋势统计。", "enabled": "已启用", "disabled": "已停用",
+    "interval": "采集间隔", "monitoringInterval": "系统监控采集间隔", "quotaInterval": "配额用量采集间隔", "intervalUnit": "采集周期单位", "units": { "seconds": "秒", "minutes": "分钟", "hours": "小时" },
+    "highFrequency": "当前使用高频采集", "highFrequencyHint": "系统监控低于 1 分钟或配额采集低于 5 分钟会增加数据库和 Worker 负载；平台允许的最短周期为 30 秒。", "invalidInterval": "采集周期不符合要求", "invalidIntervalHint": "采集周期必须在 30 秒到 24 小时之间。",
+    "dataTitle": "监控数据策略", "dataHint": "设置原始分钟快照保留时间，以及指标详情页可选择的时间范围。", "retention": "原始数据保留天数", "retentionEditHint": "支持 1～365 天；过期监控快照会在下次采集时自动清理。",
+    "ranges": "指标详情可查询范围", "rangesEditHint": "至少保留一个范围；长时间范围会自动降采样。", "rangeLabels": { "1h": "最近 1 小时", "6h": "最近 6 小时", "24h": "最近 24 小时", "7d": "最近 7 天" },
+    "saved": "监控与数据设置已保存", "footerHint": "配置保存后立即生效，并写入平台审计日志。",
     "privacy": "隐私与安全", "privacyHint": "仅保存规范化接口路径、状态码、耗时和聚合数量，不保存请求参数、正文或响应内容。"
   },
   "quota":{"plans":"配额方案","plansHint":"管理平台可以分配给空间的方案模板。","add":"新增方案","default":"平台默认","edit":"编辑配额方案","editHint":"留空表示无限额；修改后应用于绑定该方案的空间。","name":"方案名称","description":"方案说明","setDefault":"设为平台默认方案","save":"保存方案","saved":"配额方案已保存","newName":"新配额方案","metrics":{"storage_bytes":"存储空间","resources":"资源数量","max_steps_per_resource":"单资源最大步骤","members":"团队成员","active_shares":"有效分享链接","monthly_ai_tokens":"每月 AI Token","monthly_exports":"每月导出次数","monthly_video_minutes":"每月视频分钟","monthly_public_views":"每月公开访问","monthly_download_bytes":"每月下载流量"}}

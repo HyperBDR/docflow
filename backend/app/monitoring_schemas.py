@@ -45,6 +45,8 @@ class MonitoringOverview(BaseModel):
     updated_at: datetime | None = None
     next_collection_at: datetime | None = None
     interval_seconds: int = 60
+    automatic_collection: bool = True
+    raw_ranges: list[str] = Field(default_factory=lambda: ["1h", "6h", "24h", "7d"])
     collector_stale: bool = False
 
 

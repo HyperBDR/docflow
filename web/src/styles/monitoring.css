@@ -36,6 +36,7 @@
 .monitor-auto-state { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 9px; color: #176a42; background: #e9f8ef; font-size: var(--monitor-font-caption); font-weight: 700; }
 .monitor-auto-state i { width: 7px; height: 7px; border-radius: 50%; background: #22a660; box-shadow: 0 0 0 4px #22a66018; animation: monitor-pulse 1.8s infinite; }
 .monitor-auto-state.stale { color: #9b6412; background: #fff4df; }.monitor-auto-state.stale i { background: #dc8a22; box-shadow: none; animation: none; }
+.monitor-auto-state.paused { color: #697386; background: #eef0f3; }.monitor-auto-state.paused i { background: #98a2b3; box-shadow: none; animation: none; }
 @keyframes monitor-pulse { 50% { box-shadow: 0 0 0 7px #22a66008; } }
 .monitor-status-strip article div small:last-child { font-size: 11px; }
 .monitor-click-hint { color: #7b8698; font-size: var(--monitor-font-caption); }

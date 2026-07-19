@@ -2,7 +2,7 @@ import smtplib
 from unittest.mock import patch
 
 from app.database import SessionLocal
-from app.models import AlertEvent, AlertRule, EmailPlatformSettings, MonitoringSnapshot, NotificationChannel
+from app.models import AlertEvent, AlertRule, AuditLog, EmailPlatformSettings, MonitoringPlatformSettings, MonitoringSnapshot, NotificationChannel
 from app.monitoring.alert_engine import ensure_default_rules, evaluate_rules
 from app.monitoring.collector import collect_monitoring
 from app.secrets import decrypt_secret
@@ -157,3 +157,63 @@ def test_platform_email_settings_are_encrypted_and_used(client):
         assert response.status_code == 422
         assert response.json() == {"detail": "SMTP account unavailable", "code": "smtp.account_unavailable"}
     assert client.get("/api/admin/settings/monitoring").json()["automatic_collection"] is True
+
+
+def test_monitoring_and_quota_collection_settings_are_editable(client):
+    register(client, "runtime-settings@example.com")
+    initial = client.get("/api/admin/settings/monitoring")
+    assert initial.status_code == 200
+    assert initial.json()["interval_seconds"] == 60
+    assert initial.json()["quota_interval_seconds"] == 300
+    assert initial.json()["min_interval_seconds"] == 30
+
+    assert client.patch("/api/admin/settings/monitoring", json={
+        "automatic_collection": True,
+        "interval_seconds": 29,
+        "quota_automatic_collection": True,
+        "quota_interval_seconds": 300,
+        "retention_days": 7,
+        "raw_ranges": ["1h"],
+    }).status_code == 422
+
+    saved = client.patch("/api/admin/settings/monitoring", json={
+        "automatic_collection": False,
+        "interval_seconds": 90,
+        "quota_automatic_collection": True,
+        "quota_interval_seconds": 600,
+        "retention_days": 30,
+        "raw_ranges": ["7d", "1h"],
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["automatic_collection"] is False
+    assert saved.json()["interval_seconds"] == 90
+    assert saved.json()["quota_interval_seconds"] == 600
+    assert saved.json()["retention_days"] == 30
+    assert saved.json()["raw_ranges"] == ["1h", "7d"]
+
+    overview = client.get("/api/admin/monitoring/overview")
+    assert overview.status_code == 200
+    assert overview.json()["automatic_collection"] is False
+    assert overview.json()["collector_stale"] is False
+    assert overview.json()["raw_ranges"] == ["1h", "7d"]
+    with SessionLocal() as db:
+        value = db.get(MonitoringPlatformSettings, "default")
+        assert value is not None
+        assert value.quota_interval_seconds == 600
+        assert db.query(AuditLog).filter(AuditLog.action == "platform_monitoring.updated").count() == 1
+
+
+def test_scheduled_collectors_respect_runtime_switches(client):
+    register(client, "runtime-scheduler@example.com")
+    response = client.patch("/api/admin/settings/monitoring", json={
+        "automatic_collection": False,
+        "interval_seconds": 60,
+        "quota_automatic_collection": False,
+        "quota_interval_seconds": 300,
+        "retention_days": 7,
+        "raw_ranges": ["24h"],
+    })
+    assert response.status_code == 200
+    from app.worker import collect_scheduled_monitoring, collect_scheduled_quota_usage
+    assert collect_scheduled_monitoring.run() == {"skipped": "disabled"}
+    assert collect_scheduled_quota_usage.run() == {"skipped": "disabled"}

@@ -8,7 +8,7 @@ import Icon from '../Icon'
 import InteractiveMetricChart from './InteractiveMetricChart'
 import SeverityBadge from './SeverityBadge'
 
-const ranges = ['1h', '6h', '24h', '7d']
+const defaultRanges = ['1h', '6h', '24h', '7d']
 
 function displayValue(key: string, value: unknown, locale: string) {
   if (value == null || value === '') return '—'
@@ -27,11 +27,12 @@ function OverflowValue({ children, className = '' }: { children: string; classNa
   return <span className={`monitor-overflow-value ${className}`.trim()} data-full-value={children} data-overflow={overflow} title={children} tabIndex={0} onMouseEnter={measure} onFocus={measure}><span ref={text}>{children}</span></span>
 }
 
-export default function MonitoringDetailDrawer({ metricKey, onClose }: { metricKey: MonitoringDetailKey; onClose: () => void }) {
+export default function MonitoringDetailDrawer({ metricKey, ranges = defaultRanges, onClose }: { metricKey: MonitoringDetailKey; ranges?: string[]; onClose: () => void }) {
   const { t, i18n } = useTranslation(['monitoring', 'common'])
   const locale = normalizeLocale(i18n.language)
   const item = monitoringCatalog[metricKey]
-  const [range, setRange] = useState('24h'), [value, setValue] = useState<MonitoringMetricDetail | null>(null), [error, setError] = useState('')
+  const [range, setRange] = useState(ranges.includes('24h') ? '24h' : ranges[0] || '1h'), [value, setValue] = useState<MonitoringMetricDetail | null>(null), [error, setError] = useState('')
+  useEffect(() => { if (!ranges.includes(range)) setRange(ranges.includes('24h') ? '24h' : ranges[0] || '1h') }, [range, ranges])
   useEffect(() => { setValue(null); setError(''); monitoringApi.detail(metricKey, range).then(setValue).catch(reason => setError(reason.message)) }, [metricKey, range])
   const chartPoints = value?.points.map(point => ({ collected_at: point.collected_at, values: point.values })) || []
   const threshold = metricKey === 'api.error_rate' ? 5 : metricKey === 'storage.capacity' ? 15 : undefined
