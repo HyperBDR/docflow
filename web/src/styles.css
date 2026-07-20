@@ -1769,9 +1769,11 @@ label.check input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: #63
 .audit-detail-body, .job-detail-body { scrollbar-width: thin; scrollbar-color: #c5cad4 transparent; }
 .audit-detail-body::-webkit-scrollbar, .job-detail-body::-webkit-scrollbar, .detail-card-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .audit-detail-body::-webkit-scrollbar-thumb, .job-detail-body::-webkit-scrollbar-thumb, .detail-card-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #c5cad4; background-clip: padding-box; }
-.detail-card-scroll { min-width: 0; max-height: min(360px, 42dvh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #c7cdd7 transparent; }
+.detail-card-scroll::-webkit-scrollbar-track { border-radius: 999px; background: #f0f2f5; }
+.audit-detail-drawer .admin-user-section, .job-detail-drawer .admin-user-section { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); align-self: start; }
+.detail-card-scroll { min-width: 0; max-height: min(230px, 32dvh); overflow-x: hidden; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #aeb6c3 #f0f2f5; }
 .audit-client-detail.detail-card-scroll pre, .audit-detail-changes.detail-card-scroll pre { max-height: none; overflow: visible; }
-.job-detail-grid.detail-card-scroll { overflow-y: auto; }
+.job-detail-grid.detail-card-scroll { max-height: min(190px, 28dvh); overflow-y: scroll; }
 .job-detail-grid strong, .job-detail-grid code, .job-detail-grid span { min-width: 0; overflow: visible; color: #3f4a5e; text-overflow: clip; overflow-wrap: anywhere; white-space: normal; }
 .job-timeline.detail-card-scroll { margin-left: 0; padding: 7px 12px 7px 17px; }
 
