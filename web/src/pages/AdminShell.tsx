@@ -27,7 +27,6 @@ import AlertRules from './monitoring/AlertRules'
 import NotificationChannels from './monitoring/NotificationChannels'
 import NotificationBell from '../components/notifications/NotificationBell'
 import NotificationCenter from './NotificationCenter'
-import '../styles/monitoring.css'
 
 export default function AdminShell({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
   const { t } = useTranslation('admin')

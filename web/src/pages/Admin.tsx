@@ -192,7 +192,7 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
           {error && <div className="error admin-user-feedback">{error}</div>}
           {detailTab === 'account' && <section className="admin-user-section monitor-detail-card">
             <header className="admin-user-section-title"><span><Icon name="user" /></span><div><h3>{t('detail.account')}</h3><p>{t('detail.accountHelp')}</p></div></header>
-            <form className="admin-user-profile-form monitor-detail-card-scroll" onSubmit={saveUser}>
+            <form className="admin-user-profile-form" onSubmit={saveUser}>
               <div className="admin-user-form-grid">
                 <label>{t('detail.name')}<input maxLength={100} value={draft.name} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} /></label>
                 <label>{t('detail.email')}<input type="email" required value={draft.email} onChange={event => setDraft(value => ({ ...value, email: event.target.value }))} /></label>
@@ -215,14 +215,14 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
           </section>}
           {detailTab === 'usage' && <section className="admin-user-section monitor-detail-card">
             <header className="admin-user-section-title"><span><Icon name="analytics" /></span><div><h3>{t('detail.resources')}</h3><p>{t('detail.usageHelp')}</p></div></header>
-            <div className="admin-user-stat-grid monitor-detail-card-scroll">{([
+            <div className="admin-user-stat-grid">{([
               ['folder', 'demos', selected.stats.demos], ['list', 'steps', selected.stats.steps], ['publish', 'published', selected.stats.published_demos], ['eye', 'views', selected.stats.views], ['users', 'viewers', selected.stats.unique_viewers], ['download', 'exports', selected.stats.exports],
             ] as const).map(([icon, label, value]) => <article key={label}><span><Icon name={icon} /></span><div><small>{t(`detail.${label}`)}</small><strong>{formatNumber(value, locale)}</strong></div></article>)}</div>
             <div className="admin-user-storage"><span><Icon name="database" /></span><div><small>{t('detail.storage')}</small><strong>{formatBytes(selected.stats.storage_bytes, locale)}</strong></div></div>
           </section>}
           {detailTab === 'security' && <section className="admin-user-section monitor-detail-card">
             <header className="admin-user-section-title warm"><span><Icon name="lock" /></span><div><h3>{t('security.title')}</h3><p>{t('security.description')}</p></div></header>
-            <div className="admin-user-security-card monitor-detail-card-scroll">
+            <div className="admin-user-security-card">
               <div><strong>{t('security.reset')}</strong><p>{t('security.resetHelp')}</p></div>
               <form onSubmit={resetPassword}><label>{t('security.newPassword')}<input type="password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} placeholder={t('security.passwordPlaceholder')} /></label><button className="secondary icon-button" disabled={passwordBusy || selected.id === currentUser.id}><Icon name="lock" />{passwordBusy ? t('security.resetting') : t('security.reset')}</button></form>
               {selected.id === currentUser.id && <p className="admin-user-self-note"><Icon name="lock" />{t('security.selfResetHint')}</p>}
