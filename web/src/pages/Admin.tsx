@@ -166,9 +166,9 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
     </section>
     {selected && <>
       <button className="admin-user-drawer-scrim" aria-label={t('common:actions.close')} onClick={closeUser} />
-      <aside className="admin-user-drawer monitor-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="admin-user-drawer-title">
+      <aside className="admin-user-drawer admin-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="admin-user-drawer-title">
         <header className="admin-user-drawer-header">
-          <div className="admin-user-identity monitor-detail-identity">
+          <div className="admin-user-identity admin-detail-identity">
             <UserAvatar user={selected} size={54} />
             <div><h2 id="admin-user-drawer-title">{selected.name || selected.email.split('@')[0]}</h2><p>{selected.email}</p>
               <div className="admin-user-meta">
@@ -188,9 +188,9 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
             ['security', 'lock', 'detail.tabs.security'],
           ] as const).map(([tab, icon, label]) => <button key={tab} className={detailTab === tab ? 'active' : ''} onClick={() => setDetailTab(tab)}><Icon name={icon} />{t(label)}</button>)}
         </nav>
-        <div className="admin-user-drawer-body monitor-detail-body">
+        <div className="admin-user-drawer-body admin-detail-body">
           {error && <div className="error admin-user-feedback">{error}</div>}
-          {detailTab === 'account' && <section className="admin-user-section monitor-detail-card">
+          {detailTab === 'account' && <section className="admin-user-section admin-detail-card">
             <header className="admin-user-section-title"><span><Icon name="user" /></span><div><h3>{t('detail.account')}</h3><p>{t('detail.accountHelp')}</p></div></header>
             <form className="admin-user-profile-form" onSubmit={saveUser}>
               <div className="admin-user-form-grid">
@@ -205,22 +205,22 @@ export default function Admin({ currentUser, onCurrentUserChange }: { currentUse
               <footer><button className="primary icon-button" disabled={busy}><Icon name="check" />{busy ? t('saving') : t('common:actions.save')}</button></footer>
             </form>
           </section>}
-          {detailTab === 'teams' && <section className="admin-user-section monitor-detail-card">
+          {detailTab === 'teams' && <section className="admin-user-section admin-detail-card">
             <header className="admin-user-section-title"><span><Icon name="users" /></span><div><h3>{t('teams.title')}</h3><p>{t('teams.description')}</p></div></header>
             {organizations.some(organization => !selected.memberships.some(membership => membership.organization_id === organization.id))
               ? <form className="admin-membership-add" onSubmit={addMembership}><label>{t('teams.organization')}<select required value={membershipOrganization} onChange={event => setMembershipOrganization(event.target.value)}><option value="">{t('teams.selectOrganization')}</option>{organizations.filter(organization => !selected.memberships.some(membership => membership.organization_id === organization.id)).map(organization => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></label><label>{t('teams.role')}<select value={membershipRole} onChange={event => setMembershipRole(event.target.value as OrganizationRole)}><option value="owner">{t('organizations.roles.owner')}</option><option value="admin">{t('organizations.roles.admin')}</option><option value="editor">{t('organizations.roles.editor')}</option><option value="viewer">{t('organizations.roles.viewer')}</option></select></label><button className="primary icon-button" disabled={membershipBusy === 'add'}>{membershipBusy === 'add' ? <span className="action-spinner" /> : <Icon name="plus" />}{t('teams.add')}</button></form>
               : <div className="admin-membership-all-linked"><Icon name="check" />{t('teams.allLinked')}</div>}
-            <div className="admin-membership-list monitor-detail-card-scroll">{selected.memberships.map(membership => <article key={membership.id}><span><Icon name={membership.organization_kind === 'personal' ? 'user' : 'users'} /></span><div><strong>{membership.organization_name}</strong><small>{membership.organization_slug}</small><div>{membership.organization_kind === 'personal' && <em>{t('teams.personal')}</em>}{membership.is_current && <em>{t('teams.current')}</em>}<b>{t(`organizations.roles.${membership.role}`)}</b></div></div><select aria-label={t('teams.role')} value={membership.role} disabled={membershipBusy === membership.id || membership.organization_kind === 'personal'} onChange={event => updateMembership(membership.id, event.target.value as OrganizationRole)}><option value="owner">{t('organizations.roles.owner')}</option><option value="admin">{t('organizations.roles.admin')}</option><option value="editor">{t('organizations.roles.editor')}</option><option value="viewer">{t('organizations.roles.viewer')}</option></select><button className="admin-membership-remove" title={t('teams.remove')} aria-label={t('teams.remove')} disabled={membershipBusy === membership.id || membership.organization_kind === 'personal'} onClick={() => removeMembership(membership.id, membership.organization_name)}><Icon name="delete" /></button></article>)}</div>
+            <div className="admin-membership-list admin-detail-card-scroll">{selected.memberships.map(membership => <article key={membership.id}><span><Icon name={membership.organization_kind === 'personal' ? 'user' : 'users'} /></span><div><strong>{membership.organization_name}</strong><small>{membership.organization_slug}</small><div>{membership.organization_kind === 'personal' && <em>{t('teams.personal')}</em>}{membership.is_current && <em>{t('teams.current')}</em>}<b>{t(`organizations.roles.${membership.role}`)}</b></div></div><select aria-label={t('teams.role')} value={membership.role} disabled={membershipBusy === membership.id || membership.organization_kind === 'personal'} onChange={event => updateMembership(membership.id, event.target.value as OrganizationRole)}><option value="owner">{t('organizations.roles.owner')}</option><option value="admin">{t('organizations.roles.admin')}</option><option value="editor">{t('organizations.roles.editor')}</option><option value="viewer">{t('organizations.roles.viewer')}</option></select><button className="admin-membership-remove" title={t('teams.remove')} aria-label={t('teams.remove')} disabled={membershipBusy === membership.id || membership.organization_kind === 'personal'} onClick={() => removeMembership(membership.id, membership.organization_name)}><Icon name="delete" /></button></article>)}</div>
             <p className="admin-membership-note"><Icon name="shield" />{t('teams.platformRoleNote')}</p>
           </section>}
-          {detailTab === 'usage' && <section className="admin-user-section monitor-detail-card">
+          {detailTab === 'usage' && <section className="admin-user-section admin-detail-card">
             <header className="admin-user-section-title"><span><Icon name="analytics" /></span><div><h3>{t('detail.resources')}</h3><p>{t('detail.usageHelp')}</p></div></header>
             <div className="admin-user-stat-grid">{([
               ['folder', 'demos', selected.stats.demos], ['list', 'steps', selected.stats.steps], ['publish', 'published', selected.stats.published_demos], ['eye', 'views', selected.stats.views], ['users', 'viewers', selected.stats.unique_viewers], ['download', 'exports', selected.stats.exports],
             ] as const).map(([icon, label, value]) => <article key={label}><span><Icon name={icon} /></span><div><small>{t(`detail.${label}`)}</small><strong>{formatNumber(value, locale)}</strong></div></article>)}</div>
             <div className="admin-user-storage"><span><Icon name="database" /></span><div><small>{t('detail.storage')}</small><strong>{formatBytes(selected.stats.storage_bytes, locale)}</strong></div></div>
           </section>}
-          {detailTab === 'security' && <section className="admin-user-section monitor-detail-card">
+          {detailTab === 'security' && <section className="admin-user-section admin-detail-card">
             <header className="admin-user-section-title warm"><span><Icon name="lock" /></span><div><h3>{t('security.title')}</h3><p>{t('security.description')}</p></div></header>
             <div className="admin-user-security-card">
               <div><strong>{t('security.reset')}</strong><p>{t('security.resetHelp')}</p></div>
