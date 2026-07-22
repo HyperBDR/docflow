@@ -203,6 +203,8 @@ def sanitize_page_context(value: dict) -> dict:
     result: dict = {}
     if value.get("manual_capture") is True:
         result["manual_capture"] = True
+    if value.get("sensitive_form") is True:
+        result["sensitive_form"] = True
     for key in ["page_title", "target_text", "target_role", "target_aria", "nearby_text", "visible_text"]:
         if key in value:
             limit = 6000 if key == "visible_text" else 1500

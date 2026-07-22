@@ -1,15 +1,16 @@
-import { captureDom, captureWarnings, normalized, pageContext, passwordRects, targetInfo } from './snapshot'
+import { captureDom, captureWarnings, concealSensitiveFormValues, normalized, pageContext, passwordRects, targetInfo } from './snapshot'
 import { browserLocale, tr } from './locale'
 import type { CapturedSnapshot, Locale, RecordingMode } from './types'
 import { isConfiguredWebPage } from './config'
 import { quotaAllowed, quotaEndedText, quotaMessage, type WorkspaceCapabilities, type WorkspaceQuotaSummary } from './quota'
 import { aiSettingsStyles, aiSettingsView, aiText } from './ai-settings'
+import { installCaptureGuard, replayCapturedAction } from './capture-transaction'
 
 type RecorderState = {
   active?: boolean
   paused?: boolean
   capturing?: boolean
-  phase?: '' | 'uploading'
+  phase?: '' | 'capturing' | 'uploading'
   steps?: number
   mode?: RecordingMode
   aiEnabled?: boolean
@@ -21,7 +22,7 @@ type RecorderState = {
 let active = false
 let paused = false
 let capturing = false
-let phase: '' | 'uploading' = ''
+let phase: '' | 'capturing' | 'uploading' = ''
 let steps = 0
 let mode: RecordingMode = 'html'
 let aiEnabled = false
@@ -39,10 +40,12 @@ let modeText: HTMLSpanElement | null = null
 let countText: HTMLSpanElement | null = null
 let pauseButton: HTMLButtonElement | null = null
 let lockLayer: HTMLDivElement | null = null
+let captureStatus: HTMLDivElement | null = null
 let lastError = ''
-let blockedClickTarget: HTMLElement | null = null
-let replayingClick = false
-let lockTimer: number | undefined
+let captureUiHidden = false
+let detachedRecorderUi: { node: HTMLElement; parent: Node; next: ChildNode | null }[] = []
+let restoreSensitiveValues: (() => void) | null = null
+const captureGuard = installCaptureGuard()
 
 function eventId() {
   return typeof crypto.randomUUID === 'function'
@@ -50,7 +53,7 @@ function eventId() {
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
 }
 
-const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'pause' | 'play' | 'camera' | 'steps' | 'drag' | 'team' | 'user' | 'warning' | 'resize' | 'tabs') => {
+const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'cancel' | 'pause' | 'play' | 'camera' | 'steps' | 'drag' | 'team' | 'user' | 'warning' | 'resize' | 'tabs') => {
   const paths = {
     clone: '<rect x="4" y="4" width="13" height="13" rx="2"/><path d="M8 17v3h12V8h-3"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',
@@ -58,6 +61,7 @@ const icon = (name: 'clone' | 'image' | 'ai' | 'cursor' | 'clock' | 'stop' | 'pa
     cursor: '<path d="m5 3 13 9-6 1.5L9 19 5 3Z"/><path d="m13 14 4 5"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    cancel: '<path d="m7 7 10 10M17 7 7 17"/>',
     pause: '<path d="M9 6v12M15 6v12"/>',
     play: '<path d="m9 6 9 6-9 6V6Z"/>',
     camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4V8Z"/><circle cx="12" cy="13" r="3"/>',
@@ -334,7 +338,7 @@ function showRecordingSetup(message: {
 }
 
 function ensureHud() {
-  if (hudHost?.isConnected || !active || window.top !== window) return
+  if (hudHost?.isConnected || (captureUiHidden && hudHost) || !active || window.top !== window) return
   const parent = document.documentElement || document.body
   if (!parent) { window.setTimeout(ensureHud, 50); return }
   const host = document.createElement('div')
@@ -342,15 +346,16 @@ function ensureHud() {
   const shadow = host.attachShadow({ mode: 'closed' })
   shadow.innerHTML = `<style>
     :host{all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC",sans-serif}
-    *{box-sizing:border-box}.lock{position:fixed;z-index:1;inset:0;display:none;pointer-events:auto;background:#0f172a12;cursor:progress}.lock.active{display:block}
+    *{box-sizing:border-box}.lock{position:fixed;z-index:1;inset:0;display:none;pointer-events:auto;background:#0f172a17;cursor:progress;backdrop-filter:saturate(.92)}.lock.active{display:block}
     .outline{position:fixed;z-index:2;display:none;border:3px solid #6d5dfc;border-radius:8px;background:#6d5dfc18;box-shadow:0 0 0 2px #fff9;transition:all 55ms linear}
     .hud{position:fixed;z-index:3;left:20px;bottom:20px;display:flex;align-items:center;gap:5px;padding:6px;border:1px solid #ffffff24;border-radius:13px;background:#101725f2;color:#fff;box-shadow:0 14px 38px #0006;pointer-events:auto;backdrop-filter:blur(16px);user-select:none}
+    .capture-status{position:fixed;z-index:4;left:50%;top:18px;display:none;align-items:center;gap:7px;max-width:240px;padding:7px 10px;border:1px solid #d9d6ff;border-radius:8px;color:#423a9e;background:#fffffff5;box-shadow:0 8px 24px #1118272e;font:700 10px/1.35 system-ui;transform:translateX(-50%);white-space:nowrap}.capture-status.active{display:flex}.capture-status i{width:12px;height:12px;flex:0 0 auto;border:2px solid #d9d6ff;border-top-color:#635bff;border-radius:50%;animation:spin .65s linear infinite}
     .drag{width:23px;height:34px;display:grid;place-items:center;border:0;color:#7f8ba0;background:transparent;cursor:move}.drag svg{width:18px;height:18px}
     .state{display:grid;gap:2px;min-width:100px;padding:0 8px 0 4px}.state strong{display:flex;align-items:center;gap:7px;font-size:11px;white-space:nowrap}.state strong:before{content:"";width:7px;height:7px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 3px #ef444432}.state small{max-width:145px;overflow:hidden;color:#9da9bb;font-size:8px;white-space:nowrap;text-overflow:ellipsis}.hud.paused .state strong:before{background:#f59e0b;box-shadow:none}.hud.capturing .state strong:before{background:#8b5cf6;animation:pulse .7s infinite alternate}
-    button.control,.count{position:relative;height:34px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid #ffffff17;border-radius:8px;color:#d9e0eb;background:#ffffff0b;font:600 10px inherit;cursor:pointer}.control{width:34px}.control:hover{color:#fff;background:#ffffff18}.control.stop{color:#fff;background:#dc3e50;border-color:#dc3e50}.control:disabled{opacity:.4;cursor:progress}.count{min-width:48px;padding:0 8px;color:#fff}.count svg,.control svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+    button.control,.count{position:relative;height:34px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid #ffffff17;border-radius:8px;color:#d9e0eb;background:#ffffff0b;font:600 10px inherit;cursor:pointer}.control{width:34px}.control:hover{color:#fff;background:#ffffff18}.control.cancel{color:#f3c4c8}.control.cancel:hover{color:#fff;background:#dc3e5030}.control.stop{color:#fff;background:#dc3e50;border-color:#dc3e50}.control:disabled{opacity:.4;cursor:progress}.count{min-width:48px;padding:0 8px;color:#fff}.count svg,.control svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
     [data-tip]:hover:after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 9px);transform:translateX(-50%);width:max-content;max-width:250px;padding:6px 8px;border-radius:6px;color:#fff;background:#080d17;font:10px/1.35 system-ui;box-shadow:0 4px 15px #0005;white-space:nowrap;pointer-events:none}.drag[data-tip]:hover:after{left:0;transform:none}
-    @keyframes pulse{to{transform:scale(1.35);opacity:.65}}
-  </style><div class="outline"></div><div class="lock"></div><div class="hud"><button class="drag" data-tip="">${icon('drag')}</button><div class="state"><strong></strong><small></small></div><button class="control pause" data-tip="">${icon('pause')}</button><span class="count">${icon('steps')}<b>0</b></span><button class="control manual" data-tip="">${icon('camera')}</button><button class="control stop" data-tip="">${icon('stop')}</button></div>`
+    @keyframes pulse{to{transform:scale(1.35);opacity:.65}}@keyframes spin{to{transform:rotate(360deg)}}
+  </style><div class="outline"></div><div class="lock"></div><div class="capture-status"><i></i><span></span></div><div class="hud"><button class="drag" data-tip="">${icon('drag')}</button><div class="state"><strong></strong><small></small></div><button class="control pause" data-tip="">${icon('pause')}</button><span class="count">${icon('steps')}<b>0</b></span><button class="control manual" data-tip="">${icon('camera')}</button><button class="control cancel" data-tip="">${icon('cancel')}</button><button class="control stop" data-tip="">${icon('stop')}</button></div>`
   hudHost = host
   highlight = shadow.querySelector('.outline')
   lockLayer = shadow.querySelector('.lock')
@@ -359,9 +364,11 @@ function ensureHud() {
   countText = shadow.querySelector('.count b')
   const pauseControl = shadow.querySelector<HTMLButtonElement>('.pause')!
   pauseButton = pauseControl
+  captureStatus = shadow.querySelector('.capture-status')
   const hud = shadow.querySelector<HTMLDivElement>('.hud')!
   const drag = shadow.querySelector<HTMLButtonElement>('.drag')!
   const manual = shadow.querySelector<HTMLButtonElement>('.manual')!
+  const cancel = shadow.querySelector<HTMLButtonElement>('.cancel')!
   const stop = shadow.querySelector<HTMLButtonElement>('.stop')!
 
   drag.addEventListener('pointerdown', event => {
@@ -377,7 +384,22 @@ function ensureHud() {
     drag.addEventListener('pointermove', move); drag.addEventListener('pointerup', up)
   })
   pauseControl.addEventListener('click', event => { event.stopPropagation(); chrome.runtime.sendMessage({ type: 'PAUSE' }).catch(() => {}) })
-  stop.addEventListener('click', event => { event.stopPropagation(); capturing = true; renderHud(); chrome.runtime.sendMessage({ type: 'STOP' }).catch(() => {}) })
+  stop.addEventListener('click', event => {
+    event.stopPropagation(); captureGuard.lock(); capturing = true; phase = 'capturing'; renderHud()
+    chrome.runtime.sendMessage({ type: 'STOP' }).then(result => {
+      if (result?.error) { capturing = false; phase = ''; lastError = `${tr(locale, 'captureFailed')}: ${result.error}`; renderHud() }
+    }).catch(error => {
+      capturing = false; phase = ''; lastError = `${tr(locale, 'captureFailed')}: ${error.message}`; renderHud()
+    }).finally(() => captureGuard.unlock())
+  })
+  cancel.addEventListener('click', async event => {
+    event.stopPropagation()
+    if (!window.confirm(tr(locale, 'cancelRecordingConfirm', { count: steps }))) return
+    captureGuard.lock(); capturing = true; phase = 'uploading'; renderHud()
+    const result = await chrome.runtime.sendMessage({ type: 'CANCEL' }).catch(error => ({ error: error.message }))
+    captureGuard.unlock()
+    if (result?.error) { capturing = false; phase = ''; lastError = `${tr(locale, 'captureFailed')}: ${result.error}`; renderHud() }
+  })
   manual.addEventListener('click', async event => {
     event.stopPropagation()
     if (!active || paused || capturing) return
@@ -388,14 +410,14 @@ function ensureHud() {
       scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(),
       capture_warnings: captureWarnings(), duration: 3, terminal: false,
     }
-    capturing = true; phase = 'uploading'; renderHud()
+    captureGuard.lock(); capturing = true; phase = 'capturing'; renderHud()
     try {
       const result = await chrome.runtime.sendMessage({ type: 'MANUAL_STEP', data, snapshot })
       if (result?.quotaEnded) return
       if (result?.error) throw new Error(result.error)
       if (typeof result?.steps === 'number') steps = result.steps
     } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
-    finally { capturing = false; phase = ''; renderHud(); scheduleRefresh() }
+    finally { captureGuard.unlock(); capturing = false; phase = ''; renderHud(); scheduleRefresh() }
   })
   parent.appendChild(host)
   renderHud()
@@ -405,7 +427,7 @@ function clearHighlight() { if (highlight) highlight.style.display = 'none' }
 
 function renderHud() {
   if (!active) {
-    hudHost?.remove(); hudHost = highlight = null; statusText = modeText = countText = null; pauseButton = null; lockLayer = null
+    hudHost?.remove(); hudHost = highlight = null; statusText = modeText = countText = null; pauseButton = null; lockLayer = captureStatus = null
     return
   }
   ensureHud()
@@ -413,8 +435,11 @@ function renderHud() {
   hud?.classList.toggle('paused', paused)
   hud?.classList.toggle('capturing', capturing)
   lockLayer?.classList.toggle('active', capturing)
+  captureStatus?.classList.toggle('active', capturing && phase === 'capturing')
+  const captureLabel = captureStatus?.querySelector('span')
+  if (captureLabel) captureLabel.textContent = tr(locale, 'capturing')
   if (statusText) statusText.textContent = lastError || (capturing ? tr(locale, 'capturing') : paused ? tr(locale, 'paused') : tr(locale, 'recording'))
-  if (modeText) modeText.textContent = capturing ? tr(locale, 'uploading') : `${mode === 'html' ? tr(locale, 'htmlMode') : tr(locale, 'screenshotMode')}${aiEnabled ? ' · AI' : ''}`
+  if (modeText) modeText.textContent = capturing ? (phase === 'capturing' ? tr(locale, 'capturing') : tr(locale, 'uploading')) : `${mode === 'html' ? tr(locale, 'htmlMode') : tr(locale, 'screenshotMode')}${aiEnabled ? ' · AI' : ''}`
   if (countText) countText.textContent = String(steps)
   if (pauseButton) {
     pauseButton.innerHTML = icon(paused ? 'play' : 'pause')
@@ -428,7 +453,9 @@ function renderHud() {
   controls.forEach(control => {
     if (control.classList.contains('drag')) control.dataset.tip = tr(locale, 'dragTooltip')
     if (control.classList.contains('manual')) control.dataset.tip = tr(locale, 'manualTooltip')
+    if (control.classList.contains('cancel')) control.dataset.tip = tr(locale, 'cancelRecordingTooltip')
     if (control.classList.contains('stop')) control.dataset.tip = tr(locale, 'stopTooltip')
+    if (control instanceof HTMLButtonElement && (control.classList.contains('manual') || control.classList.contains('cancel') || control.classList.contains('stop'))) control.disabled = capturing
   })
   void shadow
   if (paused || capturing || mode !== 'html') clearHighlight()
@@ -450,38 +477,32 @@ function refreshSnapshot() {
 }
 function scheduleRefresh() { window.clearTimeout(refreshTimer); refreshTimer = window.setTimeout(refreshSnapshot, 600) }
 
-function shouldFreezeClick(target: HTMLElement) {
-  if (target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return false
-  if (target instanceof HTMLInputElement) return ['button', 'submit', 'image', 'reset', 'checkbox', 'radio'].includes(target.type)
-  return true
+function positionCaptureStatus(rect: DOMRect) {
+  if (!captureStatus) return
+  const top = rect.bottom + 42 < innerHeight ? rect.bottom + 8 : Math.max(8, rect.top - 38)
+  const left = Math.max(90, Math.min(innerWidth - 90, rect.left + rect.width / 2))
+  Object.assign(captureStatus.style, { left: `${left}px`, top: `${top}px` })
 }
 
-function clearBlockedClick() {
-  blockedClickTarget = null
-  window.clearTimeout(lockTimer)
+function detachRecorderUi() {
+  if (captureUiHidden) return
+  captureUiHidden = true
+  detachedRecorderUi = Array.from(document.querySelectorAll<HTMLElement>('.docflow-recorder-ui')).flatMap(node => {
+    const parent = node.parentNode
+    if (!parent) return []
+    const entry = { node, parent, next: node.nextSibling }
+    node.remove()
+    return [entry]
+  })
 }
 
-function suppressBlockedClick(event: MouseEvent) {
-  if (!blockedClickTarget || replayingClick || !event.isTrusted) return
-  const raw = event.target
-  if (!(raw instanceof Node) || !(raw === blockedClickTarget || blockedClickTarget.contains(raw) || (raw instanceof Element && raw.contains(blockedClickTarget)))) return
-  event.preventDefault()
-  event.stopImmediatePropagation()
-  clearBlockedClick()
-}
-
-function replayClick(target: HTMLElement) {
-  if (!target.isConnected) { clearBlockedClick(); return }
-  capturing = false; phase = ''; renderHud()
-  replayingClick = true
-  try {
-    target.focus({ preventScroll: true })
-    target.click()
-  } finally {
-    replayingClick = false
-    window.clearTimeout(lockTimer)
-    lockTimer = window.setTimeout(clearBlockedClick, 900)
+function restoreRecorderUi() {
+  const entries = detachedRecorderUi
+  detachedRecorderUi = []
+  for (const { node, parent, next } of entries) {
+    if (!node.isConnected && parent.isConnected) parent.insertBefore(node, next?.parentNode === parent ? next : null)
   }
+  captureUiHidden = false
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -504,6 +525,7 @@ async function onPointer(event: PointerEvent) {
   // before captureVisibleTab while this click remains blocked. Keep only the
   // cached value as a fallback for restricted pages or extension messaging.
   const snapshot = mode === 'html' ? (currentSnapshot || undefined) : undefined
+  const targetRect = target.getBoundingClientRect()
   const info = targetInfo(target), isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
   const label = info.text || info.aria_label || info.tag || tr(contentLocale, 'targetElement')
   const body = contentLocale === 'zh-CN'
@@ -511,27 +533,30 @@ async function onPointer(event: PointerEvent) {
     : (isInput ? `Enter or select a value in “${label}”` : `Click “${label}”`)
   const data = {
     event_id: eventId(), title: body, body, viewport_width: innerWidth, viewport_height: innerHeight,
-    hotspot: normalized(target.getBoundingClientRect()), target: info, page_context: pageContext(target),
+    hotspot: normalized(targetRect), target: info, page_context: pageContext(target),
     scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: false,
   }
-  const freezeClick = shouldFreezeClick(target)
-  if (freezeClick) {
-    blockedClickTarget = target
-    window.clearTimeout(lockTimer)
-    event.preventDefault()
-    event.stopImmediatePropagation()
-  }
-  capturing = true; phase = 'uploading'; clearHighlight(); renderHud()
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  captureGuard.lock()
+  capturing = true; phase = 'capturing'; clearHighlight(); renderHud(); positionCaptureStatus(targetRect)
+  const captureStarted = performance.now()
   let quotaEnded = false
+  let captured = false
   try {
     const result = await chrome.runtime.sendMessage({ type: 'STEP_EVENT', data, snapshot })
-    if (result?.quotaEnded) { quotaEnded = true; clearBlockedClick(); return }
+    if (result?.quotaEnded) { quotaEnded = true; return }
     if (result?.error) throw new Error(result.error)
+    if (result?.ignored) throw new Error(tr(locale, 'captureFailed'))
     if (typeof result?.steps === 'number') steps = result.steps
+    captured = true
   } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
   finally {
+    const feedbackDelay = 280 - (performance.now() - captureStarted)
+    if (feedbackDelay > 0) await new Promise(resolve => window.setTimeout(resolve, feedbackDelay))
+    captureGuard.unlock()
     capturing = false; phase = ''; renderHud(); scheduleRefresh()
-    if (freezeClick && !quotaEnded) replayClick(target)
+    if (captured && !quotaEnded) replayCapturedAction(target)
   }
 }
 
@@ -544,9 +569,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.hidden && message.captureSnapshot && mode === 'html') {
       try { synchronizedSnapshot = captureDom() || undefined } catch { synchronizedSnapshot = currentSnapshot || undefined }
     }
-    if (hudHost) hudHost.style.display = message.hidden ? 'none' : ''
-    if (setupHost) setupHost.style.display = message.hidden ? 'none' : ''
-    requestAnimationFrame(() => sendResponse({ ok: true, snapshot: synchronizedSnapshot })); return true
+    if (!message.hidden) {
+      restoreRecorderUi()
+      restoreSensitiveValues?.()
+      restoreSensitiveValues = null
+      sendResponse({ ok: true })
+      return
+    }
+    restoreSensitiveValues?.()
+    restoreSensitiveValues = concealSensitiveFormValues()
+    detachRecorderUi()
+    requestAnimationFrame(() => requestAnimationFrame(() => sendResponse({ ok: true, snapshot: synchronizedSnapshot })))
+    return true
   }
   if (message.type === 'CAPTURE_FINAL') {
     if (mode === 'html') refreshSnapshot()
@@ -579,6 +613,5 @@ if (window.top === window && isConfiguredWebPage(window.location.href)) {
     })
   })
 }
-window.addEventListener('click', suppressBlockedClick, true)
 document.addEventListener('pointermove', onPointerMove, true)
-document.addEventListener('pointerdown', onPointer, true)
+window.addEventListener('pointerdown', onPointer, { capture: true, passive: false })

@@ -69,6 +69,9 @@ function renderState(state: any) {
   countText.textContent = `${Number(state.steps || 0)} ${tr(locale, 'steps')}`
   tabCount.textContent = tr(locale, 'linkedTabs', { count: Number(state.trackedTabs || 1) })
   pauseButton.textContent = state.paused ? tr(locale, 'resume') : tr(locale, 'pause')
+  pauseButton.disabled = Boolean(state.capturing)
+  $<HTMLButtonElement>('stop').disabled = Boolean(state.capturing)
+  $<HTMLButtonElement>('cancel-recording').disabled = Boolean(state.capturing)
   attachButton.hidden = Boolean(state.currentTabTracked)
 }
 
@@ -160,7 +163,17 @@ attachButton.addEventListener('click', async () => {
 })
 $('stop').addEventListener('click', async () => {
   statusText.textContent = tr(locale, 'finishing')
-  await chrome.runtime.sendMessage({ type: 'STOP' })
+  const result = await chrome.runtime.sendMessage({ type: 'STOP' })
+  if (result?.error) { message.textContent = result.error; await refresh(); return }
+  await refresh()
+})
+$('cancel-recording').addEventListener('click', async () => {
+  const state = await chrome.runtime.sendMessage({ type: 'STATUS' })
+  if (!window.confirm(tr(locale, 'cancelRecordingConfirm', { count: Number(state?.steps || 0) }))) return
+  const button = $<HTMLButtonElement>('cancel-recording')
+  button.disabled = true
+  const result = await chrome.runtime.sendMessage({ type: 'CANCEL' })
+  if (result?.error) { message.textContent = result.error; button.disabled = false; return }
   await refresh()
 })
 $('disconnect').addEventListener('click', async () => {

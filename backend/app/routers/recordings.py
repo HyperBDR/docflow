@@ -1,7 +1,8 @@
 import json
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,14 +12,130 @@ from app.ai_models import active_model
 from app.database import get_db
 from app.dependencies import current_user
 from app.defaults import DEFAULT_HOTSPOT_STYLE, DEFAULT_TOOLTIP
-from app.models import Hotspot as HotspotModel, Step, User
-from app.schemas import RecordingAuditInput, RecordingDomMeta, RecordingStepMeta, StepOut
+from app.models import DemoStatus, Hotspot as HotspotModel, RecordingSession, Step, User
+from app.schemas import RecordingAuditInput, RecordingDomMeta, RecordingSessionCreate, RecordingSessionOut, RecordingStepMeta, StepOut
 from app.services import owned_demo, step_out, write_audit
 from app.snapshots import SnapshotError, decode_snapshot, sanitize_page_context, sanitize_snapshot, store_snapshot
 from app.storage import storage
 from app.quota import enforce
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
+
+
+def _active_session(db: Session, session_id: str | None, demo_id: str, user: User) -> RecordingSession | None:
+    if not session_id:
+        return None
+    session = db.scalar(select(RecordingSession).where(
+        RecordingSession.id == session_id,
+        RecordingSession.demo_id == demo_id,
+        RecordingSession.owner_id == user.id,
+    ))
+    if not session:
+        raise HTTPException(status_code=404, detail="recording session not found")
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="recording session is no longer active")
+    return session
+
+
+def _session_out(db: Session, session: RecordingSession) -> RecordingSessionOut:
+    count = db.scalar(select(func.count()).select_from(Step).where(Step.recording_session_id == session.id)) or 0
+    return RecordingSessionOut(
+        id=session.id, demo_id=session.demo_id, status=session.status, mode=session.mode,
+        ai_enabled=session.ai_enabled, auto_created=session.auto_created, step_count=count,
+    )
+
+
+@router.post("/{demo_id}/sessions", response_model=RecordingSessionOut, status_code=201)
+def create_recording_session(
+    demo_id: str, payload: RecordingSessionCreate,
+    db: Session = Depends(get_db), user: User = Depends(current_user),
+):
+    demo = owned_demo(db, demo_id, user)
+    active = db.scalar(select(RecordingSession.id).where(
+        RecordingSession.demo_id == demo.id,
+        RecordingSession.owner_id == user.id,
+        RecordingSession.status == "active",
+    ).limit(1))
+    if active:
+        raise HTTPException(status_code=409, detail="a recording session is already active for this resource")
+    if payload.auto_created and (demo.steps or demo.status != DemoStatus.draft):
+        raise HTTPException(status_code=409, detail="only an empty draft can be an automatic recording")
+    session = RecordingSession(
+        demo_id=demo.id, organization_id=demo.organization_id, owner_id=user.id,
+        status="active", mode=payload.mode, ai_enabled=payload.ai_enabled,
+        auto_created=payload.auto_created,
+        original_settings={
+            "content_locale": demo.content_locale,
+            "ai_context": demo.ai_context,
+            "navigation": dict(demo.navigation or {}),
+            "manual_fields": list(demo.manual_fields or []),
+        },
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return _session_out(db, session)
+
+
+@router.post("/sessions/{session_id}/complete", response_model=RecordingSessionOut)
+def complete_recording_session(
+    session_id: str, db: Session = Depends(get_db), user: User = Depends(current_user),
+):
+    session = db.scalar(select(RecordingSession).where(RecordingSession.id == session_id, RecordingSession.owner_id == user.id))
+    if not session:
+        raise HTTPException(status_code=404, detail="recording session not found")
+    if session.status == "cancelled":
+        raise HTTPException(status_code=409, detail="recording session was cancelled")
+    if session.status == "active":
+        session.status = "completed"
+        session.completed_at = datetime.now(timezone.utc)
+        db.commit()
+    return _session_out(db, session)
+
+
+@router.post("/sessions/{session_id}/cancel", response_model=RecordingSessionOut)
+def cancel_recording_session(
+    session_id: str, request: Request,
+    db: Session = Depends(get_db), user: User = Depends(current_user),
+):
+    session = db.scalar(select(RecordingSession).where(RecordingSession.id == session_id, RecordingSession.owner_id == user.id))
+    if not session:
+        raise HTTPException(status_code=404, detail="recording session not found")
+    if session.status == "completed":
+        raise HTTPException(status_code=409, detail="completed recording sessions cannot be cancelled")
+    if session.status == "cancelled":
+        return _session_out(db, session)
+    demo = owned_demo(db, session.demo_id or "", user)
+    steps = db.scalars(select(Step).where(Step.recording_session_id == session.id)).all()
+    keys = {key for step in steps for key in (step.asset_key, step.dom_snapshot_key) if key}
+    original = dict(session.original_settings or {})
+    demo_label, demo_id, organization_id = demo.title, demo.id, demo.organization_id
+    session.status = "cancelled"
+    session.cancelled_at = datetime.now(timezone.utc)
+    if session.auto_created:
+        session.demo_id = None
+        db.delete(demo)
+    else:
+        for step in steps:
+            db.delete(step)
+        db.flush()
+        remaining = db.scalars(select(Step).where(Step.demo_id == demo.id).order_by(Step.position, Step.id)).all()
+        for position, step in enumerate(remaining):
+            step.position = position
+        for field in ("content_locale", "ai_context", "navigation", "manual_fields"):
+            if field in original:
+                setattr(demo, field, original[field])
+    write_audit(
+        db, user, "recording.cancelled", "recording", demo_id, demo_label, organization_id,
+        after={"session_id": session.id, "step_count": len(steps), "auto_created": session.auto_created},
+        request=request, source="extension",
+    )
+    db.commit()
+    for key in keys:
+        referenced = db.scalar(select(Step.id).where(or_(Step.asset_key == key, Step.dom_snapshot_key == key)).limit(1))
+        if not referenced:
+            storage.delete(key)
+    return _session_out(db, session)
 
 
 @router.post("/{demo_id}/steps", response_model=StepOut, status_code=201)
@@ -38,6 +155,7 @@ async def upload_step(
     existing = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.event_id == parsed.event_id))
     if existing:
         return step_out(existing, demo.id)
+    session = _active_session(db, parsed.recording_session_id, demo.id, user)
     count = db.scalar(select(func.count()).select_from(Step).where(Step.demo_id == demo.id)) or 0
     enforce(db,demo.organization_id,"max_steps_per_resource",current=count)
     content = await screenshot.read(10 * 1024 * 1024 + 1)
@@ -51,6 +169,7 @@ async def upload_step(
     redactions = [parsed.password_rect.model_dump()] if parsed.password_rect else []
     step = Step(
         demo_id=demo.id,
+        recording_session_id=session.id if session else None,
         event_id=parsed.event_id,
         position=count,
         title=parsed.title,
@@ -83,7 +202,7 @@ async def upload_step(
                 after={"step_id": step.id, "position": step.position, "mode": "screenshot", "ai_enabled": parsed.ai_enabled},
                 request=request, source="extension")
     db.commit()
-    if parsed.ai_enabled and active_model(db) and step:
+    if parsed.ai_enabled and active_model(db) and step and not session:
         try:
             enqueue_ai_job(db, demo, user, step.id)
         except Exception:
@@ -111,6 +230,7 @@ async def upload_dom_slide(
     existing = db.scalar(select(Step).where(Step.demo_id == demo.id, Step.event_id == parsed.event_id))
     if existing:
         return step_out(existing, demo.id)
+    session = _active_session(db, parsed.recording_session_id, demo.id, user)
     count = db.scalar(select(func.count()).select_from(Step).where(Step.demo_id == demo.id)) or 0
     enforce(db,demo.organization_id,"max_steps_per_resource",current=count)
 
@@ -146,20 +266,25 @@ async def upload_dom_slide(
     title = parsed.title or ("流程完成" if parsed.terminal else f"点击「{target_text[:60]}」")
     body = parsed.body or ("已完成此操作流程。" if parsed.terminal else title)
     redactions = [item.model_dump() for item in parsed.password_rects]
+    safe_page_context = sanitize_page_context(parsed.page_context)
     step = Step(
         demo_id=demo.id,
+        recording_session_id=session.id if session else None,
         event_id=parsed.event_id,
         position=count,
         title=title,
         body=body,
         asset_key=image_key,
-        render_mode="dom" if snapshot_key else "image",
+        # Authentication and secret-entry pages prioritize an exact, blanked
+        # pixel capture. Keep the sanitized DOM snapshot available so an
+        # editor can still opt into HTML mode after reviewing it.
+        render_mode="image" if safe_page_context.get("sensitive_form") else ("dom" if snapshot_key else "image"),
         dom_snapshot_key=snapshot_key,
         viewport_width=parsed.viewport_width or width,
         viewport_height=parsed.viewport_height or height,
         hotspot=parsed.hotspot.model_dump() if parsed.hotspot else {},
         redactions=redactions,
-        page_context=sanitize_page_context(parsed.page_context),
+        page_context=safe_page_context,
         scroll_state=parsed.scroll_state,
         capture_warnings=list(dict.fromkeys(warnings))[:100],
         duration=parsed.duration,
@@ -186,7 +311,7 @@ async def upload_dom_slide(
                 after={"step_id": step.id, "position": step.position, "mode": "html", "terminal": parsed.terminal, "ai_enabled": parsed.ai_enabled},
                 request=request, source="extension")
     db.commit()
-    if parsed.ai_enabled and active_model(db) and step:
+    if parsed.ai_enabled and active_model(db) and step and not session:
         try:
             enqueue_ai_job(db, demo, user, step.id)
         except Exception:

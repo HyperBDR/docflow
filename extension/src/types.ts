@@ -8,6 +8,7 @@ export type Recording = {
   activeTabId: number
   trackedTabIds: number[]
   demoId: string
+  sessionId: string
   api: string
   web?: string
   token: string
@@ -15,7 +16,7 @@ export type Recording = {
   active: boolean
   paused: boolean
   capturing: boolean
-  phase: '' | 'uploading'
+  phase: '' | 'capturing' | 'uploading'
   steps: number
   mode: RecordingMode
   aiEnabled: boolean

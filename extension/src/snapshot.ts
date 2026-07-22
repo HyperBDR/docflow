@@ -10,6 +10,33 @@ export type TargetInfo = {
   text?: string
 }
 
+const sensitiveControlSelector = [
+  'input[type="password"]', 'input[type="email"]', 'input[autocomplete="one-time-code"]',
+  'input[autocomplete="current-password"]', 'input[autocomplete="username"]',
+  'input[name*="token" i]', 'input[name*="secret" i]', 'input[name*="api_key" i]', '[data-docflow-redact]',
+].join(',')
+
+export function sensitiveFormDetected() {
+  return Boolean(document.querySelector(sensitiveControlSelector))
+}
+
+/** Keep form geometry intact in pixel captures while removing entered secrets. */
+export function concealSensitiveFormValues() {
+  if (!sensitiveFormDetected()) return () => {}
+  const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input:not([type="button"]):not([type="submit"]):not([type="reset"]),textarea'))
+  const values = controls.map(control => ({ control, value: control.value, placeholder: control.placeholder, caretColor: control.style.caretColor }))
+  controls.forEach(control => {
+    control.value = ''
+    control.placeholder = ''
+    control.style.caretColor = 'transparent'
+  })
+  return () => values.forEach(({ control, value, placeholder, caretColor }) => {
+    control.value = value
+    control.placeholder = placeholder
+    control.style.caretColor = caretColor
+  })
+}
+
 function escapeAttribute(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
@@ -73,6 +100,7 @@ export function pageContext(element?: HTMLElement) {
     nearby_text: nearby.trim().replace(/\s+/g, ' ').slice(0, 1500),
     visible_text: (document.body?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 6000),
     raster_regions: rasterFallbackRegions(),
+    sensitive_form: sensitiveFormDetected(),
   }
 }
 
@@ -93,12 +121,7 @@ function rasterFallbackRegions() {
 }
 
 export function passwordRects(): Rect[] {
-  const selectors = [
-    'input[type="password"]', 'input[type="email"]', 'input[autocomplete="one-time-code"]',
-    'input[autocomplete="current-password"]', 'input[name*="token" i]', 'input[name*="secret" i]',
-    'input[name*="api_key" i]', '[data-docflow-redact]',
-  ].join(',')
-  return Array.from(document.querySelectorAll<HTMLElement>(selectors))
+  return Array.from(document.querySelectorAll<HTMLElement>(sensitiveControlSelector))
     .filter(input => {
       const rect = input.getBoundingClientRect()
       return rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= innerHeight && rect.left <= innerWidth

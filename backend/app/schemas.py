@@ -813,6 +813,7 @@ class AdminResourceDetail(AdminResourceOut):
 
 
 class RecordingStepMeta(BaseModel):
+    recording_session_id: str | None = Field(default=None, max_length=36)
     event_id: str = Field(min_length=1, max_length=64)
     title: str = Field(default="", max_length=200)
     body: str = Field(default="", max_length=5000)
@@ -825,6 +826,7 @@ class RecordingStepMeta(BaseModel):
 
 
 class RecordingDomMeta(BaseModel):
+    recording_session_id: str | None = Field(default=None, max_length=36)
     event_id: str = Field(min_length=1, max_length=64)
     title: str = Field(default="", max_length=200)
     body: str = Field(default="", max_length=5000)
@@ -842,10 +844,26 @@ class RecordingDomMeta(BaseModel):
 
 
 class RecordingAuditInput(BaseModel):
-    action: Literal["started", "paused", "resumed", "completed"]
+    action: Literal["started", "paused", "resumed", "completed", "cancelled"]
     mode: Literal["html", "screenshot"] = "html"
     ai_enabled: bool = False
     step_count: int = Field(default=0, ge=0, le=100)
+
+
+class RecordingSessionCreate(BaseModel):
+    mode: Literal["html", "screenshot"] = "html"
+    ai_enabled: bool = False
+    auto_created: bool = False
+
+
+class RecordingSessionOut(BaseModel):
+    id: str
+    demo_id: str | None
+    status: str
+    mode: str
+    ai_enabled: bool
+    auto_created: bool
+    step_count: int = 0
 
 
 class ExportCreate(BaseModel):

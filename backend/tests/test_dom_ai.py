@@ -140,6 +140,31 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
     assert snapshot_response.json()["snapshot"]
 
 
+def test_sensitive_form_keeps_dom_snapshot_but_defaults_to_exact_image(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "Login flow"}).json()
+    meta = {
+        "event_id": "login-1", "viewport_width": 1000, "viewport_height": 700,
+        "title": "Enter credentials", "body": "Enter credentials",
+        "target": {"css": "#email", "tag": "input", "text": "Email"},
+        "hotspot": {"x": .5, "y": .5, "w": .3, "h": .07},
+        "page_context": {"page_title": "Sign in", "sensitive_form": True},
+        "password_rects": [{"x": .35, "y": .45, "w": .3, "h": .07}],
+    }
+    response = authenticated.post(
+        f"/api/recordings/{demo['id']}/slides",
+        data={"meta": json.dumps(meta)},
+        files={
+            "screenshot": ("screen.png", screenshot(), "image/png"),
+            "snapshot": ("snapshot.json.gz", gzip.compress(json.dumps(rrweb_payload()).encode()), "application/gzip"),
+        },
+    )
+    assert response.status_code == 201, response.text
+    step = response.json()
+    assert step["render_mode"] == "image"
+    assert step["snapshot_url"]
+    assert step["page_context"]["sensitive_form"] is True
+
+
 def test_ai_application_respects_manual_fields(authenticated):
     demo_data = authenticated.post("/api/demos", json={"title": "人工标题"}).json()
     db = SessionLocal()

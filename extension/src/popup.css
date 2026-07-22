@@ -25,6 +25,7 @@ label { color: #58657b; font-size: 12px; }
 .record-dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 4px #ef444433; }
 .recording-summary.paused .record-dot { background: #f59e0b; box-shadow: none; }.recording-summary.capturing .record-dot { background: #8b5cf6; }
 .active-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.active-actions .cancel-recording { grid-column: 1/-1; border-color: #f0c6ca; color: #a62f3e; background: #fff6f7; }
 .record-actions { width: 100%; display: grid; justify-items: stretch; gap: 9px; margin: 0 auto; }
 .record-secondary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .record-button { min-height: 50px; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 12px 13px; border-radius: 11px; font-size: 13px; line-height: 1.2; text-align: center; white-space: nowrap; }

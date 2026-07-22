@@ -270,11 +270,28 @@ class Demo(Base):
     tags: Mapped[list[Tag]] = relationship(secondary=demo_tags, lazy="selectin")
 
 
+class RecordingSession(Base):
+    __tablename__ = "recording_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    demo_id: Mapped[str | None] = mapped_column(ForeignKey("demos.id", ondelete="SET NULL"), nullable=True, index=True)
+    organization_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    mode: Mapped[str] = mapped_column(String(20), default="html")
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    original_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Step(Base):
     __tablename__ = "steps"
     __table_args__ = (UniqueConstraint("demo_id", "event_id", name="uq_step_demo_event"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     demo_id: Mapped[str] = mapped_column(ForeignKey("demos.id", ondelete="CASCADE"), index=True)
+    recording_session_id: Mapped[str | None] = mapped_column(ForeignKey("recording_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
     event_id: Mapped[str] = mapped_column(String(64))
     position: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(200), default="")

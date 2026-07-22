@@ -108,7 +108,15 @@ async function attachTab(tabId: number, makeActive = false) {
   return state
 }
 
-async function deleteAutomaticDemo(state: Pick<Recording, 'api' | 'token' | 'demoId' | 'autoCreated' | 'steps'>) {
+async function deleteAutomaticDemo(state: Pick<Recording, 'api' | 'token' | 'demoId' | 'sessionId' | 'autoCreated' | 'steps'>) {
+  if (state.sessionId) {
+    try {
+      await fetch(`${state.api}/api/recordings/sessions/${state.sessionId}/cancel`, {
+        method: 'POST', headers: { Authorization: `Bearer ${state.token}` },
+      })
+    } catch { /* best-effort cleanup; the server session remains recoverable */ }
+    return
+  }
   if (!state.autoCreated || state.steps > 0) return
   try {
     await fetch(`${state.api}/api/demos/${state.demoId}`, {
@@ -126,16 +134,30 @@ async function auditRecording(state: Recording, action: 'started' | 'paused' | '
   } catch { /* audit delivery must not interrupt recording */ }
 }
 
-async function begin(demoId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false) {
+function applyStepQuota(state: Recording, live: WorkspaceCapabilities) {
+  const stepQuota = live.items?.find(item => item.key === 'max_steps_per_resource')
+  if (typeof stepQuota?.limit !== 'number') {
+    state.stepQuotaLimit = undefined
+    state.stepQuotaRemaining = undefined
+    return
+  }
+  state.stepQuotaLimit = stepQuota.limit
+  state.stepQuotaRemaining = Math.max(0, stepQuota.limit - Number(live.demo_step_count || 0))
+}
+
+async function begin(demoId: string, sessionId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false, capabilities?: WorkspaceCapabilities) {
   const auth = await connectedCredentials()
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
   if (!auth || !tab.id || !isRecordableUrl(tab.url)) throw new Error('请打开可录制的业务页面并确认扩展已连接')
   recording = {
-    rootTabId: tab.id, activeTabId: tab.id, trackedTabIds: [tab.id], demoId, api: auth.api, web: auth.web, token: auth.token,
-    screenshot: await capture(tab.id), active: true, paused: false,
+    rootTabId: tab.id, activeTabId: tab.id, trackedTabIds: [tab.id], demoId, sessionId, api: auth.api, web: auth.web, token: auth.token,
+    // Every slide receives a synchronized clean screenshot. Do not capture the
+    // setup dialog here and keep it as an accidental fallback image.
+    screenshot: 'data:image/png;base64,', active: true, paused: false,
     capturing: false, phase: '', steps: 0, mode, aiEnabled, locale, contentLocale,
     autoCreated,
   }
+  if (capabilities) applyStepQuota(recording, capabilities)
   await persist(recording)
   await notify(recording)
   await auditRecording(recording, 'started')
@@ -153,7 +175,7 @@ async function restore(): Promise<Recording | null> {
     const existingTabs = (await Promise.all(trackedTabIds.map(id => chrome.tabs.get(id).catch(() => null)))).filter(Boolean)
     const existingIds = existingTabs.map(tab => tab!.id!)
     if (!existingIds.length) {
-      await deleteAutomaticDemo({ ...saved, autoCreated: Boolean(saved.autoCreated), steps: Number(saved.steps || 0) })
+      await deleteAutomaticDemo({ ...saved, sessionId: String(saved.sessionId || ''), autoCreated: Boolean(saved.autoCreated), steps: Number(saved.steps || 0) })
       await chrome.storage.session.remove('recording')
       return null
     }
@@ -164,7 +186,7 @@ async function restore(): Promise<Recording | null> {
       phase: '',
       steps: Number(saved.steps || 0), mode: saved.mode || 'html',
       aiEnabled: Boolean(saved.aiEnabled), locale: saved.locale || browserLocale(), contentLocale: saved.contentLocale || saved.locale || browserLocale(),
-      autoCreated: Boolean(saved.autoCreated),
+      autoCreated: Boolean(saved.autoCreated), sessionId: String(saved.sessionId || ''),
     }
     return recording
   } catch { await chrome.storage.session.remove('recording'); return null }
@@ -280,7 +302,7 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
   if (!state.active || !state.screenshot) throw new Error('录制状态已结束')
   const response = await fetch(screenshotOverride || state.screenshot)
   const form = new FormData()
-  form.append('meta', JSON.stringify({ ...data, ai_enabled: state.aiEnabled }))
+  form.append('meta', JSON.stringify({ ...data, ai_enabled: state.aiEnabled, recording_session_id: state.sessionId || undefined }))
   form.append('screenshot', await response.blob(), 'step.png')
   if (domSnapshot) form.append('snapshot', await gzipJson(domSnapshot), 'snapshot.json.gz')
   const upload = await fetch(`${state.api}/api/recordings/${state.demoId}/slides`, { method: 'POST', headers: { Authorization: `Bearer ${state.token}` }, body: form })
@@ -305,23 +327,10 @@ async function recordStep(data: Record<string, any>, snapshot: Record<string, an
 async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording, sourceTabId: number) {
   const sourceTab = await chrome.tabs.get(sourceTabId)
   if (!sourceTab.active || !state.trackedTabIds.includes(sourceTabId)) return { ignored: true, steps: state.steps }
-  const auth: Credentials = { api: state.api, token: state.token }
-  const live = await loadCapabilities(auth, '', state.demoId).catch(() => null)
-  if (live) {
-    const stepQuota = live.items?.find(item => item.key === 'max_steps_per_resource')
-    if (typeof stepQuota?.limit === 'number') {
-      const liveRemaining = Math.max(0, stepQuota.limit - Number(live.demo_step_count || 0))
-      let localRemaining = state.stepQuotaRemaining ?? liveRemaining
-      if (state.stepQuotaLimit !== undefined && state.stepQuotaLimit !== stepQuota.limit) {
-        localRemaining = Math.max(0, localRemaining + stepQuota.limit - state.stepQuotaLimit)
-      }
-      state.stepQuotaLimit = stepQuota.limit
-      state.stepQuotaRemaining = Math.min(localRemaining, liveRemaining)
-    } else {
-      state.stepQuotaLimit = undefined
-      state.stepQuotaRemaining = undefined
-    }
-    const quotaError = !quotaAllowed(live, 'record_step')
+  if (state.stepQuotaRemaining !== undefined && state.stepQuotaRemaining < 1) {
+    const live = await loadCapabilities({ api: state.api, token: state.token }, '', state.demoId).catch(() => null)
+    if (live) applyStepQuota(state, live)
+    const quotaError = live && !quotaAllowed(live, 'record_step')
       ? quotaMessage(live, 'record_step', state.locale)
       : state.stepQuotaRemaining !== undefined && state.stepQuotaRemaining < 1 && state.stepQuotaLimit !== undefined
         ? quotaMetricMessage('max_steps_per_resource', state.stepQuotaLimit, state.stepQuotaLimit, state.locale)
@@ -330,13 +339,9 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
       await scheduleQuotaEnd(state, quotaError)
       return { quotaEnded: true, error: quotaError, steps: state.steps }
     }
-    if (state.aiEnabled && !quotaAllowed(live, 'use_ai')) {
-      state.aiEnabled = false
-      await persist(state); await notify(state)
-    }
   }
   state.activeTabId = sourceTabId
-  state.capturing = true; state.phase = 'uploading'
+  state.capturing = true; state.phase = 'capturing'
   await persist(state); await notify(state)
   let captured: { screenshot: string; snapshot?: Record<string, any> }
   try {
@@ -410,6 +415,7 @@ async function finishQuotaEnd(state: Recording, message: string) {
       await sendToRecordableTab(state.activeTabId, { type: 'RECORDING_QUOTA_ENDED', message, editorUrl })
       delivered = true
     } catch { /* fall back to opening the editor directly */ }
+    await completeRemoteSession(state)
     await completeRecording(state, false)
     if (!delivered) await chrome.tabs.create({ url: editorUrl })
   } finally {
@@ -439,6 +445,13 @@ async function stop(open = true) {
       if (final?.data) await uploadStep(final.data, state.mode === 'html' ? final.snapshot : undefined, await captureClean(state.activeTabId), state)
     }
   } catch (error) { console.warn('DocFlow final slide:', error) }
+  try {
+    await completeRemoteSession(state)
+  } catch (error) {
+    state.capturing = false; state.phase = ''; state.error = (error as Error).message
+    await persist(state); await notify(state)
+    throw error
+  }
   if (state.aiEnabled) {
     try {
       const live = await loadCapabilities({ api: state.api, token: state.token }, '', state.demoId)
@@ -448,6 +461,35 @@ async function stop(open = true) {
     } catch { /* AI is optional */ }
   }
   await completeRecording(state, open)
+}
+
+async function cancelRecording() {
+  const state = await restore()
+  if (!state) { await chrome.storage.session.remove('recording'); return }
+  state.paused = true; state.capturing = true; state.phase = 'uploading'; state.error = ''
+  await persist(state); await notify(state)
+  try {
+    await queue.catch(() => {})
+    if (state.sessionId) {
+      const response = await fetch(`${state.api}/api/recordings/sessions/${state.sessionId}/cancel`, {
+        method: 'POST', headers: { Authorization: `Bearer ${state.token}` },
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Could not cancel recording' }))
+        throw new Error(String(error.detail || 'Could not cancel recording'))
+      }
+    } else {
+      await deleteAutomaticDemo(state)
+    }
+    state.active = false; state.capturing = false; state.phase = ''
+    await notify(state)
+    recording = null
+    await chrome.storage.session.remove('recording')
+  } catch (error) {
+    state.paused = false; state.capturing = false; state.phase = ''; state.error = (error as Error).message
+    await persist(state); await notify(state)
+    throw error
+  }
 }
 
 function requireWebSender(sender: chrome.runtime.MessageSender) {
@@ -501,6 +543,27 @@ async function updateDemoAISettings(auth: Credentials, demoId: string, contentLo
     const error = await response.json().catch(() => ({ detail: 'Could not save AI settings' }))
     throw new Error(String(error.detail || 'Could not save AI settings'))
   }
+}
+
+async function createRecordingSession(auth: Credentials, demoId: string, mode: RecordingMode, aiEnabled: boolean, autoCreated: boolean) {
+  const response = await fetch(`${auth.api}/api/recordings/${demoId}/sessions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, ai_enabled: aiEnabled, auto_created: autoCreated }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Could not start recording session' }))
+    throw new Error(String(error.detail || 'Could not start recording session'))
+  }
+  return response.json() as Promise<{ id: string }>
+}
+
+async function completeRemoteSession(state: Recording) {
+  if (!state.sessionId) return
+  const response = await fetch(`${state.api}/api/recordings/sessions/${state.sessionId}/complete`, {
+    method: 'POST', headers: { Authorization: `Bearer ${state.token}` },
+  })
+  if (!response.ok) throw new Error('Could not complete recording session')
 }
 
 async function validateRecordingTarget(auth: Credentials, demoId: string) {
@@ -657,21 +720,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       requireQuota(live, 'record_step', uiLocale)
       if (message.aiEnabled) requireQuota(live, 'use_ai', uiLocale)
       let autoCreated = false
+      let sessionId = ''
       if (!demoId) {
         demoId = (await createAutomaticDemo(auth, tab, contentLocale, uiLocale, aiContext)).id
         autoCreated = true
       } else {
         await validateRecordingTarget(auth, demoId)
-        await updateDemoAISettings(auth, demoId, contentLocale, aiContext)
       }
       try {
-        await begin(demoId, message.mode, Boolean(message.aiEnabled), tab.id, message.locale || browserLocale(), contentLocale, autoCreated)
+        sessionId = (await createRecordingSession(auth, demoId, message.mode || 'html', Boolean(message.aiEnabled), autoCreated)).id
+        if (!autoCreated) await updateDemoAISettings(auth, demoId, contentLocale, aiContext)
+        await begin(demoId, sessionId, message.mode, Boolean(message.aiEnabled), tab.id, message.locale || browserLocale(), contentLocale, autoCreated, live)
       } catch (error) {
-        if (autoCreated) await deleteAutomaticDemo({ api: auth.api, token: auth.token, demoId, autoCreated, steps: 0 })
+        if (sessionId) {
+          await fetch(`${auth.api}/api/recordings/sessions/${sessionId}/cancel`, {
+            method: 'POST', headers: { Authorization: `Bearer ${auth.token}` },
+          }).catch(() => null)
+        } else if (autoCreated) {
+          await fetch(`${auth.api}/api/demos/${demoId}`, {
+            method: 'DELETE', headers: { Authorization: `Bearer ${auth.token}` },
+          }).catch(() => null)
+        }
         throw error
       }
       await chrome.storage.local.remove('pendingTarget')
-      return { ok: true, demoId, autoCreated }
+      return { ok: true, demoId, sessionId, autoCreated }
     }
     if (message.type === 'ATTACH_CURRENT_TAB') {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -681,6 +754,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === 'PAUSE') { const state = await pause(); return state ? { active: true, paused: state.paused, steps: state.steps, mode: state.mode } : { active: false } }
     if (message.type === 'STOP') { await stop(message.open !== false); return { ok: true } }
+    if (message.type === 'CANCEL') { await cancelRecording(); return { ok: true } }
     if (message.type === 'STATUS') {
       const state = await restore()
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
