@@ -228,7 +228,10 @@ def sanitize_page_context(value: dict) -> dict:
         x, y = max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
         w, h = min(1.0 - x, w), min(1.0 - y, h)
         if w > 0 and h > 0:
-            regions.append({"x": x, "y": y, "w": w, "h": h, "kind": "iframe"})
+            kind = str(item.get("kind", "iframe")).lower()
+            if kind not in {"iframe", "video", "canvas"}:
+                kind = "iframe"
+            regions.append({"x": x, "y": y, "w": w, "h": h, "kind": kind})
     if regions:
         result["raster_regions"] = regions
     return result

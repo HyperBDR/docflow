@@ -233,6 +233,12 @@ async function inlineCssAssets(css: string, stylesheetUrl: string, budget: { rem
   return css
 }
 
+async function inlineCssText(css: string, baseUrl: string, budget: { remaining: number }) {
+  if (!css || css.length > 2_000_000 || budget.remaining <= 0) return css
+  const imported = await inlineCssImports(css, baseUrl, budget, new Set([baseUrl]))
+  return inlineCssAssets(imported, baseUrl, budget)
+}
+
 async function inlineCssImports(
   css: string,
   stylesheetUrl: string,
@@ -271,19 +277,39 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
 
   for (const node of nodes.filter(item => item.type === 2 && String(item.tagName).toLowerCase() === 'link').slice(0, 20)) {
     const attrs = node.attributes || {}
-    if (!String(attrs.rel || '').toLowerCase().includes('stylesheet') || !attrs.href) continue
+    if (!String(attrs.rel || '').toLowerCase().includes('stylesheet')) continue
     try {
-      const url = new URL(String(attrs.href), pageUrl).href
-      const response = await fetch(url, { credentials: 'include' })
-      if (!response.ok) continue
-      let css = await response.text()
-      if (css.length > 2_000_000) continue
-      css = await inlineCssImports(css, url, budget, new Set([url]))
-      css = await inlineCssAssets(css, url, budget)
+      const url = new URL(String(attrs.href || pageUrl), pageUrl).href
+      let css = String(attrs._cssText || attrs._csstext || '')
+      if (attrs.href) {
+        try {
+          const response = await fetch(url, { credentials: 'include' })
+          if (response.ok) {
+            const fetched = await response.text()
+            if (fetched.length <= 2_000_000) css = fetched
+          }
+        } catch { /* rrweb's existing inline CSS can still be enriched */ }
+      }
+      if (!css) continue
+      css = await inlineCssText(css, url, budget)
       node.attributes = { ...attrs, href: '', _cssText: css }
       delete node.attributes.integrity
       delete node.attributes.crossorigin
     } catch { /* screenshot remains the visual fallback */ }
+  }
+
+  // rrweb preserves inline <style> content separately from linked sheets.
+  // Resolve those URLs against the page itself before server sanitization.
+  for (const node of nodes.filter(item => item.type === 3 && item.isStyle && item.textContent).slice(0, 80)) {
+    try { node.textContent = await inlineCssText(String(node.textContent), pageUrl, budget) }
+    catch { /* unresolved URLs are removed by the server */ }
+  }
+
+  // Inline style attributes can contain background-image and CSS variables
+  // that never pass through a stylesheet node.
+  for (const node of nodes.filter(item => item.type === 2 && String(item.attributes?.style || '').includes('url(')).slice(0, 160)) {
+    try { node.attributes.style = await inlineCssAssets(String(node.attributes.style), pageUrl, budget) }
+    catch { /* screenshot remains the visual fallback */ }
   }
 
   for (const node of nodes.filter(item => item.type === 2 && String(item.tagName).toLowerCase() === 'img').slice(0, 60)) {
@@ -294,6 +320,20 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
       const dataUrl = await responseDataUrl(response, Math.min(2_000_000, budget.remaining))
       if (dataUrl) { attrs.rr_dataURL = dataUrl; budget.remaining -= Math.ceil(dataUrl.length * .75) }
     } catch { /* screenshot remains the visual fallback */ }
+  }
+
+
+  // A video remains intentionally script-free in replay, but preserving a
+  // small poster gives it a useful visual before the screenshot-region
+  // fallback is applied.
+  for (const node of nodes.filter(item => item.type === 2 && String(item.tagName).toLowerCase() === 'video' && item.attributes?.poster).slice(0, 20)) {
+    const attrs = node.attributes || {}
+    if (String(attrs.poster).startsWith('data:') || budget.remaining <= 0) continue
+    try {
+      const response = await fetch(new URL(String(attrs.poster), pageUrl).href, { credentials: 'include' })
+      const dataUrl = await responseDataUrl(response, Math.min(2_000_000, budget.remaining))
+      if (dataUrl) { attrs.poster = dataUrl; budget.remaining -= Math.ceil(dataUrl.length * .75) }
+    } catch { /* the visible screenshot region remains the fallback */ }
   }
   return snapshot
 }

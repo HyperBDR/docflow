@@ -105,19 +105,20 @@ export function pageContext(element?: HTMLElement) {
 }
 
 function rasterFallbackRegions() {
-  return Array.from(document.querySelectorAll<HTMLElement>('iframe,frame')).flatMap(frame => {
-    const rect = frame.getBoundingClientRect()
+  return Array.from(document.querySelectorAll<HTMLElement>('iframe,frame,video,canvas')).flatMap(element => {
+    const rect = element.getBoundingClientRect()
     const left = Math.max(0, rect.left), top = Math.max(0, rect.top)
     const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom)
     if (right - left < 2 || bottom - top < 2) return []
-    const style = getComputedStyle(frame)
+    const style = getComputedStyle(element)
     if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return []
+    const tag = element.tagName.toLowerCase()
     return [{
       x: left / innerWidth, y: top / innerHeight,
       w: (right - left) / innerWidth, h: (bottom - top) / innerHeight,
-      kind: 'iframe',
+      kind: tag === 'frame' ? 'iframe' : tag,
     }]
-  }).slice(0, 20)
+  }).slice(0, 40)
 }
 
 export function passwordRects(): Rect[] {
@@ -132,6 +133,7 @@ export function passwordRects(): Rect[] {
 export function captureWarnings(): string[] {
   const warnings: string[] = []
   if (document.querySelector('canvas')) warnings.push('Canvas content may use a raster fallback')
+  if (document.querySelector('video')) warnings.push('Video playback is not included; a raster fallback is used')
   return warnings
 }
 

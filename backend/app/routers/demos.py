@@ -317,6 +317,10 @@ def publish_demo(demo_id: str, request: Request, db: Session = Depends(get_db), 
             "hotspot": step.hotspot, "hotspots": hotspots, "duration": step.duration,
             "asset_key": public_key, "render_mode": step.render_mode,
             "dom_snapshot_key": step.dom_snapshot_key, "scroll_state": step.scroll_state,
+            # Public playback only needs the visual fallback geometry. Do not
+            # publish captured page text or source URLs with the revision.
+            "page_context": {"raster_regions": (step.page_context or {}).get("raster_regions", [])},
+            "capture_warnings": step.capture_warnings,
             "animation": step.animation or {},
         })
     revision = PublishedRevision(

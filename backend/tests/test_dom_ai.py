@@ -83,13 +83,15 @@ def test_page_context_keeps_only_safe_raster_fallback_regions():
         "page_title": "Embedded report",
         "raster_regions": [
             {"x": .1, "y": .2, "w": .5, "h": .4, "kind": "iframe"},
-            {"x": -.2, "y": .9, "w": .4, "h": .5},
+            {"x": -.2, "y": .9, "w": .4, "h": .5, "kind": "video"},
+            {"x": .3, "y": .3, "w": .2, "h": .2, "kind": "unsupported"},
             {"x": "bad", "y": 0, "w": 1, "h": 1},
         ],
     })
     assert value["raster_regions"] == [
         {"x": .1, "y": .2, "w": .5, "h": .4, "kind": "iframe"},
-        {"x": 0.0, "y": .9, "w": .4, "h": 1 - .9, "kind": "iframe"},
+        {"x": 0.0, "y": .9, "w": .4, "h": 1 - .9, "kind": "video"},
+        {"x": .3, "y": .3, "w": .2, "h": .2, "kind": "iframe"},
     ]
 
 
@@ -100,7 +102,8 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
         "title": "点击创建项目", "body": "点击创建项目继续。",
         "target": {"css": "#create", "tag": "button", "text": "创建项目"},
         "hotspot": {"x": .8, "y": .1, "w": .12, "h": .06},
-        "page_context": {"page_title": "项目", "url": "https://internal.test/projects?token=secret", "visible_text": "创建项目"},
+        "page_context": {"page_title": "项目", "url": "https://internal.test/projects?token=secret", "visible_text": "创建项目", "raster_regions": [{"x": .1, "y": .2, "w": .4, "h": .3, "kind": "video"}]},
+        "capture_warnings": ["Video playback is not included; a raster fallback is used"],
         "scroll_state": {"x": 0, "y": 20}, "terminal": False,
     }
     response = authenticated.post(
@@ -131,6 +134,8 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
     token = published["share_url"].rsplit("/", 1)[-1]
     public = authenticated.get(f"/public/{token}").json()
     assert public["steps"][0]["render_mode"] == "dom"
+    assert public["steps"][0]["page_context"]["raster_regions"][0]["kind"] == "video"
+    assert public["steps"][0]["capture_warnings"] == ["Video playback is not included; a raster fallback is used"]
     assert public["steps"][0]["snapshot_url"]
     assert "snapshot_version" in public["steps"][0], list(public["steps"][0])
     snapshot_response = authenticated.get(f"/public/{token}/slides/{step['id']}/snapshot", params={"v": public["steps"][0]["snapshot_version"]})
