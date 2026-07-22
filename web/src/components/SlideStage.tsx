@@ -20,7 +20,7 @@ export function preloadSnapshot(url?: string) {
 }
 
 type TargetSelection = { selector: SelectorInfo; rect: Rect }
-type RasterRegion = { x: number; y: number; w: number; h: number; kind: 'iframe' }
+type RasterRegion = { x: number; y: number; w: number; h: number; kind: 'iframe' | 'video' | 'canvas' }
 
 function rasterRegions(context: Record<string, unknown>): RasterRegion[] {
   const source = context.raster_regions
@@ -30,8 +30,9 @@ function rasterRegions(context: Record<string, unknown>): RasterRegion[] {
     const value = item as Record<string, unknown>
     const x = Number(value.x), y = Number(value.y), w = Number(value.w), h = Number(value.h)
     if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return []
-    return [{ x, y, w, h, kind: 'iframe' as const }]
-  }).slice(0, 20)
+    const kind: RasterRegion['kind'] = value.kind === 'video' || value.kind === 'canvas' ? value.kind : 'iframe'
+    return [{ x, y, w, h, kind }]
+  }).slice(0, 40)
 }
 
 type Props = {
@@ -273,22 +274,24 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
 
   useEffect(() => {
     setError(''); setDynamicRects({}); setContentReady(false); setPreviewReady(false); setZoomActive(false)
+    const notifyCachedImage = requestAnimationFrame(() => {
+      const image = wrapperRef.current?.querySelector('img')
+      if (!image?.complete || image.naturalWidth <= 0) return
+      setPreviewReady(true)
+      if (!useDom) setContentReady(true)
+      if (!useDom || mode === 'player') onReady?.()
+    })
     if (!useDom || !step.snapshot_url) {
       setSnapshot(null); setLoadedSnapshotUrl('')
-      // Cached screenshots (and data URLs) can finish before this effect runs.
-      // Re-check the actual image after resetting state so the loading overlay
-      // cannot remain stuck when revisiting an already cached step.
-      const frame = requestAnimationFrame(() => {
-        const image = wrapperRef.current?.querySelector('img')
-        if (image?.complete && image.naturalWidth > 0) { setContentReady(true); onReady?.() }
-      })
-      return () => cancelAnimationFrame(frame)
+      return () => cancelAnimationFrame(notifyCachedImage)
     }
     const url = step.snapshot_url
+    let cancelled = false
     preloadSnapshot(url)
-      .then(value => { if (value) { setSnapshot(value); setLoadedSnapshotUrl(url) } })
-      .catch(value => setError(value.message))
-  }, [step.id, step.snapshot_url, useDom])
+      .then(value => { if (!cancelled && value) { setSnapshot(value); setLoadedSnapshotUrl(url) } })
+      .catch(value => { if (!cancelled) setError(value.message) })
+    return () => { cancelled = true; cancelAnimationFrame(notifyCachedImage) }
+  }, [step.id, step.snapshot_url, useDom, mode])
 
   useEffect(() => {
     const target = fit === 'viewport' ? shellRef.current : wrapperRef.current
@@ -324,10 +327,20 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
 
   useEffect(() => {
     if (!snapshot || loadedSnapshotUrl !== step.snapshot_url || frameReadyVersion === 0 || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
+    if (mode === 'player' && !previewReady) return
+    const loadDom = () => iframeRef.current?.contentWindow?.postMessage({
       type: 'DOCFLOW_LOAD', snapshot, hotspots: step.hotspots, mode, scroll: step.scroll_state,
     }, '*')
-  }, [snapshot, loadedSnapshotUrl, frameReadyVersion, step.id, step.snapshot_url, step.hotspots, step.scroll_state, mode])
+    if (mode !== 'player') { loadDom(); return }
+    // DOM reconstruction can occupy the renderer's main thread. Let the
+    // screenshot and fallback hotspot paint first, then hydrate while idle.
+    if (window.requestIdleCallback) {
+      const idle = window.requestIdleCallback(loadDom, { timeout: 900 })
+      return () => window.cancelIdleCallback(idle)
+    }
+    const timer = window.setTimeout(loadDom, 120)
+    return () => window.clearTimeout(timer)
+  }, [snapshot, loadedSnapshotUrl, frameReadyVersion, step.id, step.snapshot_url, step.hotspots, step.scroll_state, mode, previewReady])
 
   useEffect(() => {
     if (!error) return
@@ -347,6 +360,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const stageHeight = fit === 'viewport' ? Math.max(1, step.viewport_height * scale) : Math.max(240, step.viewport_height * scale)
   const stageWidth = fit === 'viewport' ? Math.max(1, step.viewport_width * scale) : undefined
   const fallback = !useDom || Boolean(error)
+  const interactionReady = contentReady || (mode === 'player' && previewReady)
   const showDomFrame = useDom && !error && Boolean(snapshot)
   const showScreenshot = fallback || !contentReady
   const zoomTransform = useMemo(() => {
@@ -375,7 +389,8 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
       <div className={`slide-visual-surface ${zoomVisible ? 'zoom-active' : ''}`} style={{ transform: zoomTransform.css, transitionDuration: deterministicZoom ? '0ms' : `${zoomTransitionDuration}ms` }}>
         {showScreenshot && <img src={step.image_url} draggable={false} alt={step.title} onLoad={() => {
           setPreviewReady(true)
-          if (fallback) { setContentReady(true); onReady?.() }
+          if (fallback) setContentReady(true)
+          if (fallback || mode === 'player') onReady?.()
         }} />}
         {showDomFrame && <iframe
           ref={iframeRef}
@@ -395,14 +410,14 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
       </div>
       {!contentReady && !previewReady && <div className="slide-transition-loading"><span /><b>{t('guide.loadingNext')}</b></div>}
       {!contentReady && previewReady && useDom && <div className="slide-background-loading"><span />{t('guide.loadingPage')}</div>}
-      {contentReady && step.hotspots.map(hotspot => <HotspotLayer
+      {interactionReady && step.hotspots.map(hotspot => <HotspotLayer
         key={hotspot.id} hotspot={hotspot} rect={zoomedRect(dynamicRects[hotspot.id] || hotspot.fallback_rect, zoomTransform.scale, zoomTransform.x, zoomTransform.y)}
         active={hotspot.id === activeId} mode={mode} wrapper={wrapperRef.current} theme={theme} navigation={navigation} stepIndex={stepIndex} stepCount={stepCount}
         onActivate={() => onHotspot?.(hotspot)} onSelect={() => onSelectHotspot?.(hotspot)}
         onGuidePrevious={onGuidePrevious} onGuideNext={() => onGuideNext?.(hotspot)}
         onRectChange={rect => onRectChange?.(hotspot, rect)}
       />)}
-      {contentReady && showZoomEditor && zoomRect && !zoomVisible && <ZoomRegionLayer rect={zoomRect} wrapper={wrapperRef.current} hotspots={step.hotspots} onChange={onZoomRectChange} onPreview={runZoomPreview} onDelete={onZoomDelete} />}
+      {interactionReady && showZoomEditor && zoomRect && !zoomVisible && <ZoomRegionLayer rect={zoomRect} wrapper={wrapperRef.current} hotspots={step.hotspots} onChange={onZoomRectChange} onPreview={runZoomPreview} onDelete={onZoomDelete} />}
     </div>
   </div>
 }

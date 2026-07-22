@@ -78,14 +78,21 @@ export default function Player() {
     if (index === demo.steps.length - 1) track('complete', stepId)
   }, [demo, exportMode, index, ready])
   useEffect(() => {
-    if (!demo || exportMode || !ready) return
-    for (const offset of [1, 2, -1]) {
+    if (!demo || exportMode) return
+    const warm = (offsets: number[]) => offsets.forEach(offset => {
       const candidate = demo.steps[index + offset]
-      if (!candidate) continue
+      if (!candidate) return
+      const image = new Image()
+      image.fetchPriority = offset === 1 ? 'high' : 'low'
+      image.src = candidate.image_url
       if (candidate.render_mode === 'dom') preloadSnapshot(candidate.snapshot_url).catch(() => undefined)
-      const image = new Image(); image.src = candidate.image_url
-    }
-  }, [demo, exportMode, index, ready])
+    })
+    // Warm the next visual immediately. Less likely navigation targets can use
+    // the remaining idle bandwidth without competing with the current step.
+    warm([1, -1])
+    const deferred = window.setTimeout(() => warm([2, 3]), 180)
+    return () => window.clearTimeout(deferred)
+  }, [demo, exportMode, index])
   useEffect(() => {
     if (!demo || exportMode || !demo.steps[index]) return
     setComments([]); setCommentText('')
