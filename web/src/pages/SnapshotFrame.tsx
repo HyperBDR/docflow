@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createCache, createMirror, rebuildIntoSandboxedIframe } from 'rrweb-snapshot'
+import { settleSnapshotAnimations } from '../snapshotAnimations'
 import type { HotspotData } from '../types'
 
 type LoadMessage = {
@@ -184,8 +185,13 @@ export default function SnapshotFrame() {
       const doc = frame?.contentDocument, view = frame?.contentWindow
       if (!doc || !view) return
       const style = doc.createElement('style')
-      style.textContent = `html,body{margin:0!important;min-height:100%;scroll-behavior:auto!important}*{animation-play-state:paused!important}.docflow-editor-hover{outline:3px solid #635bff!important;outline-offset:2px!important;cursor:crosshair!important}`
+      style.textContent = `html,body{margin:0!important;min-height:100%;scroll-behavior:auto!important}*{transition:none!important}.docflow-editor-hover{outline:3px solid #635bff!important;outline-offset:2px!important;cursor:crosshair!important}`
       doc.head.appendChild(style)
+      // rrweb restarts CSS animations when rebuilding a snapshot. Finishing
+      // finite animations keeps cards and dialogs at their visible end state;
+      // cancelling infinite animations prevents cursors and spinners moving.
+      const settlePage = () => settleSnapshotAnimations(doc)
+      settlePage()
       doc.querySelectorAll('form').forEach(form => form.addEventListener('submit', event => event.preventDefault()))
       doc.querySelectorAll('a').forEach(anchor => anchor.addEventListener('click', event => event.preventDefault()))
       const onClick = (event: MouseEvent) => {
@@ -231,7 +237,7 @@ export default function SnapshotFrame() {
       mutationObserver.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
       doc.querySelectorAll('img').forEach(image => image.addEventListener('load', scheduleRects))
       doc.fonts?.ready.then(scheduleRects).catch(() => {})
-      const settleTimers = [80, 300, 900].map(delay => window.setTimeout(scheduleRects, delay))
+      const settleTimers = [80, 300, 900].map(delay => window.setTimeout(() => { settlePage(); scheduleRects() }, delay))
       view.addEventListener('resize', scheduleRects); doc.addEventListener('scroll', scheduleRects, true)
       cleanupFrame = () => {
         doc.removeEventListener('click', onClick, true); doc.removeEventListener('pointerover', onOver, true); doc.removeEventListener('pointerout', onOut, true)
