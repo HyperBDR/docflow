@@ -823,6 +823,7 @@ class RecordingStepMeta(BaseModel):
     duration: float = Field(default=3, ge=1, le=15)
     ai_enabled: bool = True
     password_rect: Redaction | None = None
+    redactions: list[Redaction] = Field(default_factory=list)
 
 
 class RecordingDomMeta(BaseModel):
@@ -840,6 +841,7 @@ class RecordingDomMeta(BaseModel):
     page_context: dict = Field(default_factory=dict)
     scroll_state: dict = Field(default_factory=dict)
     password_rects: list[Redaction] = Field(default_factory=list)
+    redactions: list[Redaction] = Field(default_factory=list)
     capture_warnings: list[str] = Field(default_factory=list)
 
 

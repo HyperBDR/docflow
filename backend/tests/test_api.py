@@ -78,7 +78,7 @@ def test_record_publish_markdown_and_revoke(authenticated):
     assert authenticated.get(f"/public/{token}").status_code == 404
 
 
-def test_step_validation_and_password_redaction(authenticated):
+def test_legacy_password_rectangle_does_not_create_a_black_bar(authenticated):
     demo = authenticated.post("/api/demos", json={"title": "登录"}).json()
     meta = {
         "event_id": "password",
@@ -94,8 +94,25 @@ def test_step_validation_and_password_redaction(authenticated):
         files={"screenshot": ("screen.png", image_bytes(), "image/png")},
     )
     assert response.status_code == 201
-    assert len(response.json()["redactions"]) == 1
+    assert response.json()["redactions"] == []
     assert authenticated.patch(f"/api/demos/{demo['id']}/steps/{response.json()['id']}", json={"duration": 16}).status_code == 422
+
+
+def test_explicit_recording_redaction_is_preserved(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "Explicit redaction"}).json()
+    meta = {
+        "event_id": "explicit-redaction", "title": "Hide account number",
+        "viewport_width": 1280, "viewport_height": 720,
+        "hotspot": {"x": .5, "y": .5, "w": .2, "h": .06},
+        "redactions": [{"x": .4, "y": .47, "w": .2, "h": .06}],
+    }
+    response = authenticated.post(
+        f"/api/recordings/{demo['id']}/steps",
+        data={"meta": json.dumps(meta)},
+        files={"screenshot": ("screen.png", image_bytes(), "image/png")},
+    )
+    assert response.status_code == 201
+    assert len(response.json()["redactions"]) == 1
 
 
 def test_screenshot_hotspots_stay_scoped_and_can_be_deleted(authenticated):

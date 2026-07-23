@@ -12,6 +12,7 @@ from app.models import AnalyticsEvent, PublishedRevision, ShareToken, StepCommen
 from app.schemas import AnalyticsEventCreate, CommentCreate, ShareUnlock
 from app.security import hash_token, verify_password
 from app.storage import storage
+from app.http_cache import cache_headers, is_not_modified
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -150,9 +151,11 @@ def public_asset(token: str, step_id: str, request: Request, db: Session = Depen
     step = next((item for item in revision.snapshot["steps"] if item["id"] == step_id), None)
     if not step or not storage.exists(step["asset_key"]):
         raise HTTPException(status_code=404, detail="asset not found")
+    headers = cache_headers(step["asset_key"], "public", 300)
+    if is_not_modified(request, headers["ETag"]): return Response(status_code=304, headers=headers)
     direct = storage.direct_url(step["asset_key"])
-    if direct: return RedirectResponse(direct, status_code=307, headers={"Cache-Control": "public, max-age=60"})
-    return StreamingResponse(io.BytesIO(storage.read(step["asset_key"])), media_type="image/webp", headers={"Cache-Control": "public, max-age=300"})
+    if direct: return RedirectResponse(direct, status_code=307, headers=headers)
+    return StreamingResponse(io.BytesIO(storage.read(step["asset_key"])), media_type="image/webp", headers=headers)
 
 
 @router.get("/{token}/slides/{step_id}/snapshot")
@@ -162,18 +165,19 @@ def public_snapshot(token: str, step_id: str, request: Request, v: str | None = 
     if not step or not step.get("dom_snapshot_key"):
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
     key = step["dom_snapshot_key"]
-    version = key.rsplit("/", 1)[-1].split(".", 1)[0]
     if not storage.exists(key):
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
+    version = key.rsplit("/", 1)[-1].split(".", 1)[0]
+    headers = {
+        **cache_headers(key, "public", 31536000 if v == version else 300, immutable=v == version),
+        "Content-Encoding": "gzip",
+    }
+    if is_not_modified(request, headers["ETag"]): return Response(status_code=304, headers=headers)
     # Snapshots are already stored as gzip. Returning those bytes directly
     # avoids expanding a 0.6–1.3 MB object into 4–5 MB of JSON on every step.
     return Response(
         content=storage.read(key), media_type="application/json",
-        headers={
-            "Content-Encoding": "gzip",
-            "Cache-Control": "public, max-age=31536000, immutable" if v == version else "public, max-age=300",
-            "ETag": f'"{version}"',
-        },
+        headers=headers,
     )
 
 

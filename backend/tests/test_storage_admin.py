@@ -1,5 +1,6 @@
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from app.config import settings
 from app.database import SessionLocal
@@ -31,7 +32,12 @@ def test_local_storage_management_routing_browse_and_reference_protection(client
     assert client.post(f"/api/admin/storage/configs/{target['id']}/test").status_code == 200
 
     key = storage.write("tests/example.txt", b"managed-storage")
+    second_key = storage.write("tests/second.txt", b"another-object")
     assert key == f"storage://{target['id']}/tests/example.txt"
+    with patch.object(storage, "_target", wraps=storage._target) as resolve_target:
+        sizes = storage.sizes([key, second_key, key])
+    assert sizes == {key: len(b"managed-storage"), second_key: len(b"another-object")}
+    assert resolve_target.call_count == 1
     objects = client.get(f"/api/admin/storage/configs/{target['id']}/objects", params={"prefix": "tests"})
     assert objects.status_code == 200
     assert objects.json()[0]["key"] == "tests/example.txt"

@@ -10,20 +10,25 @@ export type TargetInfo = {
   text?: string
 }
 
-const sensitiveControlSelector = [
-  'input[type="password"]', 'input[type="email"]', 'input[autocomplete="one-time-code"]',
-  'input[autocomplete="current-password"]', 'input[autocomplete="username"]',
-  'input[name*="token" i]', 'input[name*="secret" i]', 'input[name*="api_key" i]', '[data-docflow-redact]',
+const plaintextSensitiveControlSelector = [
+  'input[type="email"]', 'input[autocomplete="one-time-code"]', 'input[autocomplete="username"]',
+  'input[name*="token" i]', 'input[name*="secret" i]', 'input[name*="api_key" i]',
 ].join(',')
+const explicitRedactionSelector = '[data-docflow-redact]'
+const sensitiveControlSelector = ['input[type="password"]', plaintextSensitiveControlSelector, explicitRedactionSelector].join(',')
 
 export function sensitiveFormDetected() {
   return Boolean(document.querySelector(sensitiveControlSelector))
 }
 
-/** Keep form geometry intact in pixel captures while removing entered secrets. */
+/**
+ * Keep form geometry intact while removing plaintext secrets. Password inputs
+ * stay untouched because browsers paint their native bullets rather than the
+ * underlying value; rrweb independently masks all captured input values.
+ */
 export function concealSensitiveFormValues() {
   if (!sensitiveFormDetected()) return () => {}
-  const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input:not([type="button"]):not([type="submit"]):not([type="reset"]),textarea'))
+  const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`${plaintextSensitiveControlSelector},input${explicitRedactionSelector},textarea${explicitRedactionSelector}`))
   const values = controls.map(control => ({ control, value: control.value, placeholder: control.placeholder, caretColor: control.style.caretColor }))
   controls.forEach(control => {
     control.value = ''
@@ -121,13 +126,23 @@ function rasterFallbackRegions() {
   }).slice(0, 40)
 }
 
-export function passwordRects(): Rect[] {
-  return Array.from(document.querySelectorAll<HTMLElement>(sensitiveControlSelector))
+export function redactionRects(): Rect[] {
+  // Automatic input redactions used to become permanently painted black bars
+  // after publishing and could drift when the viewport was scaled. Only an
+  // explicit page-level redaction marker is converted into a pixel mask.
+  return Array.from(document.querySelectorAll<HTMLElement>(explicitRedactionSelector))
     .filter(input => {
       const rect = input.getBoundingClientRect()
       return rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0 && rect.top <= innerHeight && rect.left <= innerWidth
     })
-    .map(input => normalized(input.getBoundingClientRect()))
+    .map(input => {
+      const rect = input.getBoundingClientRect()
+      const left = Math.max(0, Math.min(innerWidth, rect.left))
+      const top = Math.max(0, Math.min(innerHeight, rect.top))
+      const right = Math.max(left, Math.min(innerWidth, rect.right))
+      const bottom = Math.max(top, Math.min(innerHeight, rect.bottom))
+      return { x: left / innerWidth, y: top / innerHeight, w: (right - left) / innerWidth, h: (bottom - top) / innerHeight }
+    })
 }
 
 export function captureWarnings(): string[] {

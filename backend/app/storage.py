@@ -166,13 +166,40 @@ class Storage:
             return False
 
     def size(self, key: str) -> int:
-        try:
-            target, logical = self._resolve(key)
-            if not target: return self._legacy_path(logical).stat().st_size
-            if target.kind == "local": return self._local_path(target, logical).stat().st_size
-            return int(self._s3(target).head_object(Bucket=target.bucket, Key=self._object_key(target, logical))["ContentLength"])
-        except Exception:
-            return 0
+        return self.sizes([key]).get(key, 0)
+
+    def sizes(self, keys) -> dict[str, int]:
+        """Return object sizes while resolving each managed target once.
+
+        Quota summaries can inspect hundreds of objects. Calling ``size`` for
+        every key used to create a database session and reload StorageConfig
+        for every managed object, which amplified harmless UI polling into a
+        large number of nested database queries.
+        """
+        result: dict[str, int] = {}
+        targets: dict[str, StorageTarget | None] = {}
+        for key in dict.fromkeys(value for value in keys if value):
+            try:
+                target_id, logical = self.parse(key)
+                target = None
+                if target_id:
+                    if target_id not in targets:
+                        try: targets[target_id] = self._target(target_id)
+                        except Exception: targets[target_id] = None
+                    target = targets[target_id]
+                    if target is None:
+                        result[key] = 0
+                        continue
+                if not target:
+                    value = self._legacy_path(logical).stat().st_size
+                elif target.kind == "local":
+                    value = self._local_path(target, logical).stat().st_size
+                else:
+                    value = int(self._s3(target).head_object(Bucket=target.bucket, Key=self._object_key(target, logical))["ContentLength"])
+                result[key] = value
+            except Exception:
+                result[key] = 0
+        return result
 
     def delete(self, key: str) -> None:
         try:

@@ -79,20 +79,18 @@ export default function Player() {
   }, [demo, exportMode, index, ready])
   useEffect(() => {
     if (!demo || exportMode) return
-    const warm = (offsets: number[]) => offsets.forEach(offset => {
-      const candidate = demo.steps[index + offset]
-      if (!candidate) return
-      const image = new Image()
-      image.fetchPriority = offset === 1 ? 'high' : 'low'
-      image.src = candidate.image_url
-      if (candidate.render_mode === 'dom') preloadSnapshot(candidate.snapshot_url).catch(() => undefined)
-    })
-    // Warm the next visual immediately. Less likely navigation targets can use
-    // the remaining idle bandwidth without competing with the current step.
-    warm([1, -1])
-    const deferred = window.setTimeout(() => warm([2, 3]), 180)
+    const candidate = demo.steps[index + 1]
+    if (!candidate) return
+    // Fetch only the next screenshot while the current step is becoming
+    // visible. Large DOM payloads must not compete with the active visual on a
+    // slow HTTP/2 connection.
+    const image = new Image()
+    image.fetchPriority = 'high'
+    image.src = candidate.image_url
+    if (!ready || candidate.render_mode !== 'dom') return
+    const deferred = window.setTimeout(() => preloadSnapshot(candidate.snapshot_url).catch(() => undefined), 900)
     return () => window.clearTimeout(deferred)
-  }, [demo, exportMode, index])
+  }, [demo, exportMode, index, ready])
   useEffect(() => {
     if (!demo || exportMode || !demo.steps[index]) return
     setComments([]); setCommentText('')

@@ -38,7 +38,8 @@ def quota_capabilities(db: Session, organization_id: str, demo: Demo | None = No
     their own transaction. This response is intentionally not persisted so a
     quota-plan or override change becomes visible on the next refresh.
     """
-    summary = quota_summary(db, organization_id)
+    asset_sizes: dict[str, int] = {}
+    summary = quota_summary(db, organization_id, asset_sizes)
     items = {item["key"]: item for item in summary["items"]}
     step_count = len(demo.steps) if demo else 0
     video_minutes = estimate_video_minutes(demo) if demo else 1
@@ -70,13 +71,13 @@ def quota_capabilities(db: Session, organization_id: str, demo: Demo | None = No
             elif action == "publish" and metric == "active_shares" and demo and not needs_share:
                 value = None
             elif action == "publish" and metric == "storage_bytes" and demo:
-                value = blocker(metric, increment=estimate_publish_bytes(demo))
+                value = blocker(metric, increment=estimate_publish_bytes(demo, asset_sizes))
             elif action == "use_ai" and metric == "monthly_ai_tokens":
                 value = blocker(metric, increment=estimate_ai_tokens(demo) if demo else estimate_ai_tokens_for_steps(1))
             elif action == "export" and metric == "storage_bytes" and demo:
-                value = blocker(metric, increment=estimate_export_bytes(demo, "pdf"))
+                value = blocker(metric, increment=estimate_export_bytes(demo, "pdf", asset_sizes))
             elif action == "export_video" and metric == "storage_bytes" and demo:
-                value = blocker(metric, increment=estimate_export_bytes(demo, "mp4"))
+                value = blocker(metric, increment=estimate_export_bytes(demo, "mp4", asset_sizes))
             elif action == "export_video" and metric == "monthly_video_minutes":
                 value = blocker(metric, increment=video_minutes)
             else:

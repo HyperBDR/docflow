@@ -6,6 +6,7 @@ from PIL import Image
 
 from app.database import SessionLocal
 from app.models import Demo, PublishedRevision, Step
+from app.storage import storage
 
 
 def recording_step(client, demo_id: str, event_id: str):
@@ -139,6 +140,15 @@ def test_capabilities_recover_immediately_after_quota_increase(authenticated):
     restored = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo['id']}).json()
     assert restored['actions']['use_ai']['allowed'] is True
     assert restored['actions']['record_step']['allowed'] is True
+
+
+def test_capabilities_batches_storage_sizes_and_reuses_estimates(authenticated):
+    demo = authenticated.post('/api/demos', json={'title': 'Efficient capabilities'}).json()
+    assert recording_step(authenticated, demo['id'], 'stored-step').status_code == 201
+    with patch.object(storage, 'sizes', wraps=storage.sizes) as batch_sizes:
+        response = authenticated.get('/api/workspace/capabilities', params={'demo_id': demo['id']})
+    assert response.status_code == 200
+    assert batch_sizes.call_count == 1
 
 
 def test_recording_capabilities_block_resource_creation_and_full_storage(authenticated):

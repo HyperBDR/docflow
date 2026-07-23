@@ -30,7 +30,7 @@ export default function TeamSpaceSettings({ user, onUserChange, logout }: { user
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [capabilities, setCapabilities] = useState<WorkspaceCapabilities | null>(null)
-  const refreshCapabilities=useCallback(()=>api.quotaCapabilities(undefined,id).then(value=>{setCapabilities(value);return value}),[id])
+  const refreshCapabilities=useCallback((force=false)=>api.quotaCapabilities(undefined,id,{force}).then(value=>{setCapabilities(value);return value}),[id])
 
   async function load() {
     try {
@@ -38,19 +38,20 @@ export default function TeamSpaceSettings({ user, onUserChange, logout }: { user
       const selected = spaces.find(item => item.id === id)
       if (!selected || selected.kind !== 'team') throw new Error(t('space.notFound'))
       if (selected.access_source !== 'platform_admin' && !['owner', 'admin'].includes(selected.role)) throw new Error(t('space.forbidden'))
-      const [memberItems]=await Promise.all([api.organizationMembers(selected.id),refreshCapabilities()])
+      const memberItems=await api.organizationMembers(selected.id)
       setSpace(selected); setName(selected.name); setMembers(memberItems)
+      void refreshCapabilities().catch(()=>undefined)
     } catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
   }
   useEffect(() => { void load() }, [id])
-  useEffect(()=>{const refresh=()=>{if(document.visibilityState==='visible')void refreshCapabilities().catch(()=>undefined)},timer=window.setInterval(refresh,15000);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh)}},[refreshCapabilities])
+  useEffect(()=>{const refresh=()=>{if(document.visibilityState==='visible')void refreshCapabilities().catch(()=>undefined)},timer=window.setInterval(refresh,60000);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh)}},[refreshCapabilities])
 
   async function invite(event: React.FormEvent) {
     event.preventDefault(); if (!space) return
-    let live=capabilities;try{live=await refreshCapabilities()}catch{/* backend remains authoritative */}
+    let live=capabilities;try{live=await refreshCapabilities(true)}catch{/* backend remains authoritative */}
     if(!quotaAllowed(live,'invite_member')){setError(quotaGuardTitle(live,'invite_member',t,i18n.language));return}
     setBusy('invite'); setError(''); setInviteUrl('')
-    try { const result = await api.createInvitation(space.id, email, role); setInviteUrl(result.invite_url || ''); setEmail(''); void refreshCapabilities(); toast.success(t('space.inviteCreated')) }
+    try { const result = await api.createInvitation(space.id, email, role); setInviteUrl(result.invite_url || ''); setEmail(''); void refreshCapabilities(true); toast.success(t('space.inviteCreated')) }
     catch (value) { setError(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
     finally { setBusy('') }
   }

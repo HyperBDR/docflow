@@ -166,7 +166,11 @@ async def upload_step(
         key, width, height = storage.save_screenshot(f"assets/drafts/{demo.id}/{uuid.uuid4()}", content)
     except Exception as exc:
         raise HTTPException(status_code=422, detail="invalid screenshot") from exc
-    redactions = [parsed.password_rect.model_dump()] if parsed.password_rect else []
+    # password_rect is accepted for compatibility with older extensions but
+    # no longer becomes a permanent black bar. Native password bullets and
+    # rrweb input masking already protect the value. Explicit redactions use
+    # the dedicated field and remain available for intentional masking.
+    redactions = [item.model_dump() for item in parsed.redactions]
     step = Step(
         demo_id=demo.id,
         recording_session_id=session.id if session else None,
@@ -265,8 +269,12 @@ async def upload_dom_slide(
     target_text = parsed.target.text if parsed.target and parsed.target.text else "目标元素"
     title = parsed.title or ("流程完成" if parsed.terminal else f"点击「{target_text[:60]}」")
     body = parsed.body or ("已完成此操作流程。" if parsed.terminal else title)
-    redactions = [item.model_dump() for item in parsed.password_rects]
+    # Ignore legacy automatic input rectangles; they drifted when screenshots
+    # were scaled and produced misplaced black bars in published/PDF output.
+    redactions = [item.model_dump() for item in parsed.redactions]
     safe_page_context = sanitize_page_context(parsed.page_context)
+    if redactions:
+        safe_page_context["explicit_redactions"] = True
     step = Step(
         demo_id=demo.id,
         recording_session_id=session.id if session else None,

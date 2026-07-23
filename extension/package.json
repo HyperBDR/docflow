@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "check:i18n": "node scripts/check-i18n.mjs",
+    "test:unit": "node --experimental-strip-types --test scripts/*.test.mjs",
     "build": "npm run check:i18n && node build.mjs",
     "watch": "node build.mjs --watch"
   },

@@ -12,12 +12,14 @@ from app.database import get_db
 from app.defaults import navigation_defaults
 from app.dependencies import current_user
 from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, Tag, User
+from app.demo_cloning import clone_demo
 from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, ShareLinkCreate, ShareLinkUpdate, StepOut, StepUpdate
 from app.security import hash_password
 from app.quota import enforce
 from app.services import active_share, current_organization_id, demo_out, next_revision_number, owned_demo, require_organization_role, step_out, viewable_demo, write_audit
 from app.storage import storage
 from app.quota_estimates import estimate_publish_bytes
+from app.http_cache import cache_headers, is_not_modified
 
 router = APIRouter(prefix="/api/demos", tags=["demos"])
 
@@ -107,58 +109,7 @@ def duplicate_demo(demo_id: str, db: Session = Depends(get_db), user: User = Dep
     source = owned_demo(db, demo_id, user)
     enforce(db, source.organization_id, "resources")
     enforce(db, source.organization_id, "max_steps_per_resource", len(source.steps), current=0)
-    duplicate = Demo(
-        owner_id=user.id,
-        organization_id=source.organization_id,
-        title=f"{source.title}{' (Copy)' if source.content_locale == 'en' else '（副本）'}"[:200],
-        description=source.description,
-        ai_context=source.ai_context,
-        content_locale=source.content_locale,
-        theme=deepcopy(source.theme or {}),
-        navigation=deepcopy(source.navigation or {}),
-        playback=deepcopy(source.playback or {}),
-        category_id=source.category_id,
-        manual_fields=sorted(set(source.manual_fields or []) | {"title"}),
-    )
-    db.add(duplicate)
-    duplicate.tags = list(source.tags)
-    db.flush()
-    for source_step in sorted(source.steps, key=lambda item: item.position):
-        step = Step(
-            demo_id=duplicate.id,
-            event_id=source_step.event_id,
-            position=source_step.position,
-            title=source_step.title,
-            body=source_step.body,
-            asset_key=source_step.asset_key,
-            render_mode=source_step.render_mode,
-            dom_snapshot_key=source_step.dom_snapshot_key,
-            viewport_width=source_step.viewport_width,
-            viewport_height=source_step.viewport_height,
-            hotspot=deepcopy(source_step.hotspot or {}),
-            redactions=deepcopy(source_step.redactions or []),
-            page_context=deepcopy(source_step.page_context or {}),
-            scroll_state=deepcopy(source_step.scroll_state or {}),
-            capture_warnings=deepcopy(source_step.capture_warnings or []),
-            manual_fields=deepcopy(source_step.manual_fields or []),
-            ai_metadata=deepcopy(source_step.ai_metadata or {}),
-            animation=deepcopy(source_step.animation or {}),
-            duration=source_step.duration,
-        )
-        db.add(step)
-        db.flush()
-        for source_hotspot in source_step.hotspots:
-            db.add(Hotspot(
-                step_id=step.id,
-                position=source_hotspot.position,
-                selector=deepcopy(source_hotspot.selector or {}),
-                fallback_rect=deepcopy(source_hotspot.fallback_rect or {}),
-                trigger=source_hotspot.trigger,
-                action=deepcopy(source_hotspot.action or {}),
-                tooltip=deepcopy(source_hotspot.tooltip or {}),
-                style=deepcopy(source_hotspot.style or {}),
-                manual_fields=deepcopy(source_hotspot.manual_fields or []),
-            ))
+    duplicate = clone_demo(db, source, user, source.organization_id, keep_taxonomy=True)
     db.commit()
     db.refresh(duplicate)
     return demo_out(db, duplicate)
@@ -238,6 +189,8 @@ def update_step(payload: StepUpdate, demo_id: str, step_id: str, db: Session = D
         values["redactions"] = [item.model_dump() for item in payload.redactions or []]
     for key, value in values.items():
         setattr(step, key, value)
+    if values.get("redactions"):
+        step.page_context = {**(step.page_context or {}), "explicit_redactions": True}
     step.manual_fields = sorted(set(step.manual_fields or []) | (set(values) - {"position"}))
     if "position" in values:
         ordered = sorted(demo.steps, key=lambda item: (item.position, item.id))
@@ -262,28 +215,31 @@ def delete_step(demo_id: str, step_id: str, db: Session = Depends(get_db), user:
 
 
 @router.get("/{demo_id}/steps/{step_id}/image")
-def step_image(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def step_image(demo_id: str, step_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = viewable_demo(db, demo_id, user)
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not storage.exists(step.asset_key):
         raise HTTPException(status_code=404, detail="image not found")
+    headers = cache_headers(step.asset_key, "private", 300)
+    if is_not_modified(request, headers["ETag"]): return Response(status_code=304, headers=headers)
     direct = storage.direct_url(step.asset_key)
-    if direct: return RedirectResponse(direct, status_code=307, headers={"Cache-Control": "private, no-store"})
-    return StreamingResponse(io.BytesIO(storage.read(step.asset_key)), media_type="image/webp")
+    if direct: return RedirectResponse(direct, status_code=307, headers=headers)
+    return StreamingResponse(io.BytesIO(storage.read(step.asset_key)), media_type="image/webp", headers=headers)
 
 
 @router.get("/{demo_id}/steps/{step_id}/snapshot")
-def step_snapshot(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def step_snapshot(demo_id: str, step_id: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = viewable_demo(db, demo_id, user)
     step = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
     if not step or not step.dom_snapshot_key:
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
     if not storage.exists(step.dom_snapshot_key):
         raise HTTPException(status_code=404, detail="DOM snapshot not found")
-    version = step.dom_snapshot_key.rsplit("/", 1)[-1].split(".", 1)[0]
+    headers = {**cache_headers(step.dom_snapshot_key, "private", 300), "Content-Encoding": "gzip"}
+    if is_not_modified(request, headers["ETag"]): return Response(status_code=304, headers=headers)
     return Response(
         content=storage.read(step.dom_snapshot_key), media_type="application/json",
-        headers={"Content-Encoding": "gzip", "Cache-Control": "private, max-age=300", "ETag": f'"{version}"'},
+        headers=headers,
     )
 
 
@@ -299,7 +255,14 @@ def publish_demo(demo_id: str, request: Request, db: Session = Depends(get_db), 
     steps = []
     for step in sorted(demo.steps, key=lambda item: item.position):
         public_key = f"assets/published/{revision_id}/{step.id}.webp"
-        storage.rendered_asset(step.asset_key, step.redactions, public_key)
+        # Older recorder versions stored every login input as a redaction.
+        # Those automatic rectangles are indistinguishable from the legacy
+        # field, but sensitive-form captures already blank plaintext controls
+        # and render password bullets. Republish them without the stale bars;
+        # intentional editor redactions remain active on normal pages.
+        context = step.page_context or {}
+        publish_redactions = [] if context.get("sensitive_form") and not context.get("explicit_redactions") else step.redactions
+        storage.rendered_asset(step.asset_key, publish_redactions, public_key)
         hotspots = [{
             "id": item.id, "position": item.position, "selector": item.selector,
             "fallback_rect": item.fallback_rect, "trigger": item.trigger,

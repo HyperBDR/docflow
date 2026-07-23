@@ -2,6 +2,7 @@ import type { Credentials, Locale, Recording, RecordingMode, RecordingTarget } f
 import { browserLocale } from './locale'
 import { quotaAllowed, quotaApiError, quotaMessage, quotaMetricMessage, type QuotaAction, type WorkspaceCapabilities, type WorkspaceQuotaSummary } from './quota'
 import { configuredApiUrl, configuredWebUrl, isConfiguredWebPage, isRecordableUrl } from './config'
+import { isInlineableSnapshotAsset, stripEmbeddedFonts } from './snapshot-assets'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
 let recording: Recording | null = null
@@ -206,8 +207,7 @@ function visitNodes(value: unknown, visit: (node: Record<string, any>) => void) 
 
 async function responseDataUrl(response: Response, maxBytes: number): Promise<string | null> {
   const contentType = response.headers.get('content-type')?.split(';')[0] || ''
-  const allowed = contentType.startsWith('image/') || contentType.startsWith('font/') || contentType.includes('font')
-  if (!response.ok || !allowed) return null
+  if (!response.ok || !isInlineableSnapshotAsset(contentType)) return null
   const data = await response.arrayBuffer()
   if (data.byteLength > maxBytes) return null
   const bytes = new Uint8Array(data)
@@ -291,7 +291,7 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
         } catch { /* rrweb's existing inline CSS can still be enriched */ }
       }
       if (!css) continue
-      css = await inlineCssText(css, url, budget)
+      css = stripEmbeddedFonts(await inlineCssText(css, url, budget))
       node.attributes = { ...attrs, href: '', _cssText: css }
       delete node.attributes.integrity
       delete node.attributes.crossorigin
@@ -301,7 +301,7 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
   // rrweb preserves inline <style> content separately from linked sheets.
   // Resolve those URLs against the page itself before server sanitization.
   for (const node of nodes.filter(item => item.type === 3 && item.isStyle && item.textContent).slice(0, 80)) {
-    try { node.textContent = await inlineCssText(String(node.textContent), pageUrl, budget) }
+    try { node.textContent = stripEmbeddedFonts(await inlineCssText(String(node.textContent), pageUrl, budget)) }
     catch { /* unresolved URLs are removed by the server */ }
   }
 

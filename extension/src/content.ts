@@ -1,4 +1,4 @@
-import { captureDom, captureWarnings, concealSensitiveFormValues, normalized, pageContext, passwordRects, targetInfo } from './snapshot'
+import { captureDom, captureWarnings, concealSensitiveFormValues, normalized, pageContext, redactionRects, targetInfo } from './snapshot'
 import { browserLocale, tr } from './locale'
 import type { CapturedSnapshot, Locale, RecordingMode } from './types'
 import { isConfiguredWebPage } from './config'
@@ -45,6 +45,7 @@ let lastError = ''
 let captureUiHidden = false
 let detachedRecorderUi: { node: HTMLElement; parent: Node; next: ChildNode | null }[] = []
 let restoreSensitiveValues: (() => void) | null = null
+let lastPointer = { x: Math.max(0, innerWidth / 2), y: Math.max(0, innerHeight / 2) }
 const captureGuard = installCaptureGuard()
 
 function eventId() {
@@ -184,6 +185,21 @@ function showRecordingSetup(message: {
     const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, organizationId: selectedOrganizationId, mode: selectedMode, aiEnabled: selectedAI, aiContext, locale, contentLocale })
     if (result?.error) { window.alert(result.error); return }
     closeSetup()
+    // START broadcasts state from the background, but that message can arrive
+    // while this setup dialog is still mounted. Activate the initiating page
+    // explicitly so HTML targeting and the HUD never wait for another click.
+    applyState({
+      active: true,
+      paused: false,
+      capturing: false,
+      phase: '',
+      steps: 0,
+      mode: selectedMode,
+      aiEnabled: selectedAI,
+      locale,
+      contentLocale,
+    })
+    requestAnimationFrame(() => requestAnimationFrame(renderLastPointerTarget))
   }
 
   const renderAISettings = () => {
@@ -407,7 +423,7 @@ function ensureHud() {
     const data = {
       event_id: eventId(), title: tr(contentLocale, 'manualTitle'), body: tr(contentLocale, 'manualBody'),
       viewport_width: innerWidth, viewport_height: innerHeight, page_context: { ...pageContext(), manual_capture: true },
-      scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(),
+      scroll_state: { x: scrollX, y: scrollY }, redactions: redactionRects(),
       capture_warnings: captureWarnings(), duration: 3, terminal: false,
     }
     captureGuard.lock(); capturing = true; phase = 'capturing'; renderHud()
@@ -424,6 +440,22 @@ function ensureHud() {
 }
 
 function clearHighlight() { if (highlight) highlight.style.display = 'none' }
+
+function renderTargetHighlight(target: HTMLElement | null) {
+  if (!target || !highlight) { clearHighlight(); return }
+  const rect = target.getBoundingClientRect()
+  if (rect.width < 2 || rect.height < 2) { clearHighlight(); return }
+  Object.assign(highlight.style, {
+    display: 'block', left: `${Math.max(0, rect.left)}px`, top: `${Math.max(0, rect.top)}px`,
+    width: `${Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left))}px`,
+    height: `${Math.max(0, Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top))}px`,
+  })
+}
+
+function renderLastPointerTarget() {
+  if (!active || paused || capturing || mode !== 'html' || window.top !== window) return
+  renderTargetHighlight(selectableTarget(document.elementFromPoint(lastPointer.x, lastPointer.y)))
+}
 
 function renderHud() {
   if (!active) {
@@ -462,12 +494,16 @@ function renderHud() {
 }
 
 function applyState(state: RecorderState) {
+  const wasActive = active
   active = Boolean(state.active); paused = Boolean(state.paused); capturing = Boolean(state.capturing)
   phase = state.phase || ''; steps = Number(state.steps || 0); mode = state.mode || 'html'
   aiEnabled = Boolean(state.aiEnabled); locale = state.locale || locale; contentLocale = state.contentLocale || contentLocale
   lastError = state.error ? `${tr(locale, 'captureFailed')}: ${state.error}` : capturing ? lastError : ''
   renderHud()
-  if (active && !paused && mode === 'html') window.setTimeout(refreshSnapshot, document.readyState === 'complete' ? 0 : 500)
+  if (active && !paused && mode === 'html') {
+    window.setTimeout(refreshSnapshot, document.readyState === 'complete' ? 0 : 500)
+    if (!wasActive) requestAnimationFrame(() => requestAnimationFrame(renderLastPointerTarget))
+  }
   else currentSnapshot = null
 }
 
@@ -506,15 +542,9 @@ function restoreRecorderUi() {
 }
 
 function onPointerMove(event: PointerEvent) {
+  lastPointer = { x: event.clientX, y: event.clientY }
   if (!active || paused || capturing || mode !== 'html' || window.top !== window || !highlight) return
-  const target = selectableTarget(event.target as Element | null)
-  if (!target) { clearHighlight(); return }
-  const rect = target.getBoundingClientRect()
-  if (rect.width < 2 || rect.height < 2) { clearHighlight(); return }
-  Object.assign(highlight.style, {
-    display: 'block', left: `${Math.max(0, rect.left)}px`, top: `${Math.max(0, rect.top)}px`,
-    width: `${Math.min(innerWidth, rect.right) - Math.max(0, rect.left)}px`, height: `${Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top)}px`,
-  })
+  renderTargetHighlight(selectableTarget(event.target as Element | null))
 }
 
 async function onPointer(event: PointerEvent) {
@@ -534,7 +564,7 @@ async function onPointer(event: PointerEvent) {
   const data = {
     event_id: eventId(), title: body, body, viewport_width: innerWidth, viewport_height: innerHeight,
     hotspot: normalized(targetRect), target: info, page_context: pageContext(target),
-    scroll_state: { x: scrollX, y: scrollY }, password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: false,
+    scroll_state: { x: scrollX, y: scrollY }, redactions: redactionRects(), capture_warnings: captureWarnings(), duration: 3, terminal: false,
   }
   event.preventDefault()
   event.stopImmediatePropagation()
@@ -589,7 +619,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       data: {
         event_id: eventId(), title: tr(contentLocale, 'flowComplete'), body: tr(contentLocale, 'flowCompleteBody'),
         viewport_width: innerWidth, viewport_height: innerHeight, page_context: pageContext(), scroll_state: { x: scrollX, y: scrollY },
-        password_rects: passwordRects(), capture_warnings: captureWarnings(), duration: 3, terminal: true,
+        redactions: redactionRects(), capture_warnings: captureWarnings(), duration: 3, terminal: true,
       },
     }); return true
   }

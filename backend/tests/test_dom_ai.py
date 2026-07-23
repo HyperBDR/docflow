@@ -78,6 +78,19 @@ def test_snapshot_sanitizer_only_warns_for_missing_visual_assets():
     assert warnings == ["Stylesheet could not be embedded; preview may differ from the source page"]
 
 
+def test_snapshot_sanitizer_keeps_images_but_drops_embedded_fonts():
+    payload = rrweb_payload()
+    button = payload["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][0]
+    button["attributes"]["style"] = (
+        'background-image:url("data:image/png;base64,AA==");'
+        'src:url("data:font/woff2;base64,d09GMgABAAAA")'
+    )
+    value, _ = sanitize_snapshot(payload)
+    style = value["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][0]["attributes"]["style"]
+    assert "data:image/png" in style
+    assert "data:font" not in style
+
+
 def test_page_context_keeps_only_safe_raster_fallback_regions():
     value = sanitize_page_context({
         "page_title": "Embedded report",
@@ -120,7 +133,19 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
     assert step["snapshot_url"]
     assert step["page_context"]["url"] == "https://internal.test/projects"
     assert step["hotspots"][0]["selector"]["css"] == "#create"
-    assert authenticated.get(step["snapshot_url"].replace("http://localhost:8000", "")).status_code == 200
+    private_snapshot = authenticated.get(step["snapshot_url"].replace("http://localhost:8000", ""))
+    assert private_snapshot.status_code == 200
+    assert private_snapshot.headers["etag"]
+    assert authenticated.get(
+        step["snapshot_url"].replace("http://localhost:8000", ""),
+        headers={"If-None-Match": private_snapshot.headers["etag"]},
+    ).status_code == 304
+    private_image = authenticated.get(step["image_url"].replace("http://localhost:8000", ""))
+    assert private_image.headers["etag"]
+    assert authenticated.get(
+        step["image_url"].replace("http://localhost:8000", ""),
+        headers={"If-None-Match": private_image.headers["etag"]},
+    ).status_code == 304
 
     hotspot_id = step["hotspots"][0]["id"]
     updated = authenticated.patch(
@@ -143,6 +168,11 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
     assert snapshot_response.headers["content-encoding"] == "gzip"
     assert "immutable" in snapshot_response.headers["cache-control"]
     assert snapshot_response.json()["snapshot"]
+    assert authenticated.get(
+        f"/public/{token}/slides/{step['id']}/snapshot",
+        params={"v": public["steps"][0]["snapshot_version"]},
+        headers={"If-None-Match": snapshot_response.headers["etag"]},
+    ).status_code == 304
 
 
 def test_sensitive_form_keeps_dom_snapshot_but_defaults_to_exact_image(authenticated):
@@ -168,6 +198,31 @@ def test_sensitive_form_keeps_dom_snapshot_but_defaults_to_exact_image(authentic
     assert step["render_mode"] == "image"
     assert step["snapshot_url"]
     assert step["page_context"]["sensitive_form"] is True
+    # Simulate an automatic rectangle persisted by an older extension. A new
+    # publish must not bake that stale geometry into the screenshot/PDF source.
+    db = SessionLocal()
+    try:
+        stored = db.get(Step, step["id"])
+        stored.redactions = [{"x": .35, "y": .45, "w": .3, "h": .07}]
+        db.commit()
+    finally:
+        db.close()
+    published = authenticated.post(f"/api/demos/{demo['id']}/publish").json()
+    token = published["share_url"].rsplit("/", 1)[-1]
+    rendered = Image.open(io.BytesIO(authenticated.get(f"/public/{token}/assets/{step['id']}.webp").content)).convert("RGB")
+    assert min(rendered.getpixel((500, 340))) > 245
+    # A later editor action is explicit and must retain the product's manual
+    # redaction feature even on a login page.
+    explicit = authenticated.patch(
+        f"/api/demos/{demo['id']}/steps/{step['id']}",
+        json={"redactions": [{"x": .35, "y": .45, "w": .3, "h": .07}]},
+    )
+    assert explicit.status_code == 200
+    assert explicit.json()["page_context"]["explicit_redactions"] is True
+    republished = authenticated.post(f"/api/demos/{demo['id']}/publish").json()
+    token = republished["share_url"].rsplit("/", 1)[-1]
+    redacted = Image.open(io.BytesIO(authenticated.get(f"/public/{token}/assets/{step['id']}.webp").content)).convert("RGB")
+    assert max(redacted.getpixel((500, 340))) < 60
 
 
 def test_ai_application_respects_manual_fields(authenticated):

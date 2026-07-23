@@ -165,16 +165,23 @@ export default function Editor() {
     ai: t('ai.generate'),
   })[tab], [tab, t])
 
-  const refreshCapabilities = useCallback(() => api.quotaCapabilities(id).then(value => { setCapabilities(value); return value }), [id])
+  const refreshCapabilities = useCallback((force = false) => api.quotaCapabilities(id, undefined, { force }).then(value => { setCapabilities(value); return value }), [id])
 
   useEffect(() => {
-    Promise.all([api.demo(id), api.latestAI(id), api.exports(id).catch(() => []), refreshCapabilities()]).then(([value, latest, exportJobs]) => {
-      setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null); setAIJob(latest); setJobs(exportJobs)
-    }).catch(value => setLoadError(value.message))
+    let active = true
+    setLoadError('')
+    api.demo(id).then(value => {
+      if (!active) return
+      setDemo(value); setSelectedId(value.steps[0]?.id || null); setSelectedHotspotId(value.steps[0]?.hotspots[0]?.id || null)
+    }).catch(value => { if (active) setLoadError(value.message) })
+    api.latestAI(id).then(value => { if (active) setAIJob(value) }).catch(() => undefined)
+    api.exports(id).then(value => { if (active) setJobs(value) }).catch(() => undefined)
+    void refreshCapabilities().catch(() => undefined)
+    return () => { active = false }
   }, [id, refreshCapabilities])
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === 'visible') void refreshCapabilities().catch(() => undefined) }
-    const timer = window.setInterval(refresh, 15000)
+    const timer = window.setInterval(refresh, 60000)
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
@@ -204,7 +211,7 @@ export default function Editor() {
       const next = await api.aiJob(aiJob.id)
       setAIJob(next)
       if (next.status === 'complete') {
-        const fresh = await api.demo(id); setDemo(fresh); void refreshCapabilities(); toast.success(t('messages.aiComplete'), { dedupeKey: next.id })
+        const fresh = await api.demo(id); setDemo(fresh); void refreshCapabilities(true); toast.success(t('messages.aiComplete'), { dedupeKey: next.id })
       }
       if (next.status === 'failed' || next.status === 'cancelled') toast.error(next.error_code ? t(`common:errors.codes.${next.error_code}`) : t('messages.aiFailed'), { dedupeKey: next.id, persistent: next.status === 'failed', action: { label: t('common:actions.view'), href: '/tasks' } })
     }, 1800)
@@ -213,7 +220,7 @@ export default function Editor() {
 
   async function guardQuota(action: QuotaActionKey) {
     let live = capabilities
-    try { live = await refreshCapabilities() } catch { /* mutation API remains authoritative */ }
+    try { live = await refreshCapabilities(true) } catch { /* mutation API remains authoritative */ }
     if (quotaAllowed(live, action)) return true
     toast.warning(quotaGuardTitle(live, action, t, i18n.language))
     return false
@@ -317,7 +324,7 @@ export default function Editor() {
       const form = new FormData(); form.append('meta', JSON.stringify(meta)); form.append('screenshot', screenshot.file)
       const step = await api.uploadStep(id, form)
       setDemo(current => current ? { ...current, steps: [...current.steps, step] } : current); setSelectedId(step.id); setSelectedHotspotId(step.hotspots[0]?.id || null)
-      void refreshCapabilities()
+      void refreshCapabilities(true)
       toast.success(t(screenshot.compressed ? 'messages.screenshotCompressed' : 'messages.screenshotAdded'))
     } catch (value) {
       if (value instanceof ScreenshotPreparationError) toast.error(t(value.code === 'too_large' ? 'messages.screenshotTooLarge' : 'messages.screenshotInvalid'))
@@ -331,7 +338,7 @@ export default function Editor() {
     if (exportAction) return
     if (!await guardQuota('publish')) return
     setExportAction('publish')
-    try { setDemo(await api.publish(id)); void refreshCapabilities(); toast.success(t('messages.published')) }
+    try { setDemo(await api.publish(id)); void refreshCapabilities(true); toast.success(t('messages.published')) }
     catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
@@ -362,7 +369,7 @@ export default function Editor() {
       // Export the current editor state instead of a potentially stale
       // published revision, so timing/Zoom changes take effect immediately.
       setDemo(await api.publish(id))
-      const live = await refreshCapabilities()
+      const live = await refreshCapabilities(true)
       const quotaAction = kind === 'mp4' ? 'export_video' : 'export'
       if (!quotaAllowed(live, quotaAction)) {
         toast.warning(quotaGuardTitle(live, quotaAction, t, i18n.language))
@@ -370,14 +377,14 @@ export default function Editor() {
       }
       const job = await api.createExport(id, kind)
       setJobs(current => [job, ...current.filter(item => item.kind !== kind)])
-      void refreshCapabilities()
+      void refreshCapabilities(true)
       toast.task(t('messages.exportCreated'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } })
     } catch (value) { toast.error((value as Error).message) }
     finally { setExportAction(null) }
   }
   async function generateAI(stepId?: string) {
     if (!await guardQuota('use_ai')) return
-    try { const job = await api.generateAI(id, stepId); setAIJob(job); setTab('ai'); void refreshCapabilities(); toast.task(t('workspace:toast.aiSubmitted'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } }) } catch (value) { toast.error((value as Error).message) }
+    try { const job = await api.generateAI(id, stepId); setAIJob(job); setTab('ai'); void refreshCapabilities(true); toast.task(t('workspace:toast.aiSubmitted'), { dedupeKey: job.id, action: { label: t('common:actions.view'), href: '/tasks' } }) } catch (value) { toast.error((value as Error).message) }
   }
   async function prepareRecorder() {
     if (!demo || recorderBusy) return
@@ -552,7 +559,7 @@ export default function Editor() {
             <div className="export-section-heading"><span><Icon name="link" />{t('export.shareLink')}</span></div>
             {demo.share_url ? <div className="share-link-card"><span title={demo.share_url}>{demo.share_url}</span><button className={`icon-button ${exportAction === 'copy-share' ? 'action-pending' : ''}`} aria-busy={exportAction === 'copy-share'} disabled={actionBusy} onClick={copyShareLink}>{exportAction === 'copy-share' ? <span className="action-spinner" /> : <Icon name="copy" />}{exportAction === 'copy-share' ? t('export.copying') : t('common:actions.copy')}</button><a className="icon-button" href={demo.share_url} target="_blank" rel="noreferrer"><Icon name="play" />{t('common:actions.open')}</a></div> : <div className="export-empty-note"><Icon name="link" /><span>{t('export.unpublished')}</span></div>}
             <QuotaGuard fill message={!can('publish') ? quotaTitle('publish') : ''}><button className={`publish-version-button icon-button ${exportAction === 'publish' ? 'action-pending' : ''}`} aria-busy={exportAction === 'publish'} disabled={actionBusy || !can('publish')} onClick={publish}>{exportAction === 'publish' ? <span className="action-spinner" /> : <Icon name="publish" />}{exportAction === 'publish' ? t('export.publishing') : demo.status === 'published' ? t('export.updatePublished') : t('export.publishCreate')}</button></QuotaGuard>
-            <ShareLinkManager demo={demo} capabilities={capabilities} onQuotaChanged={() => void refreshCapabilities()}/>
+            <ShareLinkManager demo={demo} capabilities={capabilities} onQuotaChanged={() => void refreshCapabilities(true)}/>
           </section>
 
           <section>

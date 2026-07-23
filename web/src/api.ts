@@ -2,6 +2,7 @@ import i18n from './i18n'
 import type { AdminDownload, AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminShare, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, PublicPlatformConfig, QuotaPlan, QuotaSummary, RecycleItem, ResourceGovernance, ShareLink, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 import type { PlatformQuotaLimits, PlatformQuotaPreview, QuotaMetricKey, QuotaOverview, QuotaPlanStatistics, QuotaSpaceHistory } from './quota/types'
 import type { WorkspaceCapabilities } from './workspace/types'
+import { cachedCapabilities, invalidateCapabilities } from './workspace/capabilitiesClient'
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -58,7 +59,7 @@ export const api = {
   platformConfig: () => request<PublicPlatformConfig>('/api/platform/config'),
   googleIdentity: () => request<GoogleIdentity | null>('/api/auth/google/identity'),
   unlinkGoogle: () => request<void>('/api/auth/google/identity', { method: 'DELETE' }),
-  logout: () => request('/api/auth/logout', { method: 'POST' }),
+  logout: () => request('/api/auth/logout', { method: 'POST' }).finally(invalidateCapabilities),
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
   adminJobs: (filters: { query?: string; job_type?: string; status?: string; user_id?: string; organization_id?: string; from_at?: string; to_at?: string; page?: number; page_size?: number } = {}) => request<AdminJobPage>(`/api/admin/jobs?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),
   adminJob: (type: 'ai' | 'export', id: string) => request<AdminJobDetail>(`/api/admin/jobs/${type}/${id}`),
@@ -114,7 +115,7 @@ export const api = {
   createOrganization: (name: string, ownerId?: string) => request<Organization>('/api/organizations', { method: 'POST', body: JSON.stringify({ name, owner_id: ownerId || null }) }),
   updateOrganization: (id: string, name: string) => request<Organization>(`/api/organizations/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   archiveOrganization: (id: string) => request<void>(`/api/organizations/${id}/archive`, { method: 'POST' }),
-  switchOrganization: (id: string) => request<User>(`/api/organizations/${id}/switch`, { method: 'POST' }),
+  switchOrganization: (id: string) => request<User>(`/api/organizations/${id}/switch`, { method: 'POST' }).then(value => { invalidateCapabilities(); return value }),
   organizationMembers: (id: string) => request<OrganizationMember[]>(`/api/organizations/${id}/members`),
   updateOrganizationMember: (organizationId: string, memberId: string, role: OrganizationRole) => request<OrganizationMember>(`/api/organizations/${organizationId}/members/${memberId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
   removeOrganizationMember: (organizationId: string, memberId: string) => request<void>(`/api/organizations/${organizationId}/members/${memberId}`, { method: 'DELETE' }),
@@ -145,11 +146,16 @@ export const api = {
   purgeTeamSpace: (id: string) => request<void>(`/api/admin/recycle-bin/team-spaces/${id}`, { method: 'DELETE' }),
   demos: () => request<Demo[]>('/api/demos'),
   demo: (id: string) => request<Demo>(`/api/demos/${id}`),
-  quotaCapabilities: (demoId?: string, organizationId?: string) => request<WorkspaceCapabilities>(`/api/workspace/capabilities?${new URLSearchParams({ ...(demoId ? { demo_id: demoId } : {}), ...(organizationId ? { organization_id: organizationId } : {}) })}`),
+  quotaCapabilities: (demoId?: string, organizationId?: string, options: { force?: boolean } = {}) => {
+    const params = new URLSearchParams({ ...(demoId ? { demo_id: demoId } : {}), ...(organizationId ? { organization_id: organizationId } : {}) })
+    const key = `${organizationId || 'current'}:${demoId || 'workspace'}`
+    return cachedCapabilities(key, () => request<WorkspaceCapabilities>(`/api/workspace/capabilities?${params}`), options)
+  },
   createDemo: (title: string, categoryId?: string, contentLocale?: Locale) => request<Demo>('/api/demos', { method: 'POST', body: JSON.stringify({ title, category_id: categoryId || null, content_locale: contentLocale || 'zh-CN' }) }),
   updateDemo: (id: string, values: Partial<Demo> & { tag_ids?: string[] }) => request<Demo>(`/api/demos/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
   deleteDemo: (id: string) => request<void>(`/api/demos/${id}`, { method: 'DELETE' }),
   duplicateDemo: (id: string) => request<Demo>(`/api/demos/${id}/duplicate`, { method: 'POST' }),
+  transferDemo: (id: string, action: 'copy' | 'move', targetOrganizationId: string) => request<Demo>(`/api/demos/${id}/transfer`, { method: 'POST', body: JSON.stringify({ action, target_organization_id: targetOrganizationId }) }),
   mergeDemos: (demoIds: string[], title: string, categoryId?: string) => request<Demo>('/api/demos/merge', { method: 'POST', body: JSON.stringify({ demo_ids: demoIds, title, category_id: categoryId || null }) }),
   categories: () => request<Category[]>('/api/categories'),
   createCategory: (name: string, parentId?: string, color = '#635bff') => request<Category>('/api/categories', { method: 'POST', body: JSON.stringify({ name, parent_id: parentId || null, color }) }),

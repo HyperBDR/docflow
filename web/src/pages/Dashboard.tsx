@@ -5,6 +5,7 @@ import { api } from '../api'
 import { copyText } from '../clipboard'
 import { formatDate } from '../i18n'
 import Icon from '../components/Icon'
+import SpaceTransferDialog from '../components/SpaceTransferDialog'
 import { useToast } from '../components/toast'
 import type { Category, Demo, Tag } from '../types'
 import type { QuotaActionKey, WorkspaceCapabilities } from '../workspace/types'
@@ -26,14 +27,15 @@ export default function Dashboard() {
   const [dialog, setDialog] = useState<Dialog>(null)
   const [tagTargets, setTagTargets] = useState<Demo[] | null>(null)
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [spaceTransferTarget, setSpaceTransferTarget] = useState<Demo | null>(null)
   const [busy, setBusy] = useState(false)
   const [capabilities, setCapabilities] = useState<WorkspaceCapabilities | null>(null)
   const navigate = useNavigate()
   const toast = useToast()
 
-  const refreshCapabilities = useCallback(() => api.quotaCapabilities().then(value => { setCapabilities(value); return value }), [])
-  useEffect(() => { Promise.all([api.demos(), api.categories(), api.tags(), refreshCapabilities()]).then(([demoItems, categoryItems, tagItems]) => { setDemos(demoItems); setCategories(categoryItems); setTags(tagItems) }).catch(showError) }, [refreshCapabilities])
-  useEffect(() => { const refresh=()=>{if(document.visibilityState==='visible')void refreshCapabilities().catch(()=>undefined)},timer=window.setInterval(refresh,15000);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh)} }, [refreshCapabilities])
+  const refreshCapabilities = useCallback((force = false) => api.quotaCapabilities(undefined, undefined, { force }).then(value => { setCapabilities(value); return value }), [])
+  useEffect(() => { Promise.all([api.demos(), api.categories(), api.tags()]).then(([demoItems, categoryItems, tagItems]) => { setDemos(demoItems); setCategories(categoryItems); setTags(tagItems) }).catch(showError); void refreshCapabilities().catch(() => undefined) }, [refreshCapabilities])
+  useEffect(() => { const refresh=()=>{if(document.visibilityState==='visible')void refreshCapabilities().catch(()=>undefined)},timer=window.setInterval(refresh,60000);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('focus',refresh)} }, [refreshCapabilities])
   useEffect(() => {
     if (!openMenu) return
     const close = () => setOpenMenu(null)
@@ -58,7 +60,7 @@ export default function Dashboard() {
   function showError(value: unknown) { toast.error(value instanceof Error ? value.message : t('common:errors.operationFailed')) }
   const can=(action:QuotaActionKey)=>quotaAllowed(capabilities,action)
   const quotaTitle=(action:QuotaActionKey)=>quotaGuardTitle(capabilities,action,t,i18n.language)
-  async function guard(action:QuotaActionKey){let live=capabilities;try{live=await refreshCapabilities()}catch{/* API mutation remains authoritative */}if(quotaAllowed(live,action))return true;toast.warning(quotaGuardTitle(live,action,t,i18n.language));return false}
+  async function guard(action:QuotaActionKey){let live=capabilities;try{live=await refreshCapabilities(true)}catch{/* API mutation remains authoritative */}if(quotaAllowed(live,action))return true;toast.warning(quotaGuardTitle(live,action,t,i18n.language));return false}
   function toggle(id: string) { setSelected(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next }) }
   function setDisplay(next: 'grid' | 'list') { setView(next); localStorage.setItem('docflow-library-view', next) }
   function categoryCount(id?: string) {
@@ -70,14 +72,14 @@ export default function Dashboard() {
   async function remove(ids: string[]) {
     if (!ids.length || !window.confirm(t('messages.deleteConfirm', { count: ids.length }))) return
     setBusy(true)
-    try { await Promise.all(ids.map(id => api.deleteDemo(id))); setDemos(current => current.filter(item => !ids.includes(item.id))); setSelected(new Set()); void refreshCapabilities(); toast.success(t('messages.deleted', { count: ids.length })) }
+    try { await Promise.all(ids.map(id => api.deleteDemo(id))); setDemos(current => current.filter(item => !ids.includes(item.id))); setSelected(new Set()); void refreshCapabilities(true); toast.success(t('messages.deleted', { count: ids.length })) }
     catch (value) { showError(value) } finally { setBusy(false) }
   }
   async function duplicate(items: Demo[]) {
     if (!items.length) return
     if(!await guard('create_resource'))return
     setBusy(true)
-    try { const copied = await Promise.all(items.map(item => api.duplicateDemo(item.id))); setDemos(current => [...copied, ...current]); setSelected(new Set(copied.map(item => item.id))); void refreshCapabilities(); toast.success(t('messages.duplicated', { count: copied.length })) }
+    try { const copied = await Promise.all(items.map(item => api.duplicateDemo(item.id))); setDemos(current => [...copied, ...current]); setSelected(new Set(copied.map(item => item.id))); void refreshCapabilities(true); toast.success(t('messages.duplicated', { count: copied.length })) }
     catch (value) { showError(value) } finally { setBusy(false) }
   }
   async function share(items: Demo[]) {
@@ -89,13 +91,13 @@ export default function Dashboard() {
       const published = results.flatMap(result => result.status === 'fulfilled' && result.value.share_url ? [result.value] : [])
       if (!published.length) throw new Error(t('messages.shareFailed'))
       await copyText(published.map(item => item.share_url).join('\n'))
-      const updates = new Map(published.map(item => [item.id, item])); setDemos(current => current.map(item => updates.has(item.id) ? { ...item, ...updates.get(item.id)! } : item)); void refreshCapabilities(); toast.success(t('messages.linksCopied', { count: published.length }))
+      const updates = new Map(published.map(item => [item.id, item])); setDemos(current => current.map(item => updates.has(item.id) ? { ...item, ...updates.get(item.id)! } : item)); void refreshCapabilities(true); toast.success(t('messages.linksCopied', { count: published.length }))
     } catch (value) { showError(value) } finally { setBusy(false) }
   }
   async function revoke(demo: Demo) {
     if (!window.confirm(t('messages.revokeConfirm', { title: demo.title }))) return
     setBusy(true)
-    try { const updated = await api.revoke(demo.id); setDemos(current => current.map(item => item.id === updated.id ? { ...item, ...updated } : item)); void refreshCapabilities(); toast.success(t('messages.revoked')) }
+    try { const updated = await api.revoke(demo.id); setDemos(current => current.map(item => item.id === updated.id ? { ...item, ...updated } : item)); void refreshCapabilities(true); toast.success(t('messages.revoked')) }
     catch (value) { showError(value) } finally { setBusy(false) }
   }
 
@@ -126,6 +128,7 @@ export default function Dashboard() {
         {selected.size > 0 && <div className="bulk-action-bar"><span>{t('selectedResources', { count: selected.size })}</span><div>
           <button disabled={busy || selected.size !== 1} onClick={() => navigate(`/demos/${selectedDemos[0].id}?mode=edit`)}><Icon name="edit" />{t('common:actions.edit')}</button>
           <button disabled={busy} onClick={() => setDialog('move')}><Icon name="folder" />{t('moveTo')}</button>
+          <button disabled={busy || selected.size !== 1} onClick={() => setSpaceTransferTarget(selectedDemos[0])}><Icon name="move" />{t('transferSpace')}</button>
           <button disabled={busy} onClick={() => { setTagTargets(null); setDialog('tags') }}><Icon name="tag" />{t('setTags')}</button>
           <button disabled={busy || selected.size < 2 || selected.size > 5 || !can('create_resource')} title={!can('create_resource')?quotaTitle('create_resource'):t('mergeHint')} onClick={() => setDialog('merge')}><Icon name="move" />{t('merge')}</button>
           <button disabled={busy || (selectedDemos.some(item=>!item.share_url)&&!can('create_share'))} title={selectedDemos.some(item=>!item.share_url)&&!can('create_share')?quotaTitle('create_share'):''} onClick={() => share(selectedDemos)}><Icon name="share" />{t('common:actions.share')}</button><button disabled={busy || !can('create_resource')} title={!can('create_resource')?quotaTitle('create_resource'):''} onClick={() => duplicate(selectedDemos)}><Icon name="copy" />{t('common:actions.copy')}</button><button className="danger" disabled={busy} onClick={() => remove([...selected])}><Icon name="delete" />{t('common:actions.delete')}</button>
@@ -147,6 +150,7 @@ export default function Dashboard() {
               {demo.share_url && <Link to={`/demos/${demo.id}/analytics`} onClick={() => setOpenMenu(null)}><Icon name="analytics" />{t('analytics')}</Link>}
               {demo.share_url && <a href={demo.share_url} target="_blank" rel="noreferrer" onClick={() => setOpenMenu(null)}><Icon name="play" />{t('openPreview')}</a>}
               <button disabled={busy || !can('create_resource')} title={!can('create_resource')?quotaTitle('create_resource'):''} onClick={() => { setOpenMenu(null); duplicate([demo]) }}><Icon name="copy" />{t('duplicate')}</button>
+              <button disabled={busy} onClick={() => { setOpenMenu(null); setSpaceTransferTarget(demo) }}><Icon name="move" />{t('transferSpace')}</button>
               {demo.share_url && <button disabled={busy} onClick={() => { setOpenMenu(null); revoke(demo) }}><Icon name="unlink" />{t('revoke')}</button>}
               <button disabled={busy} className="danger" onClick={() => { setOpenMenu(null); remove([demo.id]) }}><Icon name="delete" />{t('deleteDemo')}</button>
             </div>}
@@ -158,7 +162,8 @@ export default function Dashboard() {
     {dialog === 'categories' && <CategoryDialog categories={categories} onClose={() => { setDialog(null); api.demos().then(setDemos).catch(showError) }} onChange={setCategories} onError={showError} />}
     {dialog === 'move' && <MoveDialog categories={categories} count={selected.size} onClose={() => setDialog(null)} onMove={async categoryId => { setBusy(true); try { const updates = await Promise.all(selectedDemos.map(item => api.updateDemo(item.id, { category_id: categoryId || null }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); toast.success(t('messages.moved')) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
     {dialog === 'tags' && <TagDialog tags={tags} demos={tagTargets ?? selectedDemos} onClose={() => { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError) }} onTags={setTags} onApply={async ids => { const targets = tagTargets ?? selectedDemos; if (!targets.length) { setDialog(null); setTagTargets(null); api.demos().then(setDemos).catch(showError); return } setBusy(true); try { const updates = await Promise.all(targets.map(item => api.updateDemo(item.id, { tag_ids: ids }))); const map = new Map(updates.map(item => [item.id, item])); setDemos(current => current.map(item => map.get(item.id) || item)); setDialog(null); setTagTargets(null); toast.success(targets.length === 1 ? t('messages.demoTagsUpdated', { title: targets[0].title }) : t('messages.tagsUpdated')) } catch (value) { showError(value) } finally { setBusy(false) } }} onError={showError} />}
-    {dialog === 'merge' && <MergeDialog demos={selectedDemos} categories={categories} onClose={() => setDialog(null)} onMerge={async (ids, name, categoryId) => { if(!await guard('create_resource'))return;setBusy(true); try { const merged = await api.mergeDemos(ids, name, categoryId); setDemos(current => [merged, ...current]); setSelected(new Set([merged.id])); setDialog(null); void refreshCapabilities(); toast.success(t('messages.merged', { title: merged.title })) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
+    {dialog === 'merge' && <MergeDialog demos={selectedDemos} categories={categories} onClose={() => setDialog(null)} onMerge={async (ids, name, categoryId) => { if(!await guard('create_resource'))return;setBusy(true); try { const merged = await api.mergeDemos(ids, name, categoryId); setDemos(current => [merged, ...current]); setSelected(new Set([merged.id])); setDialog(null); void refreshCapabilities(true); toast.success(t('messages.merged', { title: merged.title })) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
+    {spaceTransferTarget && <SpaceTransferDialog demo={spaceTransferTarget} busy={busy} onClose={() => setSpaceTransferTarget(null)} onError={showError} onTransfer={async (action, targetOrganizationId) => { setBusy(true); try { const result = await api.transferDemo(spaceTransferTarget.id, action, targetOrganizationId); if (action === 'move') { setDemos(current => current.filter(item => item.id !== spaceTransferTarget.id)); setSelected(current => { const next = new Set(current); next.delete(spaceTransferTarget.id); return next }) } setSpaceTransferTarget(null); void refreshCapabilities(true); toast.success(t(action === 'copy' ? 'messages.copiedToSpace' : 'messages.movedToSpace', { title: result.title })) } catch (value) { showError(value) } finally { setBusy(false) } }} />}
   </main>
 }
 

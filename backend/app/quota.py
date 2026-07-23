@@ -25,7 +25,7 @@ def effective_plan(db:Session,organization_id:str):
     limits={**DEFAULT_LIMITS,**(plan.limits or {}),**((assignment.overrides or {}) if assignment else {})}
     return plan,limits,assignment
 
-def usage(db:Session,organization_id:str)->dict[str,int]:
+def usage(db:Session,organization_id:str,asset_sizes:dict[str,int]|None=None)->dict[str,int]:
     start,end=month_range();demos=db.scalars(select(Demo).where(Demo.organization_id==organization_id,Demo.deleted_at.is_(None))).all();ids=[d.id for d in demos]
     steps=db.execute(select(Step.demo_id,func.count(Step.id)).where(Step.demo_id.in_(ids)).group_by(Step.demo_id)).all() if ids else []
     keys=set()
@@ -48,8 +48,10 @@ def usage(db:Session,organization_id:str)->dict[str,int]:
         AIJob.created_at>=start,AIJob.created_at<=end,
     )) or 0
     reserved_export_bytes=sum(job.quota_reserved_bytes or 0 for job in exports if job.status in {JobStatus.queued,JobStatus.running})
+    measured_sizes=storage.sizes(keys)
+    if asset_sizes is not None:asset_sizes.update(measured_sizes)
     return {
-      "storage_bytes":sum(storage.size(k) for k in keys)+reserved_export_bytes,"resources":len(ids),"max_steps_per_resource":max([c for _,c in steps],default=0),
+      "storage_bytes":sum(measured_sizes.values())+reserved_export_bytes,"resources":len(ids),"max_steps_per_resource":max([c for _,c in steps],default=0),
       "members":db.scalar(select(func.count(OrganizationMember.id)).where(OrganizationMember.organization_id==organization_id)) or 0,
       "active_shares":db.scalar(select(func.count(ShareToken.id)).join(Demo,Demo.id==ShareToken.demo_id).where(Demo.organization_id==organization_id,ShareToken.revoked.is_(False),or_(ShareToken.expires_at.is_(None),ShareToken.expires_at>datetime.now(timezone.utc)))) or 0,
       "monthly_ai_tokens":(db.scalar(select(func.sum(AIUsageRecord.total_tokens)).where(AIUsageRecord.organization_id==organization_id,AIUsageRecord.created_at>=start,AIUsageRecord.created_at<=end)) or 0)+reserved_ai_tokens,
@@ -58,8 +60,8 @@ def usage(db:Session,organization_id:str)->dict[str,int]:
       "monthly_download_bytes":db.scalar(select(func.sum(ExportDownloadEvent.bytes_transferred)).where(ExportDownloadEvent.organization_id==organization_id,ExportDownloadEvent.status=="completed",ExportDownloadEvent.created_at>=start,ExportDownloadEvent.created_at<=end)) or 0,
     }
 
-def quota_summary(db:Session,organization_id:str)->dict:
-    plan,limits,assignment=effective_plan(db,organization_id);used=usage(db,organization_id);start,end=month_range();items=[]
+def quota_summary(db:Session,organization_id:str,asset_sizes:dict[str,int]|None=None)->dict:
+    plan,limits,assignment=effective_plan(db,organization_id);used=usage(db,organization_id,asset_sizes);start,end=month_range();items=[]
     for key,limit in limits.items():
         value=int(used.get(key,0));has_limit=limit is not None;percent=round(value/int(limit)*100,1) if limit else 100.0 if has_limit else 0;items.append({"key":key,"used":value,"limit":limit,"percent":percent,"status":"exceeded" if has_limit and value>=int(limit) else "warning" if has_limit and percent>=80 else "normal","enforcement":"soft" if key in SOFT else "hard"})
     return {"organization_id":organization_id,"plan":{"id":plan.id,"name":plan.name,"description":plan.description},"items":items,"period":{"starts_at":start,"resets_at":end},"has_overrides":bool(assignment and assignment.overrides)}
@@ -82,3 +84,22 @@ def enforce(db:Session,organization_id:str,key:str,increment:int=1,current:int|N
     used=usage(db,organization_id).get(key,0) if current is None else current
     if used+max(0,increment)>int(limit):
         raise HTTPException(status_code=403,detail={"message":"workspace quota exceeded","code":f"quota.{key}_exceeded","quota":{"metric":key,"used":used,"limit":limit}})
+
+
+def enforce_increments(db: Session, organization_id: str, increments: dict[str, int]) -> None:
+    """Atomically validate several quota increments against one usage snapshot."""
+    _, limits, _ = effective_plan(db, organization_id)
+    hard = {key: max(0, int(value)) for key, value in increments.items() if key not in SOFT and limits.get(key) is not None}
+    for key in sorted(hard):
+        _quota_lock(db, organization_id, key)
+    used = usage(db, organization_id)
+    for key, increment in hard.items():
+        # This metric is a per-resource ceiling, not an additive workspace total.
+        current = 0 if key == "max_steps_per_resource" else int(used.get(key, 0))
+        limit = int(limits[key])
+        if current + increment > limit:
+            raise HTTPException(status_code=403, detail={
+                "message": "workspace quota exceeded",
+                "code": f"quota.{key}_exceeded",
+                "quota": {"metric": key, "used": current, "limit": limit},
+            })

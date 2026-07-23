@@ -46,7 +46,7 @@ def safe_url(value: str, *, href: bool = False) -> str | None:
     lowered = clean.lower()
     if href and (clean.startswith("#") or lowered.startswith("mailto:")):
         return clean
-    if lowered.startswith("data:image/") or lowered.startswith("data:font/") or lowered.startswith("data:application/font"):
+    if lowered.startswith("data:image/"):
         return clean
     return None
 
@@ -58,7 +58,7 @@ def sanitize_css(value: str) -> str:
 
     def replace_url(match: re.Match) -> str:
         target = match.group(2).strip()
-        if target.startswith("data:image/") or target.startswith("data:font/") or target.startswith("data:application/font"):
+        if target.startswith("data:image/"):
             return f'url("{target}")'
         return "url(\"\")"
 
