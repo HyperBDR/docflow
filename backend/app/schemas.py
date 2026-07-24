@@ -538,7 +538,8 @@ class Hotspot(BaseModel):
 
 
 class Redaction(Hotspot):
-    pass
+    kind: Literal["cover", "mosaic", "blur"] = "cover"
+    color: str = Field(default="#23272f", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class PlaybackConfig(BaseModel):
@@ -636,6 +637,7 @@ class StepOut(BaseModel):
     position: int
     title: str
     body: str
+    hotspot_mode: Literal["independent", "sequence"] = "independent"
     viewport_width: int
     viewport_height: int
     hotspot: dict
@@ -771,6 +773,7 @@ class CommentOut(BaseModel):
 class StepUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     body: str | None = Field(default=None, max_length=5000)
+    hotspot_mode: Literal["independent", "sequence"] | None = None
     hotspot: Hotspot | None = None
     redactions: list[Redaction] | None = None
     duration: float | None = Field(default=None, ge=1, le=15)
@@ -896,3 +899,4 @@ class AIJobOut(BaseModel):
     error: str | None
     error_code: str | None = None
     can_revert: bool = False
+    can_reapply: bool = False

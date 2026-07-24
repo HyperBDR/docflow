@@ -34,6 +34,7 @@ export default function Player() {
   const exportMode = params.get('export') === '1'
   const [demo, setDemo] = useState<Published | null>(null)
   const [index, setIndex] = useState(0)
+  const [hotspotIndex, setHotspotIndex] = useState(0)
   const [ready, setReady] = useState(false)
   const [exportZoomProgress, setExportZoomProgress] = useState<number | undefined>(exportMode ? 0 : undefined)
   const [error, setError] = useState('')
@@ -70,13 +71,14 @@ export default function Player() {
     setLocked(false); setDemo(value); setIndex(Math.min(requestedStep, Math.max(0, value.steps.length - 1))); track('view')
   }).catch(value => { if (value.message !== 'locked') setError(value.message) }) }
   useEffect(() => { void load() }, [token, publicApi, requestedStep])
-  useEffect(() => setReady(false), [index])
+  useEffect(() => { setReady(false); setHotspotIndex(0) }, [index])
   useEffect(() => {
     if (!demo || exportMode || !ready || !demo.steps[index]) return
     const stepId = demo.steps[index].id
-    track('step_view', stepId)
-    if (index === demo.steps.length - 1) track('complete', stepId)
-  }, [demo, exportMode, index, ready])
+    if (hotspotIndex === 0) track('step_view', stepId)
+    const current = demo.steps[index]
+    if (index === demo.steps.length - 1 && (current.hotspot_mode !== 'sequence' || hotspotIndex >= current.hotspots.length - 1)) track('complete', stepId)
+  }, [demo, exportMode, index, hotspotIndex, ready])
   useEffect(() => {
     if (!demo || exportMode) return
     const candidate = demo.steps[index + 1]
@@ -108,23 +110,28 @@ export default function Player() {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!ready) return
-      if (event.key === 'ArrowRight' || event.key === ' ') goTo(index + 1)
-      if (event.key === 'ArrowLeft') goTo(index - 1)
+      if (event.key === 'ArrowRight' || event.key === ' ') goForward()
+      if (event.key === 'ArrowLeft') goPrevious()
     }
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
-  }, [demo, index, ready])
+  }, [demo, index, hotspotIndex, ready])
   useEffect(() => {
     if (!demo || exportMode || !ready) return
     const playback = { ...defaultPlayback, ...(demo.playback || {}) }
-    if (!playback.autoplay || demo.steps.length < 2) return
+    if (!playback.autoplay) return
+    const current = demo.steps[index]
+    if (demo.steps.length < 2 && !(current.hotspot_mode === 'sequence' && current.hotspots.length > 1)) return
     const duration = Math.max(250, Math.min(60000, Number(playback.step_duration_ms) || 2000))
     const transitionDelay = Math.max(0, Math.min(30000, Number(playback.transition_delay_ms) || 0))
     const timer = window.setTimeout(() => {
-      if (index < demo.steps.length - 1) goTo(index + 1)
-      else if (playback.loop) goTo(0)
+      const hotspots = [...(current.hotspots || [])].sort((a, b) => a.position - b.position)
+      const atSequenceEnd = current.hotspot_mode !== 'sequence' || hotspotIndex >= Math.max(0, hotspots.length - 1)
+      if (index >= demo.steps.length - 1 && atSequenceEnd) {
+        if (playback.loop) goTo(0)
+      } else goForward()
     }, duration + transitionDelay)
     return () => window.clearTimeout(timer)
-  }, [demo, exportMode, index, ready])
+  }, [demo, exportMode, index, hotspotIndex, ready])
 
   async function unlock(event: React.FormEvent) {
     event.preventDefault(); setUnlocking(true); setError('')
@@ -145,17 +152,51 @@ export default function Player() {
     next_label: demo.content_locale === 'en' ? 'Next' : '下一步',
     ...(demo.navigation || {}),
   }
+  const totalProgressUnits = demo.steps.reduce((total, item) => total + (
+    item.hotspot_mode === 'sequence' ? Math.max(1, item.hotspots.length) : 1
+  ), 0)
+  const completedProgressUnits = demo.steps.slice(0, index).reduce((total, item) => total + (
+    item.hotspot_mode === 'sequence' ? Math.max(1, item.hotspots.length) : 1
+  ), 0)
+  const currentProgressUnits = step.hotspot_mode === 'sequence'
+    ? Math.min(Math.max(1, hotspotIndex + 1), Math.max(1, step.hotspots.length))
+    : 1
+  const progressPercent = (completedProgressUnits + currentProgressUnits) / Math.max(1, totalProgressUnits) * 100
 
   function goTo(next: number) {
     if (!ready) return
     const target = Math.max(0, Math.min(demo!.steps.length - 1, next))
     if (target === index) return
     setReady(false)
+    setHotspotIndex(0)
     setIndex(target)
+  }
+
+  function goPrevious() {
+    if (!demo || !ready) return
+    const current = demo.steps[index]
+    if (current?.hotspot_mode === 'sequence' && hotspotIndex > 0) {
+      setHotspotIndex(value => Math.max(0, value - 1))
+      return
+    }
+    goTo(index - 1)
+  }
+
+  function goForward() {
+    if (!demo || !ready) return
+    const current = demo.steps[index]
+    const hotspots = [...(current?.hotspots || [])].sort((a, b) => a.position - b.position)
+    if (current?.hotspot_mode === 'sequence' && hotspots[hotspotIndex]) {
+      activate(hotspots[hotspotIndex])
+      return
+    }
+    goTo(index + 1)
   }
 
   function activate(hotspot: HotspotData) {
     track('interaction', step.id)
+    const ordered = [...step.hotspots].sort((a, b) => a.position - b.position)
+    const currentHotspotIndex = Math.max(0, ordered.findIndex(item => item.id === hotspot.id))
     if (hotspot.action.type === 'goto' && hotspot.action.target_step_id) {
       const target = demo!.steps.findIndex(item => item.id === hotspot.action.target_step_id)
       if (target >= 0) goTo(target)
@@ -167,6 +208,10 @@ export default function Player() {
     }
     if (hotspot.action.type === 'end') {
       goTo(demo!.steps.length - 1)
+      return
+    }
+    if (step.hotspot_mode === 'sequence' && currentHotspotIndex < ordered.length - 1) {
+      setHotspotIndex(currentHotspotIndex + 1)
       return
     }
     goTo(index + 1)
@@ -183,19 +228,20 @@ export default function Player() {
   }
 
   return <main className={`player-shell ${exportMode ? 'export-mode' : ''}`} data-export-ready={ready ? 'true' : 'false'} data-step-index={index} style={{ '--player-primary': theme.primary_color } as React.CSSProperties}>
-    <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}</span></div><div className="player-header-actions">{!exportMode && <LanguageSwitcher publicMode compact />}<button onClick={() => document.documentElement.requestFullscreen()}>{t('fullscreen')}</button></div></header>
+    <header><div><strong>{demo.title}</strong><span>{index + 1} / {demo.steps.length}{step.hotspot_mode === 'sequence' && step.hotspots.length > 1 ? ` · ${hotspotIndex + 1} / ${step.hotspots.length}` : ''}</span></div><div className="player-header-actions">{!exportMode && <LanguageSwitcher publicMode compact />}<button onClick={() => document.documentElement.requestFullscreen()}>{t('fullscreen')}</button></div></header>
     <section className={`player-stage ${ready ? 'ready' : 'loading'}`}><SlideStage
       step={step} mode="player" fit="viewport" persistZoom exportZoomProgress={exportZoomProgress} theme={theme} navigation={navigation} stepIndex={index} stepCount={demo.steps.length}
-      onHotspot={activate} onGuidePrevious={() => goTo(index - 1)} onGuideNext={activate} onReady={() => setReady(true)}
+      activeHotspotId={step.hotspot_mode === 'sequence' ? [...step.hotspots].sort((a, b) => a.position - b.position)[hotspotIndex]?.id : undefined}
+      onHotspot={activate} onGuidePrevious={goPrevious} onGuideNext={activate} onReady={() => setReady(true)}
     /></section>
     <footer>
       <button
-        hidden={!navigation.show_previous} disabled={!ready || index === 0} onClick={() => goTo(index - 1)}
+        hidden={!navigation.show_previous} disabled={!ready || (index === 0 && hotspotIndex === 0)} onClick={goPrevious}
         style={{ background: navigation.previous_color, color: navigation.text_color, borderRadius: navigation.radius }}
       >← {navigation.previous_label}</button>
-      <div><h2>{step.title || t('step', { index: index + 1 })}</h2><p>{step.body}</p>{navigation.show_progress && <div className="player-progress"><span style={{ width: `${(index + 1) / demo.steps.length * 100}%`, background: theme.primary_color }} /></div>}</div>
+      <div><h2>{step.title || t('step', { index: index + 1 })}</h2><p>{step.body}</p>{navigation.show_progress && <div className="player-progress"><span style={{ width: `${progressPercent}%`, background: theme.primary_color }} /></div>}</div>
       <button
-        hidden={!navigation.show_next} disabled={!ready || index === demo.steps.length - 1} onClick={() => goTo(index + 1)}
+        hidden={!navigation.show_next} disabled={!ready || (index === demo.steps.length - 1 && (step.hotspot_mode !== 'sequence' || hotspotIndex >= step.hotspots.length - 1))} onClick={goForward}
         style={{ background: navigation.next_color, color: navigation.next_text_color, borderRadius: navigation.radius }}
       >{navigation.next_label} →</button>
     </footer>

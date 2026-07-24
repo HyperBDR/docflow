@@ -12,7 +12,7 @@ from app.database import get_db
 from app.defaults import navigation_defaults
 from app.dependencies import current_user
 from app.models import Category, Demo, DemoStatus, Hotspot, PublishedRevision, ShareToken, Step, Tag, User
-from app.demo_cloning import clone_demo
+from app.demo_cloning import clone_demo, clone_step
 from app.schemas import DemoCreate, DemoOut, DemoUpdate, MergeDemos, ShareLinkCreate, ShareLinkUpdate, StepOut, StepUpdate
 from app.security import hash_password
 from app.quota import enforce
@@ -121,6 +121,7 @@ def copy_steps(db: Session, source: Demo, target: Demo, start: int) -> int:
         step = Step(
             demo_id=target.id, event_id=f"merge-{source.id[:8]}-{source_step.event_id}"[:64], position=position,
             title=source_step.title, body=source_step.body, asset_key=source_step.asset_key,
+            hotspot_mode=source_step.hotspot_mode or "independent",
             render_mode=source_step.render_mode, dom_snapshot_key=source_step.dom_snapshot_key,
             viewport_width=source_step.viewport_width, viewport_height=source_step.viewport_height,
             hotspot=deepcopy(source_step.hotspot or {}), redactions=deepcopy(source_step.redactions or []),
@@ -200,6 +201,26 @@ def update_step(payload: StepUpdate, demo_id: str, step_id: str, db: Session = D
     return step_out(step, demo.id)
 
 
+@router.post("/{demo_id}/steps/{step_id}/duplicate", response_model=StepOut, status_code=201)
+def duplicate_step(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    demo = owned_demo(db, demo_id, user)
+    source = db.scalar(select(Step).where(Step.id == step_id, Step.demo_id == demo.id))
+    if not source:
+        raise HTTPException(status_code=404, detail="step not found")
+    enforce(db, demo.organization_id, "max_steps_per_resource", current=len(demo.steps))
+    insert_at = source.position + 1
+    for item in demo.steps:
+        if item.position >= insert_at:
+            item.position += 1
+    duplicate = clone_step(
+        db, source, demo.id, insert_at,
+        event_id=f"copy-{secrets.token_hex(20)}"[:64],
+    )
+    db.commit()
+    db.refresh(duplicate)
+    return step_out(duplicate, demo.id)
+
+
 @router.delete("/{demo_id}/steps/{step_id}", status_code=204)
 def delete_step(demo_id: str, step_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     demo = owned_demo(db, demo_id, user)
@@ -256,10 +277,8 @@ def publish_demo(demo_id: str, request: Request, db: Session = Depends(get_db), 
     for step in sorted(demo.steps, key=lambda item: item.position):
         public_key = f"assets/published/{revision_id}/{step.id}.webp"
         # Older recorder versions stored every login input as a redaction.
-        # Those automatic rectangles are indistinguishable from the legacy
-        # field, but sensitive-form captures already blank plaintext controls
-        # and render password bullets. Republish them without the stale bars;
-        # intentional editor redactions remain active on normal pages.
+        # Republish those legacy captures without stale automatic bars;
+        # intentional editor redactions remain active.
         context = step.page_context or {}
         publish_redactions = [] if context.get("sensitive_form") and not context.get("explicit_redactions") else step.redactions
         storage.rendered_asset(step.asset_key, publish_redactions, public_key)
@@ -276,6 +295,7 @@ def publish_demo(demo_id: str, request: Request, db: Session = Depends(get_db), 
             }]
         steps.append({
             "id": step.id, "position": step.position, "title": step.title, "body": step.body,
+            "hotspot_mode": step.hotspot_mode or "independent",
             "viewport_width": step.viewport_width, "viewport_height": step.viewport_height,
             "hotspot": step.hotspot, "hotspots": hotspots, "duration": step.duration,
             "asset_key": public_key, "render_mode": step.render_mode,

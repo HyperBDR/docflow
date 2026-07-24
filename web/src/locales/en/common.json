@@ -1,4 +1,5 @@
 {
+  "extensionUpdate": { "title": "DocFlow extension update available", "requiredTitle": "DocFlow extension update required", "versions": "Current {{current}} · Latest {{latest}}", "download": "Download update", "installHint": "Replace the extension folder, then click Reload on chrome://extensions" },
   "language": { "label": "Language", "zh-CN": "中文", "en": "English", "switchTo": "Change language" },
   "help": { "open": "Open help center" },
   "actions": { "close": "Close", "cancel": "Cancel", "confirm": "Confirm", "save": "Save", "create": "Create", "edit": "Edit", "delete": "Delete", "copy": "Copy", "share": "Share", "open": "Open", "view": "View task", "download": "Download", "back": "Back", "next": "Next", "previous": "Previous", "retry": "Retry", "more": "More actions", "publish": "Publish", "preview": "Preview", "search": "Search", "clear": "Clear", "remove": "Remove", "add": "Add", "apply": "Apply", "logout": "Log out" },
@@ -20,7 +21,7 @@
       "resource": { "transfer_owner_required": "You must be an Owner of both the source and destination spaces.", "transfer_source_unavailable": "The source space is unavailable.", "transfer_target_unavailable": "The destination space does not exist or is unavailable.", "transfer_same_space": "The source and destination spaces must be different.", "transfer_recording_active": "Finish or cancel the active recording before transferring this resource.", "transfer_job_active": "Wait for active AI or export jobs to finish before moving this resource." },
       "step": { "not_found": "This step does not exist." },
       "export": { "publish_first": "Publish the demo before exporting.", "not_found": "This export job does not exist.", "render_failed": "Export rendering failed. Please try again." },
-      "ai": { "not_configured": "AI is not configured on the server.", "no_steps": "Record at least one step first.", "job_not_found": "This AI job does not exist.", "generation_failed": "AI generation failed. Please try again." },
+      "ai": { "not_configured": "AI is not configured on the server.", "no_steps": "Record at least one step first.", "job_not_found": "This AI job does not exist.", "generation_failed": "AI generation failed. Please try again.", "timeout": "The AI provider timed out after automatic retries. Check the upstream service or increase the model read timeout in AI settings." },
       "job": { "cancelled_by_admin": "The task was cancelled by an administrator.", "dispatch_failed": "The task could not be dispatched. Please retry." },
       "extension": { "invalid_pairing_code": "The pairing code is invalid or expired." },
       "category": { "not_found": "This category does not exist." },

@@ -4,13 +4,16 @@ import { createCache, createMirror, rebuildIntoSandboxedIframe } from 'rrweb-sna
 import { settleSnapshotAnimations } from '../snapshotAnimations'
 import type { HotspotData } from '../types'
 
-type LoadMessage = {
-  type: 'DOCFLOW_LOAD'
-  snapshot: { snapshot: Record<string, unknown> }
-  hotspots: HotspotData[]
-  mode: 'player' | 'editor'
-  scroll?: { x?: number; y?: number }
-}
+type LoadMessage =
+  | {
+      type: 'DOCFLOW_LOAD'
+      snapshot: { snapshot: Record<string, unknown> }
+      hotspots: HotspotData[]
+      mode: 'player' | 'editor'
+      hotspotMode?: 'independent' | 'sequence'
+      scroll?: { x?: number; y?: number }
+    }
+  | { type: 'DOCFLOW_FOCUS_HOTSPOT'; hotspotId: string }
 
 function isInjectedNode(node: Record<string, any>, parentTag = '') {
   if (node.type !== 2) return false
@@ -145,6 +148,8 @@ export default function SnapshotFrame() {
   useEffect(() => {
     let hotspots: HotspotData[] = []
     let mode: 'player' | 'editor' = 'player'
+    let hotspotMode: 'independent' | 'sequence' = 'independent'
+    let activeHotspotId = ''
     let frame: HTMLIFrameElement | null = null
     let cleanupFrame = () => {}
     let disposed = false
@@ -207,6 +212,7 @@ export default function SnapshotFrame() {
           return
         }
         for (const hotspot of hotspots) {
+          if (hotspotMode === 'sequence' && hotspot.id !== activeHotspotId) continue
           if (hotspot.trigger !== 'click' || !hotspot.selector?.css) continue
           try {
             if (target.matches(hotspot.selector.css) || target.closest(hotspot.selector.css)) {
@@ -221,6 +227,7 @@ export default function SnapshotFrame() {
         if (!target) return
         if (mode === 'editor') target.classList.add('docflow-editor-hover')
         for (const hotspot of hotspots) {
+          if (hotspotMode === 'sequence' && hotspot.id !== activeHotspotId) continue
           if (hotspot.trigger !== 'hover' || !hotspot.selector?.css) continue
           try { if (target.matches(hotspot.selector.css) || target.closest(hotspot.selector.css)) parent.postMessage({ type: 'DOCFLOW_HOTSPOT', hotspotId: hotspot.id }, '*') } catch { /* noop */ }
         }
@@ -248,22 +255,42 @@ export default function SnapshotFrame() {
     }
 
     const onMessage = async (event: MessageEvent<LoadMessage>) => {
-      if (event.source !== parent || event.data?.type !== 'DOCFLOW_LOAD') return
+      if (event.source !== parent) return
+      const message = event.data
+      if (!message) return
+      if (message.type === 'DOCFLOW_FOCUS_HOTSPOT') {
+        activeHotspotId = message.hotspotId
+        const doc = frame?.contentDocument, view = frame?.contentWindow
+        const hotspot = hotspots.find(item => item.id === message.hotspotId)
+        if (!doc || !view || !hotspot) return
+        const element = findTarget(hotspot, doc, view)
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+          window.setTimeout(scheduleRectRefresh, 80)
+          window.setTimeout(scheduleRectRefresh, 320)
+        }
+        return
+      }
+      if (message.type !== 'DOCFLOW_LOAD') return
       const currentLoad = ++loadVersion
-      hotspots = event.data.hotspots || []; mode = event.data.mode
+      hotspots = message.hotspots || []; mode = message.mode
+      hotspotMode = message.hotspotMode || 'independent'
+      activeHotspotId = hotspotMode === 'sequence'
+        ? [...hotspots].sort((a, b) => a.position - b.position)[0]?.id || ''
+        : ''
       try {
         rectsEnabled = false
-        repairLegacySnapshot(event.data.snapshot.snapshot as Record<string, any>)
+        repairLegacySnapshot(message.snapshot.snapshot as Record<string, any>)
         const root = await connectedRoot()
         if (disposed || currentLoad !== loadVersion) return
         cleanupFrame(); root.replaceChildren()
-        const rebuilt = rebuildIntoSandboxedIframe(event.data.snapshot.snapshot as any, {
+        const rebuilt = rebuildIntoSandboxedIframe(message.snapshot.snapshot as any, {
           root, cache: createCache(), mirror: createMirror(), hackCss: true,
           iframeAttributes: { style: 'display:block;width:100%;height:100%;border:0;background:white' },
         })
         frame = rebuilt.iframe
         attachFrameAgent()
-        frame.contentWindow?.scrollTo(event.data.scroll?.x || 0, event.data.scroll?.y || 0)
+        frame.contentWindow?.scrollTo(message.scroll?.x || 0, message.scroll?.y || 0)
         requestAnimationFrame(() => {
           // The fallback hotspot rect is immediately usable. Do not keep the
           // whole slide blocked while semantic target resolution scans the DOM.

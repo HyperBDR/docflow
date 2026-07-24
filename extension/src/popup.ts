@@ -1,14 +1,16 @@
 import { browserLocale, tr, type MessageKey } from './locale'
 import { configuredApiUrl, configuredWebUrl } from './config'
-import type { Credentials, Locale, RecordingMode, RecordingPreferences, RecordingTarget } from './types'
+import type { Credentials, ExtensionUpdate, Locale, RecordingMode, RecordingPreferences, RecordingTarget } from './types'
 
 type Space = { id: string; name: string; kind: 'personal' | 'team' }
-type ExtensionConfig = { ai_enabled: boolean; default_content_locale: Locale }
+type ExtensionConfig = { ai_enabled: boolean; default_content_locale: Locale; capture_feedback_duration_ms: number }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 const locale: Locale = browserLocale()
 const connect = $('connect'), recorder = $('recorder'), setup = $('setup'), activePanel = $('active-recording'), message = $('message')
 const homeView = $('home-view'), settingsView = $('settings-view'), settingsToggle = $<HTMLButtonElement>('settings-toggle')
+const privacyToggle = $<HTMLInputElement>('privacy-masking')
+const recordingTarget = $('recording-target')
 const interactiveButton = $<HTMLButtonElement>('record-interactive'), videoButton = $<HTMLButtonElement>('record-video'), screenshotButton = $<HTMLButtonElement>('take-screenshot')
 const pauseButton = $<HTMLButtonElement>('pause'), attachButton = $<HTMLButtonElement>('attach-tab')
 const statusText = $('record-status'), modeText = $('record-mode'), countText = $('step-count'), tabCount = $('tab-count')
@@ -17,8 +19,26 @@ let settingsOpen = false
 let spaces: Space[] = []
 let pendingTarget: RecordingTarget | undefined
 let activeOrganizationId = ''
-let extensionConfig: ExtensionConfig = { ai_enabled: false, default_content_locale: locale }
+let extensionConfig: ExtensionConfig = { ai_enabled: false, default_content_locale: locale, capture_feedback_duration_ms: 1100 }
 let recordingPreferences: RecordingPreferences = {}
+let availableUpdate: ExtensionUpdate | null = null
+
+function renderExtensionUpdate(update: ExtensionUpdate | null) {
+  availableUpdate = update?.update_available ? update : null
+  const card = $('extension-update')
+  card.hidden = !availableUpdate
+  card.classList.toggle('required', Boolean(availableUpdate?.required))
+  if (!availableUpdate) return
+  $('update-title').textContent = tr(locale, availableUpdate.required ? 'updateRequired' : 'updateAvailable')
+  $('update-versions').textContent = tr(locale, 'updateVersions', { current: availableUpdate.current_version, latest: availableUpdate.latest_version || '' })
+  $('update-priority').textContent = tr(locale, availableUpdate.required ? 'requiredUpdate' : 'optionalUpdate')
+  $('update-notes').textContent = availableUpdate.release_notes || ''
+}
+
+function renderRecordingTarget() {
+  recordingTarget.hidden = !pendingTarget
+  $('recording-target-title').textContent = pendingTarget?.title || ''
+}
 
 function applyTranslations() {
   document.documentElement.lang = locale
@@ -82,6 +102,7 @@ function avatar(name: string, email: string) {
 }
 
 async function refresh() {
+  renderExtensionUpdate(await chrome.runtime.sendMessage({ type: 'CHECK_EXTENSION_UPDATE', force: true }).catch(() => null))
   const auth = await credentials()
   connect.hidden = Boolean(auth)
   recorder.hidden = !auth
@@ -101,12 +122,15 @@ async function refresh() {
     spaces = await spaceResponse.json()
     const me = await meResponse.json()
     extensionConfig = await configResponse.json()
+    await chrome.storage.local.set({ extensionRuntimeConfig: extensionConfig })
     pendingTarget = stored.pendingTarget as RecordingTarget | undefined
     recordingPreferences = (stored.recordingPreferences as RecordingPreferences | undefined) || {}
+    privacyToggle.checked = Boolean(recordingPreferences.privacyEnabled)
     if (pendingTarget && !spaces.some(item => item.id === pendingTarget?.organizationId)) {
       pendingTarget = undefined
       await chrome.storage.local.remove('pendingTarget')
     }
+    renderRecordingTarget()
     $('user-name').textContent = me.name || me.email.split('@')[0]
     $('user-email').textContent = me.email
     $('user-avatar').textContent = avatar(me.name, me.email)
@@ -135,8 +159,10 @@ async function openRecordingSetup(mode: RecordingMode, button: HTMLButtonElement
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     const result = await chrome.runtime.sendMessage({
       type: 'OPEN_SETUP', tabId: tab?.id, demoId: pendingTarget?.demoId,
+      targetTitle: pendingTarget?.title || '',
       aiAvailable: extensionConfig.ai_enabled, defaultMode: mode,
       defaultAI: recordingPreferences.aiEnabled ?? extensionConfig.ai_enabled,
+      defaultPrivacy: Boolean(recordingPreferences.privacyEnabled),
       spaces, organizationId: activeOrganizationId,
       lockOrganization: Boolean(pendingTarget), locale,
       contentLocale: pendingTarget?.contentLocale || recordingPreferences.contentLocale || extensionConfig.default_content_locale || locale,
@@ -154,6 +180,18 @@ async function openRecordingSetup(mode: RecordingMode, button: HTMLButtonElement
 interactiveButton.addEventListener('click', () => openRecordingSetup('html', interactiveButton))
 videoButton.addEventListener('click', () => { message.textContent = tr(locale, 'videoComingSoon') })
 screenshotButton.addEventListener('click', () => { message.textContent = tr(locale, 'screenshotComingSoon') })
+
+$('download-update').addEventListener('click', () => {
+  if (availableUpdate?.download_url) chrome.tabs.create({ url: availableUpdate.download_url })
+})
+
+$('clear-recording-target').addEventListener('click', async () => {
+  const result = await chrome.runtime.sendMessage({ type: 'CLEAR_RECORDING_TARGET' })
+  if (result?.error) { message.textContent = result.error; return }
+  pendingTarget = undefined
+  renderRecordingTarget()
+  message.textContent = tr(locale, 'newRecording')
+})
 
 pauseButton.addEventListener('click', async () => { renderState(await chrome.runtime.sendMessage({ type: 'PAUSE' })) })
 attachButton.addEventListener('click', async () => {
@@ -197,6 +235,10 @@ $('disconnect').addEventListener('click', async () => {
 $('reset-tutorial').addEventListener('click', async () => {
   await chrome.storage.local.remove('recordingTutorialSeen')
   message.textContent = tr(locale, 'guideReset')
+})
+privacyToggle.addEventListener('change', async () => {
+  recordingPreferences = { ...recordingPreferences, privacyEnabled: privacyToggle.checked }
+  await chrome.runtime.sendMessage({ type: 'SAVE_RECORDING_PREFERENCES', ...recordingPreferences })
 })
 
 async function initialize() {

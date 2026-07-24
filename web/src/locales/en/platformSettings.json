@@ -1,7 +1,7 @@
 {
   "title": "System settings",
   "subtitle": "Manage platform-wide services. Changes take effect immediately and are audited.",
-  "tabs": { "general": "General", "generalHint": "Help center and product links", "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention", "quota":"Quota management", "quotaHint":"Plan templates and default limits" },
+  "tabs": { "general": "General", "generalHint": "Help center and product links", "capture": "Extension capture", "captureHint": "Screenshot feedback and pacing", "email": "Email service", "emailHint": "SMTP and sender identity", "login": "Sign-in & registration", "loginHint": "Google sign-in and account policy", "monitoring": "Monitoring & data", "monitoringHint": "Automatic collection and retention", "quota":"Quota management", "quotaHint":"Plan templates and default limits" },
   "status": { "ready": "Configured", "inactive": "Not configured", "enabled": "Enabled", "disabled": "Disabled", "running": "Running automatically" },
   "general": {
     "statusTitle": "General platform configuration", "configured": "Public product links are configured", "notConfigured": "No public product links are configured",
@@ -27,6 +27,12 @@
     "allowRegistration": "Allow automatic Google registration", "allowRegistrationHint": "When disabled, only existing accounts already linked to Google can sign in.",
     "footerHint": "Changes take effect immediately and are written to the audit log.", "testTitle": "Validate Google service", "testHint": "Checks access to Google's OpenID configuration. Full client validation occurs during an actual authorization flow.", "test": "Check connection", "testing": "Checking…", "testPassed": "Google OpenID service is reachable",
     "linkPolicy": "Existing accounts require explicit linking", "linkPolicyHint": "A matching Google email is never merged automatically with an existing password account. The user must sign in with their password and connect Google under Password & security, preventing accidental account takeover."
+  },
+  "capture": {
+    "statusTitle": "Extension capture feedback", "statusHint": "Control page locking and status feedback while the browser extension captures a screenshot.", "current": "Current: {{value}}s",
+    "feedbackTitle": "Screenshot feedback duration", "feedbackHint": "Set the minimum total time for the Capturing and Screenshot captured states after a user click.", "duration": "Feedback duration", "durationHint": "Choose {{min}}–{{max}} milliseconds; 1000–1200ms is recommended.",
+    "previewTitle": "Recording feedback preview", "previewHint": "After capture is triggered, the page shows clear progress for at least about {{value}} seconds.", "runtimeTitle": "Background work remains non-blocking", "runtimeHint": "This only controls visible feedback pacing. It never waits for fonts, backgrounds, AI, or step uploads. The extension refreshes it whenever recording starts.",
+    "footerHint": "New recording sessions use the saved value automatically; connected extensions do not need reinstalling.", "saved": "Extension capture settings saved"
   },
   "monitoring": {
     "statusTitle": "Automatic monitoring collection", "statusHint": "The Monitor scheduler dispatches tasks and the Worker collects metrics and evaluates alerts.",

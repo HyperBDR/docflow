@@ -10,10 +10,12 @@ export type TargetInfo = {
   text?: string
 }
 
-const plaintextSensitiveControlSelector = [
-  'input[type="email"]', 'input[autocomplete="one-time-code"]', 'input[autocomplete="username"]',
+const secretPlaintextControlSelector = [
+  'input[autocomplete="one-time-code"]',
   'input[name*="token" i]', 'input[name*="secret" i]', 'input[name*="api_key" i]',
 ].join(',')
+const personalControlSelector = ['input[type="email"]', 'input[autocomplete="username"]'].join(',')
+const plaintextSensitiveControlSelector = [secretPlaintextControlSelector, personalControlSelector].join(',')
 const explicitRedactionSelector = '[data-docflow-redact]'
 const sensitiveControlSelector = ['input[type="password"]', plaintextSensitiveControlSelector, explicitRedactionSelector].join(',')
 
@@ -21,23 +23,31 @@ export function sensitiveFormDetected() {
   return Boolean(document.querySelector(sensitiveControlSelector))
 }
 
-/**
- * Keep form geometry intact while removing plaintext secrets. Password inputs
- * stay untouched because browsers paint their native bullets rather than the
- * underlying value; rrweb independently masks all captured input values.
- */
-export function concealSensitiveFormValues() {
-  if (!sensitiveFormDetected()) return () => {}
-  const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`${plaintextSensitiveControlSelector},input${explicitRedactionSelector},textarea${explicitRedactionSelector}`))
-  const values = controls.map(control => ({ control, value: control.value, placeholder: control.placeholder, caretColor: control.style.caretColor }))
+/** Clear form values only when the user explicitly enables privacy masking. */
+export function concealSensitiveFormValues(enabled = false) {
+  if (!enabled) return () => {}
+  const controls = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input,textarea,select'))
+  const values = controls.map(control => ({
+    control,
+    value: control.value,
+    selectedIndex: control instanceof HTMLSelectElement ? control.selectedIndex : undefined,
+    checked: control instanceof HTMLInputElement ? control.checked : undefined,
+    placeholder: control.getAttribute('placeholder'),
+    caretColor: control.style.caretColor,
+  }))
   controls.forEach(control => {
     control.value = ''
-    control.placeholder = ''
+    if (control instanceof HTMLSelectElement) control.selectedIndex = -1
+    if (control instanceof HTMLInputElement && (control.type === 'checkbox' || control.type === 'radio')) control.checked = false
+    control.removeAttribute('placeholder')
     control.style.caretColor = 'transparent'
   })
-  return () => values.forEach(({ control, value, placeholder, caretColor }) => {
+  return () => values.forEach(({ control, value, selectedIndex, checked, placeholder, caretColor }) => {
     control.value = value
-    control.placeholder = placeholder
+    if (control instanceof HTMLSelectElement && selectedIndex !== undefined) control.selectedIndex = selectedIndex
+    if (control instanceof HTMLInputElement && checked !== undefined) control.checked = checked
+    if (placeholder === null) control.removeAttribute('placeholder')
+    else control.setAttribute('placeholder', placeholder)
     control.style.caretColor = caretColor
   })
 }
@@ -94,7 +104,7 @@ export function targetInfo(element: HTMLElement): TargetInfo {
   }
 }
 
-export function pageContext(element?: HTMLElement) {
+export function pageContext(element?: HTMLElement, privacyEnabled = false) {
   const nearby = element?.parentElement?.innerText || element?.innerText || ''
   return {
     page_title: document.title,
@@ -105,6 +115,9 @@ export function pageContext(element?: HTMLElement) {
     nearby_text: nearby.trim().replace(/\s+/g, ' ').slice(0, 1500),
     visible_text: (document.body?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 6000),
     raster_regions: rasterFallbackRegions(),
+    privacy_masking: privacyEnabled,
+    // This is metadata only. Authentication pages follow the same DOM capture
+    // and playback path as every other page.
     sensitive_form: sensitiveFormDetected(),
   }
 }
@@ -182,7 +195,7 @@ function pruneInjectedNodes(node: Record<string, any>, parentTag = '') {
   node.childNodes.forEach((child: Record<string, any>) => pruneInjectedNodes(child, tag))
 }
 
-export function captureDom(): CapturedSnapshot | null {
+export function captureDom(privacyEnabled = false): CapturedSnapshot | null {
   // rrweb's blockClass intentionally creates a same-sized placeholder. Since
   // the recorder HUD is attached to <html>, that placeholder can be rebuilt
   // before <body> and push the captured application below the viewport. Remove
@@ -197,7 +210,9 @@ export function captureDom(): CapturedSnapshot | null {
       inlineStylesheet: true,
       inlineImages: true,
       recordCanvas: true,
-      maskAllInputs: true,
+      // rrweb defaults to masking passwords even when false. An empty options
+      // object explicitly preserves every input when privacy masking is off.
+      maskAllInputs: privacyEnabled ? true : {},
       slimDOM: false,
     })
   } finally {
@@ -210,5 +225,6 @@ export function captureDom(): CapturedSnapshot | null {
     snapshot: result as unknown as Record<string, unknown>,
     captured_at: new Date().toISOString(),
     viewport: { width: innerWidth, height: innerHeight },
+    privacy_masking: privacyEnabled,
   }
 }

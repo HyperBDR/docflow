@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import admin_user
-from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings, MonitoringPlatformSettings, User
+from app.models import EmailPlatformSettings, ExtensionCaptureSettings, GeneralPlatformSettings, GoogleAuthSettings, MonitoringPlatformSettings, User
 from app.monitoring.notifications import send_test_email, smtp_error_detail
 from app.oauth.google import redirect_uri, validate_connectivity
-from app.platform_settings import SUPPORTED_MONITORING_RANGES, email_runtime_config, general_runtime_config, google_runtime_config, monitoring_runtime_config
-from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, GeneralSettingsOut, GeneralSettingsUpdate, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut, MonitoringSettingsUpdate
+from app.platform_settings import MAX_EXTENSION_CAPTURE_FEEDBACK_MS, MIN_EXTENSION_CAPTURE_FEEDBACK_MS, SUPPORTED_MONITORING_RANGES, email_runtime_config, extension_capture_runtime_config, general_runtime_config, google_runtime_config, monitoring_runtime_config
+from app.platform_settings_schemas import EmailSettingsOut, EmailSettingsUpdate, EmailTestInput, ExtensionCaptureSettingsOut, ExtensionCaptureSettingsUpdate, GeneralSettingsOut, GeneralSettingsUpdate, GoogleAuthSettingsOut, GoogleAuthSettingsUpdate, MonitoringSettingsOut, MonitoringSettingsUpdate
 from app.secrets import encrypt_secret
 from app.services import write_audit
 
@@ -65,6 +65,39 @@ def update_general_settings(payload: GeneralSettingsUpdate, request: Request, db
                 before=before, after={"help_url": help_url, "upgrade_url": upgrade_url}, request=request)
     db.commit()
     return _general_out(db)
+
+
+def _extension_capture_out(db: Session) -> ExtensionCaptureSettingsOut:
+    config = extension_capture_runtime_config(db)
+    return ExtensionCaptureSettingsOut(
+        feedback_duration_ms=config.feedback_duration_ms,
+        min_feedback_duration_ms=MIN_EXTENSION_CAPTURE_FEEDBACK_MS,
+        max_feedback_duration_ms=MAX_EXTENSION_CAPTURE_FEEDBACK_MS,
+        updated_at=config.updated_at,
+    )
+
+
+@router.get("/extension-capture", response_model=ExtensionCaptureSettingsOut)
+def get_extension_capture_settings(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    return _extension_capture_out(db)
+
+
+@router.patch("/extension-capture", response_model=ExtensionCaptureSettingsOut)
+def update_extension_capture_settings(payload: ExtensionCaptureSettingsUpdate, request: Request, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    value = db.get(ExtensionCaptureSettings, "default")
+    if not value:
+        value = ExtensionCaptureSettings(id="default")
+        db.add(value)
+    before = {"feedback_duration_ms": value.feedback_duration_ms}
+    value.feedback_duration_ms = payload.feedback_duration_ms
+    value.updated_by_id = actor.id
+    db.flush()
+    write_audit(
+        db, actor, "platform_extension_capture.updated", "platform_settings", value.id, "Extension capture settings",
+        before=before, after={"feedback_duration_ms": value.feedback_duration_ms}, request=request,
+    )
+    db.commit()
+    return _extension_capture_out(db)
 
 
 def _email_out(db: Session) -> EmailSettingsOut:

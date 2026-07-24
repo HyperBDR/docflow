@@ -141,6 +141,63 @@ def test_screenshot_hotspots_stay_scoped_and_can_be_deleted(authenticated):
     assert empty_first["hotspot"] == {}
 
 
+def test_sequential_hotspot_mode_reorders_and_exports_page_substeps(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "顺序热点"}).json()
+    step = create_step(authenticated, demo["id"], "sequence").json()
+    first_id = step["hotspots"][0]["id"]
+    second = authenticated.post(f"/api/demos/{demo['id']}/steps/{step['id']}/hotspots", json={
+        "fallback_rect": {"x": .25, "y": .3, "w": .1, "h": .1},
+        "tooltip": {"content": "第二个页面内操作"},
+    }).json()
+    assert authenticated.patch(
+        f"/api/demos/{demo['id']}/steps/{step['id']}", json={"hotspot_mode": "sequence"},
+    ).status_code == 200
+    reordered = authenticated.patch(
+        f"/api/demos/{demo['id']}/steps/{step['id']}/hotspots/{second['id']}", json={"position": 0},
+    )
+    assert reordered.status_code == 200
+    refreshed = authenticated.get(f"/api/demos/{demo['id']}").json()["steps"][0]
+    assert refreshed["hotspot_mode"] == "sequence"
+    assert [item["id"] for item in refreshed["hotspots"]] == [second["id"], first_id]
+    assert refreshed["hotspot"] == second["fallback_rect"]
+
+    published = authenticated.post(f"/api/demos/{demo['id']}/publish").json()
+    token = published["share_url"].rsplit("/", 1)[-1]
+    public = authenticated.get(f"/public/{token}").json()
+    assert public["steps"][0]["hotspot_mode"] == "sequence"
+    markdown = authenticated.get(f"/public/{token}/markdown").text
+    assert "### 1.1 第二个页面内操作" in markdown
+
+
+def test_step_duplicate_is_inserted_after_source_with_all_settings(authenticated):
+    demo = authenticated.post("/api/demos", json={"title": "复制步骤"}).json()
+    first = create_step(authenticated, demo["id"], "copy-source").json()
+    second = create_step(authenticated, demo["id"], "copy-tail").json()
+    updated = authenticated.patch(f"/api/demos/{demo['id']}/steps/{first['id']}", json={
+        "title": "Configured step",
+        "redactions": [{"x": .1, "y": .2, "w": .3, "h": .2, "kind": "mosaic"}],
+        "animation": {"zoom": {"enabled": True, "rect": {"x": .5, "y": .5, "w": .4, "h": .4}, "duration_ms": 2500}},
+    })
+    assert updated.status_code == 200, updated.text
+    source_hotspot = updated.json()["hotspots"][0]
+    assert authenticated.patch(
+        f"/api/demos/{demo['id']}/steps/{first['id']}/hotspots/{source_hotspot['id']}",
+        json={"fallback_rect": {"x": .4, "y": .3, "w": .2, "h": .15}, "tooltip": {"content": "Copied guide"}},
+    ).status_code == 200
+
+    response = authenticated.post(f"/api/demos/{demo['id']}/steps/{first['id']}/duplicate")
+    assert response.status_code == 201, response.text
+    duplicate = response.json()
+    refreshed = authenticated.get(f"/api/demos/{demo['id']}").json()["steps"]
+
+    assert [item["id"] for item in refreshed] == [first["id"], duplicate["id"], second["id"]]
+    assert duplicate["title"] == "Configured step"
+    assert duplicate["redactions"][0]["kind"] == "mosaic"
+    assert duplicate["animation"]["zoom"]["duration_ms"] == 2500
+    assert duplicate["hotspots"][0]["fallback_rect"] == {"x": .4, "y": .3, "w": .2, "h": .15}
+    assert duplicate["hotspots"][0]["tooltip"]["content"] == "Copied guide"
+
+
 def test_legacy_hotspot_ids_are_materialized_without_disappearing(authenticated):
     demo = authenticated.post("/api/demos", json={"title": "旧热点兼容"}).json()
     step = create_step(authenticated, demo["id"], "legacy").json()

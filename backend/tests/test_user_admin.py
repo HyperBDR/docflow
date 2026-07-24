@@ -368,7 +368,11 @@ def test_extension_connection_uses_sliding_expiration_and_can_be_revoked(client)
     assert me.status_code == 200
     extension_config = client.get("/api/extension/config", headers=headers)
     assert extension_config.status_code == 200
-    assert extension_config.json() == {"ai_enabled": False, "default_content_locale": "zh-CN"}
+    assert extension_config.json() == {
+        "ai_enabled": False,
+        "default_content_locale": "zh-CN",
+        "capture_feedback_duration_ms": 1100,
+    }
     with SessionLocal() as db:
         credential = db.query(ExtensionToken).filter(ExtensionToken.token_hash == hash_token(token)).one()
         expires_at = credential.expires_at

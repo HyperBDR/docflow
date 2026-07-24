@@ -67,6 +67,16 @@ class GeneralSettingsOut(BaseModel):
     updated_at: datetime | None = None
 
 
+class ExtensionCaptureSettingsUpdate(BaseModel):
+    feedback_duration_ms: int = Field(default=1100, ge=500, le=3000)
+
+
+class ExtensionCaptureSettingsOut(ExtensionCaptureSettingsUpdate):
+    min_feedback_duration_ms: int = 500
+    max_feedback_duration_ms: int = 3000
+    updated_at: datetime | None = None
+
+
 class PublicPlatformConfig(BaseModel):
     help_url: str = ""
     upgrade_url: str = ""

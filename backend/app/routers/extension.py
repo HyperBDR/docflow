@@ -10,6 +10,7 @@ from app.ai_models import active_model
 from app.database import get_db
 from app.dependencies import current_user
 from app.models import ExtensionPair, ExtensionToken, User
+from app.platform_settings import extension_capture_runtime_config
 from app.security import expires_in, hash_token, random_token, utcnow
 from app.services import write_audit
 
@@ -35,13 +36,16 @@ class TokenOut(BaseModel):
 class ExtensionConfigOut(BaseModel):
     ai_enabled: bool
     default_content_locale: str
+    capture_feedback_duration_ms: int
 
 
 @router.get("/config", response_model=ExtensionConfigOut)
 def extension_config(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    capture = extension_capture_runtime_config(db)
     return ExtensionConfigOut(
         ai_enabled=bool(active_model(db)),
         default_content_locale=user.ui_locale or "zh-CN",
+        capture_feedback_duration_ms=capture.feedback_duration_ms,
     )
 
 

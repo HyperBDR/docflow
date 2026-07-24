@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import EmailPlatformSettings, GeneralPlatformSettings, GoogleAuthSettings, MonitoringPlatformSettings
+from app.models import EmailPlatformSettings, ExtensionCaptureSettings, GeneralPlatformSettings, GoogleAuthSettings, MonitoringPlatformSettings
 from app.secrets import decrypt_secret
 
 
@@ -56,6 +56,26 @@ class GeneralRuntimeConfig:
 def general_runtime_config(db: Session) -> GeneralRuntimeConfig:
     value = db.get(GeneralPlatformSettings, "default")
     return GeneralRuntimeConfig(help_url=value.help_url, upgrade_url=value.upgrade_url, updated_at=value.updated_at) if value else GeneralRuntimeConfig(help_url="", upgrade_url="")
+
+
+DEFAULT_EXTENSION_CAPTURE_FEEDBACK_MS = 1100
+MIN_EXTENSION_CAPTURE_FEEDBACK_MS = 500
+MAX_EXTENSION_CAPTURE_FEEDBACK_MS = 3000
+
+
+@dataclass(frozen=True)
+class ExtensionCaptureRuntimeConfig:
+    feedback_duration_ms: int
+    updated_at: object | None = None
+
+
+def extension_capture_runtime_config(db: Session) -> ExtensionCaptureRuntimeConfig:
+    value = db.get(ExtensionCaptureSettings, "default")
+    duration = value.feedback_duration_ms if value else DEFAULT_EXTENSION_CAPTURE_FEEDBACK_MS
+    return ExtensionCaptureRuntimeConfig(
+        feedback_duration_ms=max(MIN_EXTENSION_CAPTURE_FEEDBACK_MS, min(MAX_EXTENSION_CAPTURE_FEEDBACK_MS, duration)),
+        updated_at=value.updated_at if value else None,
+    )
 
 
 SUPPORTED_MONITORING_RANGES = ("1h", "6h", "24h", "7d")

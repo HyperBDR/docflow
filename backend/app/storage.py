@@ -10,10 +10,11 @@ from urllib.parse import quote
 
 import boto3
 from botocore.client import Config as BotoConfig
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from app.config import settings
 from app.secrets import decrypt_secret, encrypt_secret
+from app.image_annotations import apply_annotations
 
 KEY_PREFIX = "storage://"
 
@@ -237,11 +238,7 @@ class Storage:
         return self.write(f"{key}.webp", output.getvalue()), image.width, image.height
 
     def rendered_asset(self, source_key: str, redactions: list[dict], target_key: str) -> str:
-        image = Image.open(io.BytesIO(self.read(source_key))).convert("RGB"); draw = ImageDraw.Draw(image)
-        for rect in redactions:
-            x = int(float(rect.get("x", 0)) * image.width); y = int(float(rect.get("y", 0)) * image.height)
-            w = int(float(rect.get("w", 0)) * image.width); h = int(float(rect.get("h", 0)) * image.height)
-            draw.rectangle((x, y, x + w, y + h), fill=(35, 39, 47))
+        image = apply_annotations(Image.open(io.BytesIO(self.read(source_key))), redactions)
         output = io.BytesIO(); image.save(output, "WEBP", quality=90, method=4)
         return self.write(target_key, output.getvalue())
 

@@ -15,7 +15,7 @@ from app.defaults import DEFAULT_HOTSPOT_STYLE, DEFAULT_TOOLTIP
 from app.models import DemoStatus, Hotspot as HotspotModel, RecordingSession, Step, User
 from app.schemas import RecordingAuditInput, RecordingDomMeta, RecordingSessionCreate, RecordingSessionOut, RecordingStepMeta, StepOut
 from app.services import owned_demo, step_out, write_audit
-from app.snapshots import SnapshotError, decode_snapshot, sanitize_page_context, sanitize_snapshot, store_snapshot
+from app.snapshots import SnapshotError, decode_snapshot, sanitize_page_context, sanitize_snapshot, snapshot_has_renderable_body, store_snapshot
 from app.storage import storage
 from app.quota import enforce
 
@@ -246,12 +246,16 @@ async def upload_dom_slide(
     snapshot_key = None
     snapshot_content = b""
     sanitized_snapshot = None
+    empty_dom_snapshot = False
     if snapshot and settings.dom_slides_enabled:
         try:
             snapshot_content = await snapshot.read(settings.snapshot_compressed_limit_mb * 1024 * 1024 + 1)
             decoded = decode_snapshot(snapshot_content)
             sanitized_snapshot, sanitizer_warnings = sanitize_snapshot(decoded)
+            empty_dom_snapshot = not snapshot_has_renderable_body(sanitized_snapshot)
             warnings.extend(sanitizer_warnings)
+            if empty_dom_snapshot:
+                warnings.append("DOM body was empty; the screenshot is used as a full-page visual fallback")
         except SnapshotError as exc:
             snapshot_content = b""
             warnings.append(f"DOM fallback: {exc}")
@@ -273,6 +277,8 @@ async def upload_dom_slide(
     # were scaled and produced misplaced black bars in published/PDF output.
     redactions = [item.model_dump() for item in parsed.redactions]
     safe_page_context = sanitize_page_context(parsed.page_context)
+    if empty_dom_snapshot:
+        safe_page_context["raster_regions"] = [{"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "kind": "iframe"}]
     if redactions:
         safe_page_context["explicit_redactions"] = True
     step = Step(
@@ -283,10 +289,9 @@ async def upload_dom_slide(
         title=title,
         body=body,
         asset_key=image_key,
-        # Authentication and secret-entry pages prioritize an exact, blanked
-        # pixel capture. Keep the sanitized DOM snapshot available so an
-        # editor can still opt into HTML mode after reviewing it.
-        render_mode="image" if safe_page_context.get("sensitive_form") else ("dom" if snapshot_key else "image"),
+        # Login and secret-entry pages use the same DOM-first path as every
+        # other page. Privacy masking only controls captured form values.
+        render_mode="dom" if snapshot_key else "image",
         dom_snapshot_key=snapshot_key,
         viewport_width=parsed.viewport_width or width,
         viewport_height=parsed.viewport_height or height,

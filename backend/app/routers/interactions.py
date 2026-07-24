@@ -92,11 +92,22 @@ def update_hotspot(payload: HotspotUpdate, demo_id: str, step_id: str, hotspot_i
         value = getattr(payload, field)
         if field in values and value is not None:
             values[field] = value.model_dump(exclude_none=True)
+    requested_position = values.pop("position", None)
     for key, value in values.items():
         setattr(item, key, value)
+    if requested_position is not None:
+        ordered = list(db.scalars(
+            select(Hotspot).where(Hotspot.step_id == step.id).order_by(Hotspot.position, Hotspot.id)
+        ).all())
+        ordered = [hotspot for hotspot in ordered if hotspot.id != item.id]
+        target = max(0, min(len(ordered), requested_position))
+        ordered.insert(target, item)
+        for position, hotspot in enumerate(ordered):
+            hotspot.position = position
+        step.hotspot = dict(ordered[0].fallback_rect or {}) if ordered else {}
     if item.position == 0 and "fallback_rect" in values:
         step.hotspot = dict(item.fallback_rect)
-    item.manual_fields = sorted(set(item.manual_fields or []) | set(values))
+    item.manual_fields = sorted(set(item.manual_fields or []) | set(values) | ({"position"} if requested_position is not None else set()))
     db.commit()
     return item
 

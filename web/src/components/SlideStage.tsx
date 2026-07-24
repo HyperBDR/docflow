@@ -1,8 +1,12 @@
-import { arrow, autoUpdate, flip, FloatingArrow, offset, shift, useFloating, type Placement, type VirtualElement } from '@floating-ui/react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { arrow, autoUpdate, flip, FloatingArrow, offset, shift, useFloating, type Placement } from '@floating-ui/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import type { HotspotData, Rect, SelectorInfo, Step } from '../types'
+import { resizeCenteredRect, type ResizeEdge } from '../editor/rectResize'
+import { calculateZoomTransform, transformRect } from '../editor/zoomTransform'
+import { resolveHotspotRect } from '../editor/hotspotRect'
+import AnnotationLayer, { type AnnotationTool } from './AnnotationLayer'
 
 const snapshotCache = new Map<string, Promise<Record<string, unknown>>>()
 const SNAPSHOT_CACHE_LIMIT = 12
@@ -17,6 +21,26 @@ export function preloadSnapshot(url?: string) {
   snapshotCache.set(url, pending)
   while (snapshotCache.size > SNAPSHOT_CACHE_LIMIT) snapshotCache.delete(snapshotCache.keys().next().value!)
   return pending
+}
+
+function snapshotHasRenderableBody(value: Record<string, unknown>) {
+  const source = value.snapshot
+  if (!source || typeof source !== 'object') return false
+  const stack = [source as Record<string, unknown>]
+  let body: Record<string, unknown> | null = null
+  while (stack.length) {
+    const node = stack.pop()!
+    if (node.type === 2 && String(node.tagName || '').toLowerCase() === 'body') { body = node; break }
+    if (Array.isArray(node.childNodes)) stack.push(...node.childNodes.filter(item => item && typeof item === 'object') as Record<string, unknown>[])
+  }
+  if (!body || !Array.isArray(body.childNodes)) return false
+  const descendants = body.childNodes.filter(item => item && typeof item === 'object') as Record<string, unknown>[]
+  while (descendants.length) {
+    const node = descendants.pop()!
+    if (node.type === 2 || (node.type === 3 && String(node.textContent || '').trim())) return true
+    if (Array.isArray(node.childNodes)) descendants.push(...node.childNodes.filter(item => item && typeof item === 'object') as Record<string, unknown>[])
+  }
+  return false
 }
 
 type TargetSelection = { selector: SelectorInfo; rect: Rect }
@@ -40,6 +64,8 @@ type Props = {
   mode: 'player' | 'editor'
   fit?: 'width' | 'viewport'
   activeHotspotId?: string
+  showAllHotspots?: boolean
+  showAllTooltips?: boolean
   theme?: Record<string, any>
   navigation?: Record<string, any>
   stepIndex?: number
@@ -56,6 +82,13 @@ type Props = {
   exportZoomProgress?: number
   onZoomRectChange?: (rect: Rect) => void
   onZoomDelete?: () => void
+  showAnnotations?: boolean
+  annotationTool?: AnnotationTool | null
+  selectedAnnotationIndex?: number | null
+  annotationsEditable?: boolean
+  onAnnotationSelect?: (index: number | null) => void
+  onAnnotationAdd?: (annotation: import('../types').AnnotationRect) => void
+  onAnnotationChange?: (index: number, annotation: import('../types').AnnotationRect) => void
 }
 
 function placement(value?: string, alignment?: string): Placement {
@@ -68,9 +101,10 @@ function placement(value?: string, alignment?: string): Placement {
   return alignment === 'start' || alignment === 'end' ? `bottom-${alignment}` : 'bottom'
 }
 
-function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation, stepIndex = 0, stepCount = 1, onActivate, onSelect, onGuidePrevious, onGuideNext, onRectChange }: {
+function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation, stepIndex = 0, stepCount = 1, hotspotIndex = 0, hotspotCount = 1, showTooltip = false, tooltipSelectable = false, motionDurationMs, onActivate, onSelect, onGuidePrevious, onGuideNext, onRectChange }: {
   hotspot: HotspotData; rect: Rect; active: boolean; mode: Props['mode']; wrapper: HTMLDivElement | null
   theme?: Record<string, any>; navigation?: Record<string, any>; stepIndex?: number; stepCount?: number
+  motionDurationMs?: number; hotspotIndex?: number; hotspotCount?: number; showTooltip?: boolean; tooltipSelectable?: boolean
   onActivate?: () => void; onSelect?: () => void; onGuidePrevious?: () => void; onGuideNext?: () => void; onRectChange?: (rect: Rect) => void
 }) {
   const { t } = useTranslation('player')
@@ -79,22 +113,8 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
     placement: placement(hotspot.tooltip?.placement, hotspot.tooltip?.alignment),
     strategy: 'fixed',
     middleware: [offset(hotspot.tooltip?.offset ?? 12), flip({ padding: 12 }), shift({ padding: 12 }), arrow({ element: arrowRef })],
-    whileElementsMounted: autoUpdate,
+    whileElementsMounted: (reference, floating, update) => autoUpdate(reference, floating, update, { animationFrame: true }),
   })
-  useLayoutEffect(() => {
-    if (!wrapper) return
-    const virtual: VirtualElement = {
-      getBoundingClientRect: () => {
-        const box = wrapper.getBoundingClientRect()
-        const width = rect.w * box.width
-        const height = rect.h * box.height
-        const left = box.left + (rect.x - rect.w / 2) * box.width
-        const top = box.top + (rect.y - rect.h / 2) * box.height
-        return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) }
-      },
-    }
-    refs.setPositionReference(virtual)
-  }, [wrapper, rect, refs])
 
   const color = hotspot.style?.color || theme?.primary_color || '#635bff'
   const hotspotBackground = /^#[0-9a-f]{6}$/i.test(color) ? `${color}1f` : 'rgba(99, 91, 255, .12)'
@@ -109,65 +129,89 @@ function HotspotLayer({ hotspot, rect, active, mode, wrapper, theme, navigation,
     if (mode !== 'editor' || !wrapper) return
     event.preventDefault(); event.stopPropagation()
     const button = event.currentTarget, box = wrapper.getBoundingClientRect(), startX = event.clientX, startY = event.clientY
-    const resizing = (event.target as HTMLElement).classList.contains('hotspot-resize-handle')
+    const resizeEdge = (event.target as HTMLElement).closest<HTMLElement>('[data-resize]')?.dataset.resize as ResizeEdge | undefined
     button.setPointerCapture(event.pointerId)
     const move = (next: PointerEvent) => {
       const dx = (next.clientX - startX) / box.width, dy = (next.clientY - startY) / box.height
-      if (resizing) {
-        button.style.width = `${Math.max(.015, Math.min(1, rect.w + dx * 2)) * 100}%`
-        button.style.height = `${Math.max(.015, Math.min(1, rect.h + dy * 2)) * 100}%`
+      if (resizeEdge) {
+        const value = resizeCenteredRect(rect, resizeEdge, dx, dy)
+        button.style.left = `${value.x * 100}%`
+        button.style.top = `${value.y * 100}%`
+        button.style.width = `calc(${value.w * 100}% + ${hotspotPadding * 2}px)`
+        button.style.height = `calc(${value.h * 100}% + ${hotspotPadding * 2}px)`
       } else {
         button.style.left = `${Math.max(0, Math.min(1, rect.x + dx)) * 100}%`
         button.style.top = `${Math.max(0, Math.min(1, rect.y + dy)) * 100}%`
       }
     }
+    const cleanup = () => {
+      button.removeEventListener('pointermove', move)
+      button.removeEventListener('pointerup', up)
+      button.removeEventListener('pointercancel', cancel)
+    }
     const up = (next: PointerEvent) => {
       const dx = (next.clientX - startX) / box.width, dy = (next.clientY - startY) / box.height
-      const updated = resizing
-        ? { ...rect, w: Math.max(.015, Math.min(1, rect.w + dx * 2)), h: Math.max(.015, Math.min(1, rect.h + dy * 2)) }
+      const updated = resizeEdge
+        ? resizeCenteredRect(rect, resizeEdge, dx, dy)
         : { ...rect, x: Math.max(0, Math.min(1, rect.x + dx)), y: Math.max(0, Math.min(1, rect.y + dy)) }
-      button.removeEventListener('pointermove', move); button.removeEventListener('pointerup', up)
+      cleanup()
       onRectChange?.(updated)
     }
-    button.addEventListener('pointermove', move); button.addEventListener('pointerup', up)
+    const cancel = () => cleanup()
+    button.addEventListener('pointermove', move)
+    button.addEventListener('pointerup', up)
+    button.addEventListener('pointercancel', cancel)
   }
   return <>
     <button
+      ref={refs.setReference}
       type="button"
       aria-label={hotspot.tooltip?.content || t('guide.hotspot')}
-      className={`interactive-hotspot ${hotspot.style?.pulse ? 'pulse' : ''} ${mode === 'editor' ? 'editing' : ''}`}
+      className={`interactive-hotspot ${hotspot.style?.pulse ? 'pulse' : ''} ${mode === 'editor' ? 'editing' : ''} ${active ? 'selected' : ''}`}
       style={{
         left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `calc(${Math.max(rect.w, .012) * 100}% + ${hotspotPadding * 2}px)`,
         height: `calc(${Math.max(rect.h, .012) * 100}% + ${hotspotPadding * 2}px)`, borderRadius: hotspot.style?.shape === 'circle' ? '999px' : '9px',
         borderColor: color, color, backgroundColor: hotspotBackground,
         boxShadow: hotspot.style?.spotlight && active ? `0 0 0 9999px rgba(17,24,39,${hotspot.style.overlay_opacity ?? .45})` : undefined,
+        transitionDuration: motionDurationMs === undefined ? undefined : `${motionDurationMs}ms`,
+        transitionTimingFunction: motionDurationMs === undefined ? undefined : 'cubic-bezier(.22,.61,.36,1)',
       }}
       onClick={event => { event.stopPropagation(); mode === 'editor' ? onSelect?.() : onActivate?.() }}
       onMouseEnter={() => { if (mode === 'player' && hotspot.trigger === 'hover') onActivate?.() }}
       onPointerDown={startDrag}
-    >{mode === 'editor' && <span className="hotspot-resize-handle" />}</button>
-    {active && hotspot.tooltip?.content && <div
+    >{mode === 'editor' && <>
+      <span className="hotspot-edge-handle hotspot-edge-n" data-resize="n" />
+      <span className="hotspot-edge-handle hotspot-edge-e" data-resize="e" />
+      <span className="hotspot-edge-handle hotspot-edge-s" data-resize="s" />
+      <span className="hotspot-edge-handle hotspot-edge-w" data-resize="w" />
+      <span className="hotspot-resize-handle" data-resize="se" />
+    </>}</button>
+    {(active || showTooltip) && (hotspot.tooltip?.content || showTooltip) && <div
       ref={refs.setFloating}
-      className="interactive-tooltip"
+      className={`interactive-tooltip ${showTooltip ? 'hotspot-overview-card' : ''} ${active ? 'selected' : ''}`}
+      role={tooltipSelectable ? 'button' : undefined}
+      tabIndex={tooltipSelectable ? 0 : undefined}
+      onClick={event => { if (!tooltipSelectable) return; event.preventDefault(); event.stopPropagation(); onSelect?.() }}
+      onKeyDown={event => { if (tooltipSelectable && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.stopPropagation(); onSelect?.() } }}
       style={{
-        ...floatingStyles, maxWidth: hotspot.tooltip.max_width || 320,
+        ...floatingStyles, maxWidth: `min(${hotspot.tooltip.max_width || 320}px, calc(100vw - 24px))`,
         background: tooltipTheme.background || '#fff', color: tooltipTheme.text_color || '#172033',
         borderColor: tooltipTheme.border_color || '#e2e6ed', borderRadius: tooltipTheme.radius ?? 12,
       }}
     >
       {hotspot.tooltip.show_arrow !== false && <FloatingArrow ref={arrowRef} context={context} width={18} height={9} tipRadius={2} fill={tooltipTheme.background || '#fff'} stroke={tooltipTheme.border_color || '#e2e6ed'} strokeWidth={1} />}
       <span className="tooltip-kicker"><i style={{ background: color }} />{t('guide.kicker')}</span>
-      <strong>{hotspot.tooltip.content}</strong>
+      <strong>{hotspot.tooltip?.content || t('guide.hotspot')}</strong>
       <small>{hotspot.trigger === 'hover' ? t('guide.hoverHint') : t('guide.clickHint')}</small>
       <div className="tooltip-actions">
         {guideNavigation.show_previous !== false && <button
-          type="button" disabled={stepIndex <= 0 || !onGuidePrevious}
+          type="button" disabled={(stepIndex <= 0 && hotspotIndex <= 0) || !onGuidePrevious}
           onClick={event => { event.preventDefault(); event.stopPropagation(); onGuidePrevious?.() }}
           style={{ background: guideNavigation.previous_color, color: guideNavigation.text_color, borderRadius: guideNavigation.radius }}
         ><span>←</span>{guideNavigation.previous_label}</button>}
-        <span className="tooltip-step">{Math.min(stepIndex + 1, stepCount)} / {stepCount}</span>
+        <span className="tooltip-step">{Math.min(stepIndex + 1, stepCount)} / {stepCount}{hotspotCount > 1 ? ` · ${hotspotIndex + 1} / ${hotspotCount}` : ''}</span>
         {guideNavigation.show_next !== false && <button
-          type="button" disabled={!onGuideNext || (stepIndex >= stepCount - 1 && hotspot.action.type === 'next')}
+          type="button" disabled={!onGuideNext || (stepIndex >= stepCount - 1 && hotspot.action.type === 'next' && hotspotIndex >= hotspotCount - 1)}
           onClick={event => { event.preventDefault(); event.stopPropagation(); onGuideNext?.() }}
           style={{ background: guideNavigation.next_color, color: guideNavigation.next_text_color, borderColor: guideNavigation.next_color, borderRadius: guideNavigation.radius }}
         >{guideNavigation.next_label}<span>→</span></button>}
@@ -223,7 +267,7 @@ function ZoomRegionLayer({ rect, wrapper, hotspots, onChange, onPreview, onDelet
     region.addEventListener('pointermove', move); region.addEventListener('pointerup', up)
   }
   return <>
-    <div className="zoom-region-editor" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} onPointerDown={startDrag}>
+    <div className="zoom-region-editor" style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} onPointerDown={startDrag} onClick={event => { event.preventDefault(); event.stopPropagation() }}>
       <span className="zoom-region-label">Zoom area</span><span className="zoom-resize-handle" />
     </div>
     <div className="zoom-region-controls" style={{ left: `${rect.x * 100}%`, top: `${Math.min(.94, rect.y + rect.h / 2) * 100}%` }} onClick={event => event.stopPropagation()}>
@@ -236,11 +280,7 @@ function ZoomRegionLayer({ rect, wrapper, hotspots, onChange, onPreview, onDelet
   </>
 }
 
-function zoomedRect(rect: Rect, scale: number, offsetX: number, offsetY: number): Rect {
-  return { x: rect.x * scale + offsetX, y: rect.y * scale + offsetY, w: rect.w * scale, h: rect.h * scale }
-}
-
-export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, persistZoom = false, exportZoomProgress, onZoomRectChange, onZoomDelete }: Props) {
+export default function SlideStage({ step, mode, fit = 'width', activeHotspotId, showAllHotspots = false, showAllTooltips = false, theme, navigation, stepIndex = 0, stepCount = 1, onHotspot, onSelectHotspot, onTarget, onReady, onGuidePrevious, onGuideNext, onRectChange, showZoomEditor = false, persistZoom = false, exportZoomProgress, onZoomRectChange, onZoomDelete, showAnnotations = false, annotationTool = null, selectedAnnotationIndex = null, annotationsEditable = false, onAnnotationSelect, onAnnotationAdd, onAnnotationChange }: Props) {
   const { t } = useTranslation('player')
   const shellRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -258,6 +298,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
   const fallbackRegions = useMemo(() => rasterRegions(step.page_context || {}), [step.id, step.page_context])
   const legacyIframeFallback = fallbackRegions.length === 0 && step.capture_warnings?.some(warning => warning.startsWith('Cross-origin iframe content may use a raster fallback'))
   const useDom = step.render_mode === 'dom' && Boolean(step.snapshot_url) && !legacyIframeFallback
+  const emptyDomSnapshot = Boolean(snapshot && loadedSnapshotUrl === step.snapshot_url && !snapshotHasRenderableBody(snapshot))
   const zoom = step.animation?.zoom
   const zoomRect = zoom?.rect
   const zoomTransitionDuration = Math.max(0, Math.min(5000, Number(zoom?.transition_duration_ms ?? 1200)))
@@ -329,7 +370,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     if (!snapshot || loadedSnapshotUrl !== step.snapshot_url || frameReadyVersion === 0 || !iframeRef.current?.contentWindow) return
     if (mode === 'player' && !previewReady) return
     const loadDom = () => iframeRef.current?.contentWindow?.postMessage({
-      type: 'DOCFLOW_LOAD', snapshot, hotspots: step.hotspots, mode, scroll: step.scroll_state,
+      type: 'DOCFLOW_LOAD', snapshot, hotspots: step.hotspots, mode, hotspotMode: step.hotspot_mode, scroll: step.scroll_state,
     }, '*')
     if (mode !== 'player') { loadDom(); return }
     // DOM reconstruction can occupy the renderer's main thread. Let the
@@ -340,13 +381,19 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     }
     const timer = window.setTimeout(loadDom, 120)
     return () => window.clearTimeout(timer)
-  }, [snapshot, loadedSnapshotUrl, frameReadyVersion, step.id, step.snapshot_url, step.hotspots, step.scroll_state, mode, previewReady])
+  }, [snapshot, loadedSnapshotUrl, frameReadyVersion, step.id, step.snapshot_url, step.hotspots, step.hotspot_mode, step.scroll_state, mode, previewReady])
 
   useEffect(() => {
     if (!error) return
     const frame = requestAnimationFrame(() => { setContentReady(true); onReady?.() })
     return () => cancelAnimationFrame(frame)
   }, [error, onReady])
+
+  useEffect(() => {
+    if (!emptyDomSnapshot) return
+    const frame = requestAnimationFrame(() => { setContentReady(true); onReady?.() })
+    return () => cancelAnimationFrame(frame)
+  }, [emptyDomSnapshot, onReady])
 
   useEffect(() => {
     if (deterministicZoom || mode !== 'player' || !contentReady || !zoom?.enabled || !zoomRect) return
@@ -356,21 +403,23 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
 
   useEffect(() => () => window.clearTimeout(zoomTimer.current), [])
 
-  const activeId = activeHotspotId || step.hotspots[0]?.id
+  const orderedHotspots = useMemo(() => [...step.hotspots].sort((a, b) => a.position - b.position), [step.hotspots])
+  const activeId = activeHotspotId || orderedHotspots[0]?.id
+  const activeHotspotIndex = Math.max(0, orderedHotspots.findIndex(hotspot => hotspot.id === activeId))
+  const renderedHotspots = mode === 'player' && step.hotspot_mode === 'sequence' && !showAllHotspots
+    ? orderedHotspots.filter(hotspot => hotspot.id === activeId)
+    : orderedHotspots
+  useEffect(() => {
+    if (!contentReady || !useDom || mode !== 'player' || step.hotspot_mode !== 'sequence' || !activeId) return
+    iframeRef.current?.contentWindow?.postMessage({ type: 'DOCFLOW_FOCUS_HOTSPOT', hotspotId: activeId }, '*')
+  }, [activeId, contentReady, mode, step.hotspot_mode, useDom])
   const stageHeight = fit === 'viewport' ? Math.max(1, step.viewport_height * scale) : Math.max(240, step.viewport_height * scale)
   const stageWidth = fit === 'viewport' ? Math.max(1, step.viewport_width * scale) : undefined
-  const fallback = !useDom || Boolean(error)
+  const fallback = !useDom || Boolean(error) || emptyDomSnapshot
   const interactionReady = contentReady || (mode === 'player' && previewReady)
-  const showDomFrame = useDom && !error && Boolean(snapshot)
+  const showDomFrame = useDom && !error && !emptyDomSnapshot && Boolean(snapshot)
   const showScreenshot = fallback || !contentReady
-  const zoomTransform = useMemo(() => {
-    if (!zoomRect || effectiveZoomProgress <= 0) return { scale: 1, x: 0, y: 0, css: 'translate(0, 0) scale(1)' }
-    const targetScale = Math.max(1, Math.min(4, Math.min(1 / zoomRect.w, 1 / zoomRect.h) * .94))
-    const targetX = .5 - zoomRect.x * targetScale, targetY = .5 - zoomRect.y * targetScale
-    const zoomScale = 1 + (targetScale - 1) * effectiveZoomProgress
-    const x = targetX * effectiveZoomProgress, y = targetY * effectiveZoomProgress
-    return { scale: zoomScale, x, y, css: `translate(${x * 100}%, ${y * 100}%) scale(${zoomScale})` }
-  }, [effectiveZoomProgress, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h])
+  const zoomTransform = useMemo(() => calculateZoomTransform(zoomRect, effectiveZoomProgress), [effectiveZoomProgress, zoomRect?.x, zoomRect?.y, zoomRect?.w, zoomRect?.h])
   // SnapshotFrame is trusted DocFlow code and needs same-origin access to the
   // script-free inner iframe created by rrweb. Captured content stays in the
   // inner iframe, whose sandbox does not permit scripts.
@@ -378,7 +427,7 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
     {error && <div className="capture-warning">{t('guide.fallback', { error })}</div>}
     <div
       ref={wrapperRef}
-      className={`slide-stage ${mode} ${zoomVisible ? 'zoom-previewing' : ''}`}
+      className={`slide-stage ${mode} ${zoomVisible ? 'zoom-previewing' : ''} ${annotationTool ? 'annotation-drawing' : ''}`}
       style={{ width: stageWidth, height: stageHeight, aspectRatio: `${step.viewport_width}/${step.viewport_height}` }}
       onClick={event => {
         if (mode !== 'editor' || !fallback || !onTarget) return
@@ -408,11 +457,15 @@ export default function SlideStage({ step, mode, fit = 'width', activeHotspotId,
           left: `${-region.x / region.w * 100}%`, top: `${-region.y / region.h * 100}%`,
         }} /></div>)}
       </div>
+      {showAnnotations && <AnnotationLayer annotations={step.redactions || []} tool={annotationTool} editable={annotationsEditable} selectedIndex={selectedAnnotationIndex} onSelect={onAnnotationSelect} onAdd={onAnnotationAdd} onChange={onAnnotationChange} />}
       {!contentReady && !previewReady && <div className="slide-transition-loading"><span /><b>{t('guide.loadingNext')}</b></div>}
       {!contentReady && previewReady && useDom && <div className="slide-background-loading"><span />{t('guide.loadingPage')}</div>}
-      {interactionReady && step.hotspots.map(hotspot => <HotspotLayer
-        key={hotspot.id} hotspot={hotspot} rect={zoomedRect(dynamicRects[hotspot.id] || hotspot.fallback_rect, zoomTransform.scale, zoomTransform.x, zoomTransform.y)}
+      {interactionReady && renderedHotspots.map(hotspot => <HotspotLayer
+        key={hotspot.id} hotspot={hotspot} rect={transformRect(resolveHotspotRect(mode, useDom, hotspot.fallback_rect, dynamicRects[hotspot.id]), zoomTransform)}
         active={hotspot.id === activeId} mode={mode} wrapper={wrapperRef.current} theme={theme} navigation={navigation} stepIndex={stepIndex} stepCount={stepCount}
+        hotspotIndex={Math.max(0, orderedHotspots.findIndex(item => item.id === hotspot.id))} hotspotCount={step.hotspot_mode === 'sequence' || showAllHotspots ? orderedHotspots.length : 1}
+        showTooltip={showAllTooltips} tooltipSelectable={showAllHotspots && Boolean(onSelectHotspot)}
+        motionDurationMs={zoomRect ? (deterministicZoom ? 0 : zoomTransitionDuration) : undefined}
         onActivate={() => onHotspot?.(hotspot)} onSelect={() => onSelectHotspot?.(hotspot)}
         onGuidePrevious={onGuidePrevious} onGuideNext={() => onGuideNext?.(hotspot)}
         onRectChange={rect => onRectChange?.(hotspot, rect)}

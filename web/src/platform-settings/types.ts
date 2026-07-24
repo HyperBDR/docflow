@@ -13,6 +13,10 @@ export type MonitoringPlatformSettings = {
 export type MonitoringPlatformSettingsInput = Pick<MonitoringPlatformSettings, 'automatic_collection' | 'interval_seconds' | 'quota_automatic_collection' | 'quota_interval_seconds' | 'retention_days' | 'raw_ranges'>
 export type GeneralPlatformSettings = { help_url: string; upgrade_url: string; updated_at?: string | null }
 export type GeneralPlatformSettingsInput = Pick<GeneralPlatformSettings, 'help_url' | 'upgrade_url'>
+export type ExtensionCapturePlatformSettings = {
+  feedback_duration_ms: number; min_feedback_duration_ms: number; max_feedback_duration_ms: number; updated_at?: string | null
+}
+export type ExtensionCapturePlatformSettingsInput = Pick<ExtensionCapturePlatformSettings, 'feedback_duration_ms'>
 export type GoogleAuthSettings = {
   enabled: boolean; client_id: string; client_secret_configured: boolean; allow_registration: boolean
   allowed_domains: string[]; configured: boolean; redirect_uri: string; updated_at?: string | null

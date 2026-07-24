@@ -1,5 +1,5 @@
 import i18n from './i18n'
-import type { AdminDownload, AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminShare, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, PublicPlatformConfig, QuotaPlan, QuotaSummary, RecycleItem, ResourceGovernance, ShareLink, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
+import type { AdminDownload, AdminJobDetail, AdminJobPage, AdminOrganization, AdminOverview, AdminResource, AdminResourceDetail, AdminShare, AdminUser, AIJob, AIModelConfig, AIModelInput, AIPlatformSettings, AIUsageRecord, AIUsageSummary, Analytics, AuditLog, Category, Demo, ExportJob, ExtensionRelease, ExtensionReleaseCheck, GoogleAuthPublicConfig, GoogleIdentity, HotspotData, Invitation, Locale, Organization, OrganizationMember, OrganizationRole, PageResult, PublicPlatformConfig, QuotaPlan, QuotaSummary, RecycleItem, ResourceGovernance, ShareLink, Step, StorageConfig, StorageConfigInput, StorageObject, Tag, User, UserRole } from './types'
 import type { PlatformQuotaLimits, PlatformQuotaPreview, QuotaMetricKey, QuotaOverview, QuotaPlanStatistics, QuotaSpaceHistory } from './quota/types'
 import type { WorkspaceCapabilities } from './workspace/types'
 import { cachedCapabilities, invalidateCapabilities } from './workspace/capabilitiesClient'
@@ -61,6 +61,11 @@ export const api = {
   unlinkGoogle: () => request<void>('/api/auth/google/identity', { method: 'DELETE' }),
   logout: () => request('/api/auth/logout', { method: 'POST' }).finally(invalidateCapabilities),
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  extensionReleases: (channel = '') => request<ExtensionRelease[]>(`/api/admin/extension-releases${channel ? `?channel=${encodeURIComponent(channel)}` : ''}`),
+  createExtensionRelease: (form: FormData) => request<ExtensionRelease>('/api/admin/extension-releases', { method: 'POST', body: form }),
+  updateExtensionRelease: (id: string, values: Partial<Pick<ExtensionRelease, 'status' | 'minimum_version' | 'is_required' | 'release_notes'>>) => request<ExtensionRelease>(`/api/admin/extension-releases/${id}`, { method: 'PATCH', body: JSON.stringify(values) }),
+  deleteExtensionRelease: (id: string) => request<void>(`/api/admin/extension-releases/${id}`, { method: 'DELETE' }),
+  extensionReleaseCheck: (channel: string, currentVersion: string) => request<ExtensionReleaseCheck>(`/api/extension/releases/check?${new URLSearchParams({ channel, current_version: currentVersion })}`),
   adminJobs: (filters: { query?: string; job_type?: string; status?: string; user_id?: string; organization_id?: string; from_at?: string; to_at?: string; page?: number; page_size?: number } = {}) => request<AdminJobPage>(`/api/admin/jobs?${new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== undefined).map(([key, value]) => [key, String(value)])).toString()}`),
   adminJob: (type: 'ai' | 'export', id: string) => request<AdminJobDetail>(`/api/admin/jobs/${type}/${id}`),
   retryAdminJob: (type: 'ai' | 'export', id: string) => request<AdminJobDetail>(`/api/admin/jobs/${type}/${id}/retry`, { method: 'POST' }),
@@ -172,6 +177,7 @@ export const api = {
   updateHotspot: (demoId: string, stepId: string, hotspotId: string, values: Partial<HotspotData>) => request<HotspotData>(`/api/demos/${demoId}/steps/${stepId}/hotspots/${hotspotId}`, { method: 'PATCH', body: JSON.stringify(values) }),
   deleteHotspot: (demoId: string, stepId: string, hotspotId: string) => request<void>(`/api/demos/${demoId}/steps/${stepId}/hotspots/${hotspotId}`, { method: 'DELETE' }),
   deleteStep: (demoId: string, stepId: string) => request<void>(`/api/demos/${demoId}/steps/${stepId}`, { method: 'DELETE' }),
+  duplicateStep: (demoId: string, stepId: string) => request<Step>(`/api/demos/${demoId}/steps/${stepId}/duplicate`, { method: 'POST' }),
   reorder: (demoId: string, stepIds: string[]) => request<Demo>(`/api/demos/${demoId}/steps/reorder`, { method: 'POST', body: JSON.stringify({ step_ids: stepIds }) }),
   publish: (id: string) => request<Demo>(`/api/demos/${id}/publish`, { method: 'POST' }),
   revoke: (id: string) => request<Demo>(`/api/demos/${id}/revoke`, { method: 'POST' }),
@@ -187,4 +193,5 @@ export const api = {
   aiJob: (id: string) => request<AIJob>(`/api/ai/jobs/${id}`),
   latestAI: (demoId: string) => request<AIJob | null>(`/api/demos/${demoId}/ai/latest`),
   revertAI: (id: string) => request<AIJob>(`/api/ai/jobs/${id}/revert`, { method: 'POST' }),
+  reapplyAI: (id: string) => request<AIJob>(`/api/ai/jobs/${id}/reapply`, { method: 'POST' }),
 }

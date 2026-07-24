@@ -19,6 +19,7 @@ import AdminAIUsage from './AdminAIUsage'
 import AdminAISettings from './AdminAISettings'
 import AdminStorage from './AdminStorage'
 import AdminJobs from './AdminJobs'
+import AdminExtensionReleases from './AdminExtensionReleases'
 import PlatformSettings from './PlatformSettings'
 import AdminQuotas from './AdminQuotas'
 import MonitoringOverview from './monitoring/MonitoringOverview'
@@ -40,6 +41,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
     : location.pathname.startsWith('/admin/jobs') ? t('nav.jobs')
     : location.pathname.startsWith('/admin/notifications') ? t('nav.notifications')
     : location.pathname.startsWith('/admin/storage') ? t('nav.storage')
+    : location.pathname.startsWith('/admin/extensions') ? t('nav.extensions')
     : location.pathname.startsWith('/admin/operations/quotas') ? t('nav.quotas')
     : location.pathname.startsWith('/admin/ai/settings') ? t('nav.aiSettings')
       : location.pathname.startsWith('/admin/ai/usage') ? t('nav.aiUsage')
@@ -73,6 +75,7 @@ export default function AdminShell({ user, onUserChange, logout }: { user: User;
         <Route path="ai/settings" element={<AdminAISettings />} />
         <Route path="ai/usage" element={<AdminAIUsage />} />
         <Route path="storage" element={<AdminStorage />} />
+        <Route path="extensions" element={<AdminExtensionReleases />} />
         <Route path="operations/quotas" element={<AdminQuotas />} />
         <Route path="settings" element={<PlatformSettings />} />
         <Route path="*" element={<Navigate to="/admin" />} />

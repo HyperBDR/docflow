@@ -1,9 +1,11 @@
 declare const __DOCFLOW_API_URL__: string
 declare const __DOCFLOW_WEB_URL__: string
+declare const __DOCFLOW_UPDATE_CHANNEL__: string
 
 export const configuredApiUrl = __DOCFLOW_API_URL__.replace(/\/$/, '')
 export const configuredWebUrl = __DOCFLOW_WEB_URL__.replace(/\/$/, '')
 export const configuredWebOrigin = new URL(configuredWebUrl).origin
+export const configuredUpdateChannel = __DOCFLOW_UPDATE_CHANNEL__ || 'stable'
 
 export function isConfiguredWebPage(url?: string) {
   if (!url) return false

@@ -190,7 +190,15 @@ def public_markdown(token: str, request: Request, db: Session = Depends(get_db))
         lines += [snapshot["description"], ""]
     for index, step in enumerate(snapshot["steps"], 1):
         fallback = f"Step {index}" if snapshot.get("content_locale") == "en" else f"步骤 {index}"
-        lines += [f"## {index}. {step['title'] or fallback}", "", step.get("body", ""), "", f"![{step['title'] or fallback}]({settings.public_base_url}/public/{token}/assets/{step['id']}.webp)", ""]
+        title = step["title"] or fallback
+        lines += [f"## {index}. {title}", "", step.get("body", ""), ""]
+        hotspots = sorted(step.get("hotspots") or [], key=lambda item: item.get("position", 0))
+        if len(hotspots) > 1:
+            for hotspot_index, hotspot in enumerate(hotspots, 1):
+                content = str((hotspot.get("tooltip") or {}).get("content", "")).strip()
+                if content:
+                    lines += [f"### {index}.{hotspot_index} {content}", ""]
+        lines += [f"![{title}]({settings.public_base_url}/public/{token}/assets/{step['id']}.webp)", ""]
     return "\n".join(lines)
 
 

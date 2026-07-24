@@ -1,13 +1,59 @@
-import type { Credentials, Locale, Recording, RecordingMode, RecordingTarget } from './types'
+import type { Credentials, ExtensionUpdate, Locale, Recording, RecordingMode, RecordingTarget } from './types'
 import { browserLocale } from './locale'
 import { quotaAllowed, quotaApiError, quotaMessage, quotaMetricMessage, type QuotaAction, type WorkspaceCapabilities, type WorkspaceQuotaSummary } from './quota'
-import { configuredApiUrl, configuredWebUrl, isConfiguredWebPage, isRecordableUrl } from './config'
-import { isInlineableSnapshotAsset, stripEmbeddedFonts } from './snapshot-assets'
+import { configuredApiUrl, configuredUpdateChannel, configuredWebUrl, isConfiguredWebPage, isRecordableUrl } from './config'
+import { isSerializedStylesheetLink, replaceSerializedStyleText, serializedStyleText, snapshotAssetMime, sniffSnapshotFontMime, svgDataUrlWithFragment, uniqueCssAssetUrls } from './snapshot-assets'
+import { DEFAULT_CAPTURE_FEEDBACK_DURATION_MS, captureFeedbackDuration } from './capture-feedback'
 
 type SavedRecording = Omit<Recording, 'screenshot'>
 let recording: Recording | null = null
 let queue: Promise<void> = Promise.resolve()
 let quotaEnding = false
+const UPDATE_ALARM = 'docflow-extension-update'
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+
+function packageIdentity() {
+  const manifest = chrome.runtime.getManifest()
+  return { version: manifest.version, versionName: manifest.version_name || manifest.version, channel: configuredUpdateChannel }
+}
+
+async function displayUpdateBadge(update?: ExtensionUpdate | null) {
+  const state = await restore()
+  if (state?.active) return
+  await chrome.action.setBadgeText({ text: update?.update_available ? 'NEW' : '' })
+  if (update?.update_available) {
+    await chrome.action.setBadgeBackgroundColor({ color: update.required ? '#dc3545' : '#635bff' })
+    await chrome.action.setTitle({ title: `DocFlow Recorder · ${update.required ? 'Update required' : 'Update available'} ${update.latest_version || ''}` })
+  } else await chrome.action.setTitle({ title: 'DocFlow Recorder' })
+}
+
+async function checkExtensionUpdate(force = false): Promise<ExtensionUpdate | null> {
+  const stored = await chrome.storage.local.get(['extensionUpdate', 'extensionUpdateCheckedAt'])
+  const cached = stored.extensionUpdate as ExtensionUpdate | undefined
+  const checkedAt = Number(stored.extensionUpdateCheckedAt || 0)
+  if (!force && cached && Date.now() - checkedAt < UPDATE_CHECK_INTERVAL_MS) {
+    await displayUpdateBadge(cached)
+    return cached
+  }
+  const identity = packageIdentity()
+  try {
+    const params = new URLSearchParams({ channel: identity.channel, current_version: identity.version })
+    const response = await fetch(`${configuredApiUrl}/api/extension/releases/check?${params}`)
+    if (!response.ok) throw new Error('update check failed')
+    const update = await response.json() as ExtensionUpdate
+    await chrome.storage.local.set({ extensionUpdate: update, extensionUpdateCheckedAt: Date.now() })
+    await displayUpdateBadge(update)
+    return update
+  } catch {
+    await displayUpdateBadge(cached)
+    return cached || null
+  }
+}
+
+async function initializeUpdateChecks() {
+  await chrome.alarms.create(UPDATE_ALARM, { delayInMinutes: 1, periodInMinutes: 360 })
+  await checkExtensionUpdate(false)
+}
 
 async function connectedCredentials(): Promise<Credentials | undefined> {
   const auth = (await chrome.storage.local.get('credentials')).credentials as Credentials | undefined
@@ -15,6 +61,21 @@ async function connectedCredentials(): Promise<Credentials | undefined> {
   if (auth.api.replace(/\/$/, '') === configuredApiUrl && String(auth.web || '').replace(/\/$/, '') === configuredWebUrl) return auth
   await chrome.storage.local.remove(['credentials', 'pendingTarget', 'activeOrganizationId'])
   return undefined
+}
+
+async function loadExtensionRuntimeConfig(auth: Credentials) {
+  const stored = await chrome.storage.local.get('extensionRuntimeConfig')
+  const cached = stored.extensionRuntimeConfig as { capture_feedback_duration_ms?: number } | undefined
+  try {
+    const response = await fetch(`${auth.api}/api/extension/config`, { headers: { Authorization: `Bearer ${auth.token}` } })
+    if (!response.ok) throw new Error('extension config unavailable')
+    const config = await response.json() as { capture_feedback_duration_ms?: number }
+    const normalized = { ...config, capture_feedback_duration_ms: captureFeedbackDuration(config.capture_feedback_duration_ms) }
+    await chrome.storage.local.set({ extensionRuntimeConfig: normalized })
+    return normalized
+  } catch {
+    return { capture_feedback_duration_ms: captureFeedbackDuration(cached?.capture_feedback_duration_ms) }
+  }
 }
 
 async function loadCapabilities(auth: Credentials, organizationId = '', demoId = ''): Promise<WorkspaceCapabilities> {
@@ -58,7 +119,8 @@ function statePayload(state: Recording, active = true) {
   return {
     type: 'RECORDING_STATE', active, paused: state.paused,
     capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode,
-    aiEnabled: state.aiEnabled, error: state.error || '', locale: state.locale, contentLocale: state.contentLocale,
+    aiEnabled: state.aiEnabled, privacyEnabled: state.privacyEnabled, captureFeedbackDurationMs: state.captureFeedbackDurationMs,
+    error: state.error || '', locale: state.locale, contentLocale: state.contentLocale,
     trackedTabs: state.trackedTabIds.length,
   }
 }
@@ -146,7 +208,7 @@ function applyStepQuota(state: Recording, live: WorkspaceCapabilities) {
   state.stepQuotaRemaining = Math.max(0, stepQuota.limit - Number(live.demo_step_count || 0))
 }
 
-async function begin(demoId: string, sessionId: string, mode: RecordingMode = 'html', aiEnabled = false, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false, capabilities?: WorkspaceCapabilities) {
+async function begin(demoId: string, sessionId: string, mode: RecordingMode = 'html', aiEnabled = false, privacyEnabled = false, captureFeedbackDurationMs = DEFAULT_CAPTURE_FEEDBACK_DURATION_MS, sourceTabId?: number, locale: Locale = browserLocale(), contentLocale: Locale = locale, autoCreated = false, capabilities?: WorkspaceCapabilities) {
   const auth = await connectedCredentials()
   const tab = sourceTabId ? await chrome.tabs.get(sourceTabId) : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
   if (!auth || !tab.id || !isRecordableUrl(tab.url)) throw new Error('请打开可录制的业务页面并确认扩展已连接')
@@ -155,7 +217,8 @@ async function begin(demoId: string, sessionId: string, mode: RecordingMode = 'h
     // Every slide receives a synchronized clean screenshot. Do not capture the
     // setup dialog here and keep it as an accidental fallback image.
     screenshot: 'data:image/png;base64,', active: true, paused: false,
-    capturing: false, phase: '', steps: 0, mode, aiEnabled, locale, contentLocale,
+    capturing: false, phase: '', steps: 0, mode, aiEnabled, privacyEnabled,
+    captureFeedbackDurationMs: captureFeedbackDuration(captureFeedbackDurationMs), locale, contentLocale,
     autoCreated,
   }
   if (capabilities) applyStepQuota(recording, capabilities)
@@ -186,7 +249,9 @@ async function restore(): Promise<Recording | null> {
       paused: Boolean(saved.paused), capturing: false,
       phase: '',
       steps: Number(saved.steps || 0), mode: saved.mode || 'html',
-      aiEnabled: Boolean(saved.aiEnabled), locale: saved.locale || browserLocale(), contentLocale: saved.contentLocale || saved.locale || browserLocale(),
+      aiEnabled: Boolean(saved.aiEnabled), privacyEnabled: Boolean(saved.privacyEnabled),
+      captureFeedbackDurationMs: captureFeedbackDuration(saved.captureFeedbackDurationMs),
+      locale: saved.locale || browserLocale(), contentLocale: saved.contentLocale || saved.locale || browserLocale(),
       autoCreated: Boolean(saved.autoCreated), sessionId: String(saved.sessionId || ''),
     }
     return recording
@@ -205,44 +270,187 @@ function visitNodes(value: unknown, visit: (node: Record<string, any>) => void) 
   if (Array.isArray(node.childNodes)) node.childNodes.forEach(child => visitNodes(child, visit))
 }
 
-async function responseDataUrl(response: Response, maxBytes: number): Promise<string | null> {
-  const contentType = response.headers.get('content-type')?.split(';')[0] || ''
-  if (!response.ok || !isInlineableSnapshotAsset(contentType)) return null
+async function responseDataUrl(response: Response, maxBytes: number, sourceUrl = response.url): Promise<string | null> {
+  if (!response.ok) return null
+  let contentType = snapshotAssetMime(response.headers.get('content-type') || '', sourceUrl)
+  const declaredLength = Number(response.headers.get('content-length') || 0)
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return null
   const data = await response.arrayBuffer()
   if (data.byteLength > maxBytes) return null
   const bytes = new Uint8Array(data)
+  contentType ||= sniffSnapshotFontMime(bytes)
+  if (!contentType) return null
   let binary = ''
   for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
   return `data:${contentType};base64,${btoa(binary)}`
 }
 
-async function inlineCssAssets(css: string, stylesheetUrl: string, budget: { remaining: number }) {
-  const matches = [...css.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)]
+type SnapshotAssetLoader = (url: string, maxBytes: number) => Promise<string | null>
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 5_000) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try { return await fetch(url, { ...init, signal: controller.signal }) }
+  finally { clearTimeout(timeout) }
+}
+
+function decodedDataUrlSize(dataUrl: string) {
+  const payload = dataUrl.split(',', 2)[1] || ''
+  return Math.max(0, Math.floor(payload.length * .75) - (payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0))
+}
+
+async function pageAssetDataUrl(tabId: number, pageUrl: string, assetUrl: string, maxBytes: number): Promise<string | null> {
+  let pageOrigin = '', assetOrigin = ''
+  try {
+    pageOrigin = new URL(pageUrl).origin
+    assetOrigin = new URL(assetUrl).origin
+  } catch { return null }
+  if (!pageOrigin || pageOrigin !== assetOrigin) return null
+  try {
+    const [execution] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      args: [assetUrl, pageOrigin, maxBytes],
+      func: async (url: string, expectedOrigin: string, limit: number) => {
+        if (location.origin !== expectedOrigin) return null
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 3_500)
+        try {
+          const response = await fetch(url, { credentials: 'include', cache: 'force-cache', signal: controller.signal })
+          if (!response.ok) return null
+          const declared = Number(response.headers.get('content-length') || 0)
+          if (Number.isFinite(declared) && declared > limit) return null
+          const data = new Uint8Array(await response.arrayBuffer())
+          if (data.byteLength > limit) return null
+          let binary = ''
+          for (let offset = 0; offset < data.length; offset += 0x8000) binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000))
+          return { contentType: response.headers.get('content-type') || '', base64: btoa(binary), head: [...data.subarray(0, 12)] }
+        } catch { return null }
+        finally { window.clearTimeout(timeout) }
+      },
+    })
+    const result = execution?.result as { contentType?: string; base64?: string; head?: number[] } | null | undefined
+    if (!result?.base64) return null
+    const contentType = snapshotAssetMime(String(result.contentType || ''), assetUrl)
+      || sniffSnapshotFontMime(new Uint8Array(Array.isArray(result.head) ? result.head : []))
+    return contentType ? `data:${contentType};base64,${result.base64}` : null
+  } catch { return null }
+}
+
+async function pageStylesheetText(tabId: number, pageUrl: string, stylesheetUrl: string): Promise<string | null> {
+  let pageOrigin = '', stylesheetOrigin = ''
+  try {
+    pageOrigin = new URL(pageUrl).origin
+    stylesheetOrigin = new URL(stylesheetUrl).origin
+  } catch { return null }
+  if (!pageOrigin || pageOrigin !== stylesheetOrigin) return null
+  try {
+    const [execution] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      args: [stylesheetUrl, pageOrigin],
+      func: async (url: string, expectedOrigin: string) => {
+        if (location.origin !== expectedOrigin) return null
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 3_500)
+        try {
+          const response = await fetch(url, { credentials: 'include', cache: 'force-cache', signal: controller.signal })
+          if (!response.ok) return null
+          const declared = Number(response.headers.get('content-length') || 0)
+          if (Number.isFinite(declared) && declared > 2_000_000) return null
+          const text = await response.text()
+          return new TextEncoder().encode(text).byteLength <= 2_000_000 ? text : null
+        } catch { return null }
+        finally { window.clearTimeout(timeout) }
+      },
+    })
+    return typeof execution?.result === 'string' ? execution.result : null
+  } catch { return null }
+}
+
+function snapshotAssetLoader(pageUrl: string, tabId?: number): SnapshotAssetLoader {
+  const cache = new Map<string, Promise<string | null>>()
+  return async (url, maxBytes) => {
+    let pending = cache.get(url)
+    if (!pending) {
+      pending = (async () => {
+        // Fetch same-origin assets in the page's MAIN world first. This keeps
+        // the accepted certificate and authenticated session of intranet
+        // pages, which an MV3 extension service worker does not always share.
+        if (tabId) {
+          const fromPage = await pageAssetDataUrl(tabId, pageUrl, url, 6_000_000)
+          if (fromPage) return fromPage
+        }
+        try {
+          return await responseDataUrl(await fetchWithTimeout(url, { credentials: 'include' }), 6_000_000, url)
+        } catch { return null }
+      })()
+      cache.set(url, pending)
+    }
+    const dataUrl = await pending
+    return dataUrl && decodedDataUrlSize(dataUrl) <= maxBytes ? dataUrl : null
+  }
+}
+
+function snapshotAssetCandidates(nodes: Record<string, any>[], pageUrl: string, limit = 120) {
+  const urls: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string, base = pageUrl, stripFragment = false) => {
+    if (!raw || raw.startsWith('data:') || raw.startsWith('#') || urls.length >= limit) return
+    try {
+      const value = new URL(raw, base)
+      if (stripFragment) value.hash = ''
+      if (!seen.has(value.href)) { seen.add(value.href); urls.push(value.href) }
+    } catch { /* malformed URLs are ignored without affecting capture */ }
+  }
+  const addCss = (css: string, base: string) => uniqueCssAssetUrls(css).forEach(raw => add(raw, base))
+
+  for (const node of nodes) {
+    if (urls.length >= limit) break
+    const attrs = node.attributes || {}
+    const tag = node.type === 2 ? String(node.tagName || '').toLowerCase() : ''
+    if (isSerializedStylesheetLink(node)) {
+      let base = pageUrl
+      try { base = new URL(String(attrs.href || pageUrl), pageUrl).href } catch { /* keep page base */ }
+      addCss(String(attrs._cssText || attrs._csstext || ''), base)
+    } else if (tag === 'style') addCss(serializedStyleText(node), pageUrl)
+    else if (node.type === 3 && node.isStyle && node.textContent) addCss(String(node.textContent), pageUrl)
+    if (tag && String(attrs.style || '').includes('url(')) addCss(String(attrs.style), pageUrl)
+    if (tag === 'img' && attrs.src && !attrs.rr_dataURL) add(String(attrs.src))
+    if (tag === 'video' && attrs.poster) add(String(attrs.poster))
+    if (tag === 'use') add(String(attrs.href || attrs['xlink:href'] || ''), pageUrl, true)
+  }
+  return urls
+}
+
+async function inlineCssAssets(css: string, stylesheetUrl: string, budget: { remaining: number }, loadAsset: SnapshotAssetLoader) {
   const replacements = new Map<string, string>()
-  for (const match of matches.slice(0, 40)) {
-    const raw = match[2].trim()
-    if (!raw || raw.startsWith('data:') || raw.startsWith('#') || replacements.has(raw) || budget.remaining <= 0) continue
+  // Deduplicate before applying the cap. Large compiled stylesheets repeat the
+  // same font URL many times; slicing the raw matches first could starve a
+  // later, visible class background such as .login-container.
+  for (const raw of uniqueCssAssetUrls(css)) {
+    if (budget.remaining <= 0) break
     try {
       const url = new URL(raw, stylesheetUrl).href
-      const response = await fetch(url, { credentials: 'include' })
-      const dataUrl = await responseDataUrl(response, Math.min(1_500_000, budget.remaining))
-      if (dataUrl) { replacements.set(raw, dataUrl); budget.remaining -= Math.ceil(dataUrl.length * .75) }
+      const dataUrl = await loadAsset(url, Math.min(6_000_000, budget.remaining))
+      if (dataUrl) { replacements.set(raw, dataUrl); budget.remaining -= decodedDataUrlSize(dataUrl) }
     } catch { /* inaccessible resource remains a safe empty URL after server sanitization */ }
   }
   for (const [raw, dataUrl] of replacements) css = css.split(raw).join(dataUrl)
   return css
 }
 
-async function inlineCssText(css: string, baseUrl: string, budget: { remaining: number }) {
+async function inlineCssText(css: string, baseUrl: string, budget: { remaining: number }, loadAsset: SnapshotAssetLoader) {
   if (!css || css.length > 2_000_000 || budget.remaining <= 0) return css
-  const imported = await inlineCssImports(css, baseUrl, budget, new Set([baseUrl]))
-  return inlineCssAssets(imported, baseUrl, budget)
+  const imported = await inlineCssImports(css, baseUrl, budget, loadAsset, new Set([baseUrl]))
+  return inlineCssAssets(imported, baseUrl, budget, loadAsset)
 }
 
 async function inlineCssImports(
   css: string,
   stylesheetUrl: string,
   budget: { remaining: number },
+  loadAsset: SnapshotAssetLoader,
   seen = new Set<string>(),
   depth = 0,
 ) {
@@ -255,60 +463,82 @@ async function inlineCssImports(
       const url = new URL(raw, stylesheetUrl).href
       if (seen.has(url)) { css = css.replace(original, ''); continue }
       seen.add(url)
-      const response = await fetch(url, { credentials: 'include' })
+      const response = await fetchWithTimeout(url, { credentials: 'include' })
       if (!response.ok) continue
       let imported = await response.text()
       const bytes = new TextEncoder().encode(imported).byteLength
       if (bytes > 1_500_000 || bytes > budget.remaining) continue
       budget.remaining -= bytes
-      imported = await inlineCssImports(imported, url, budget, seen, depth + 1)
-      imported = await inlineCssAssets(imported, url, budget)
+      imported = await inlineCssImports(imported, url, budget, loadAsset, seen, depth + 1)
+      imported = await inlineCssAssets(imported, url, budget, loadAsset)
       css = css.replace(original, media ? `@media ${media}{${imported}}` : imported)
     } catch { /* the server removes an unresolved @import safely */ }
   }
   return css
 }
 
-async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl: string): Promise<Record<string, any> | undefined> {
+async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl: string, tabId?: number): Promise<Record<string, any> | undefined> {
   if (!snapshot?.snapshot) return snapshot
   const nodes: Record<string, any>[] = []
   visitNodes(snapshot.snapshot, node => nodes.push(node))
-  const budget = { remaining: 8 * 1024 * 1024 }
+  // Keep enough headroom below the API's compressed snapshot limit while
+  // allowing a normal high-resolution login background to be embedded.
+  const budget = { remaining: 12 * 1024 * 1024 }
+  const svgSprites = new Map<string, string | null>()
+  const loadAsset = snapshotAssetLoader(pageUrl, tabId)
 
-  for (const node of nodes.filter(item => item.type === 2 && String(item.tagName).toLowerCase() === 'link').slice(0, 20)) {
+  // Start all common CSS/image/font reads together before the page replays the
+  // captured click. The recording response does not await this work, so a 404
+  // or slow head resource can never block the user's original interaction.
+  await Promise.allSettled(snapshotAssetCandidates(nodes, pageUrl).map(url => loadAsset(url, 6_000_000)))
+
+  for (const node of nodes.filter(isSerializedStylesheetLink).slice(0, 20)) {
     const attrs = node.attributes || {}
-    if (!String(attrs.rel || '').toLowerCase().includes('stylesheet')) continue
     try {
       const url = new URL(String(attrs.href || pageUrl), pageUrl).href
       let css = String(attrs._cssText || attrs._csstext || '')
       if (attrs.href) {
         try {
-          const response = await fetch(url, { credentials: 'include' })
-          if (response.ok) {
-            const fetched = await response.text()
-            if (fetched.length <= 2_000_000) css = fetched
+          const fromPage = tabId ? await pageStylesheetText(tabId, pageUrl, url) : null
+          if (fromPage !== null) css = fromPage
+          else {
+            const response = await fetchWithTimeout(url, { credentials: 'include' })
+            if (response.ok) {
+              const fetched = await response.text()
+              if (fetched.length <= 2_000_000) css = fetched
+            }
           }
         } catch { /* rrweb's existing inline CSS can still be enriched */ }
       }
       if (!css) continue
-      css = stripEmbeddedFonts(await inlineCssText(css, url, budget))
+      css = await inlineCssText(css, url, budget, loadAsset)
       node.attributes = { ...attrs, href: '', _cssText: css }
       delete node.attributes.integrity
       delete node.attributes.crossorigin
     } catch { /* screenshot remains the visual fallback */ }
   }
 
+  // rrweb stores many inline <style> blocks in the element's _cssText
+  // attribute rather than as a style text node. These blocks commonly contain
+  // login backgrounds and @font-face declarations for third-party icon sets.
+  for (const node of nodes.filter(item => item.type === 2 && String(item.tagName).toLowerCase() === 'style').slice(0, 120)) {
+    const css = serializedStyleText(node)
+    if (!css) continue
+    try { replaceSerializedStyleText(node, await inlineCssText(css, pageUrl, budget, loadAsset)) }
+    catch { /* unresolved URLs are removed by the server */ }
+  }
+
   // rrweb preserves inline <style> content separately from linked sheets.
   // Resolve those URLs against the page itself before server sanitization.
   for (const node of nodes.filter(item => item.type === 3 && item.isStyle && item.textContent).slice(0, 80)) {
-    try { node.textContent = stripEmbeddedFonts(await inlineCssText(String(node.textContent), pageUrl, budget)) }
+    try { node.textContent = await inlineCssText(String(node.textContent), pageUrl, budget, loadAsset) }
     catch { /* unresolved URLs are removed by the server */ }
   }
 
   // Inline style attributes can contain background-image and CSS variables
   // that never pass through a stylesheet node.
   for (const node of nodes.filter(item => item.type === 2 && String(item.attributes?.style || '').includes('url(')).slice(0, 160)) {
-    try { node.attributes.style = await inlineCssAssets(String(node.attributes.style), pageUrl, budget) }
+    try { node.attributes.style = await inlineCssAssets(String(node.attributes.style), pageUrl, budget, loadAsset) }
     catch { /* screenshot remains the visual fallback */ }
   }
 
@@ -316,10 +546,36 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
     const attrs = node.attributes || {}
     if (!attrs.src || String(attrs.src).startsWith('data:') || attrs.rr_dataURL || budget.remaining <= 0) continue
     try {
-      const response = await fetch(new URL(String(attrs.src), pageUrl).href, { credentials: 'include' })
-      const dataUrl = await responseDataUrl(response, Math.min(2_000_000, budget.remaining))
-      if (dataUrl) { attrs.rr_dataURL = dataUrl; budget.remaining -= Math.ceil(dataUrl.length * .75) }
+      const dataUrl = await loadAsset(new URL(String(attrs.src), pageUrl).href, Math.min(6_000_000, budget.remaining))
+      if (dataUrl) { attrs.rr_dataURL = dataUrl; budget.remaining -= decodedDataUrlSize(dataUrl) }
     } catch { /* screenshot remains the visual fallback */ }
+  }
+
+  // SVG icon systems commonly reference an external sprite through
+  // <use href="/icons.svg#name">. A static replay cannot request that file,
+  // so embed the sprite and retain its fragment identifier.
+  for (const node of nodes.filter(item => item.type === 2 && String(item.tagName).toLowerCase() === 'use').slice(0, 80)) {
+    const attrs = node.attributes || {}
+    const raw = String(attrs.href || attrs['xlink:href'] || '')
+    if (!raw || raw.startsWith('#') || raw.startsWith('data:') || budget.remaining <= 0) continue
+    try {
+      const source = new URL(raw, pageUrl)
+      const fragment = source.hash
+      source.hash = ''
+      const cacheKey = source.href
+      let dataUrl = svgSprites.get(cacheKey)
+      if (dataUrl === undefined) {
+        dataUrl = await loadAsset(cacheKey, Math.min(6_000_000, budget.remaining))
+        if (!dataUrl?.toLowerCase().startsWith('data:image/svg+xml')) dataUrl = null
+        svgSprites.set(cacheKey, dataUrl)
+        if (dataUrl) budget.remaining -= decodedDataUrlSize(dataUrl)
+      }
+      if (!dataUrl) continue
+      const embedded = svgDataUrlWithFragment(dataUrl, `${cacheKey}${fragment}`)
+      if ('href' in attrs) attrs.href = embedded
+      if ('xlink:href' in attrs) attrs['xlink:href'] = embedded
+      if (!('href' in attrs) && !('xlink:href' in attrs)) attrs.href = embedded
+    } catch { /* old recordings retain the screenshot fallback */ }
   }
 
 
@@ -330,9 +586,8 @@ async function enrichSnapshot(snapshot: Record<string, any> | undefined, pageUrl
     const attrs = node.attributes || {}
     if (String(attrs.poster).startsWith('data:') || budget.remaining <= 0) continue
     try {
-      const response = await fetch(new URL(String(attrs.poster), pageUrl).href, { credentials: 'include' })
-      const dataUrl = await responseDataUrl(response, Math.min(2_000_000, budget.remaining))
-      if (dataUrl) { attrs.poster = dataUrl; budget.remaining -= Math.ceil(dataUrl.length * .75) }
+      const dataUrl = await loadAsset(new URL(String(attrs.poster), pageUrl).href, Math.min(6_000_000, budget.remaining))
+      if (dataUrl) { attrs.poster = dataUrl; budget.remaining -= decodedDataUrlSize(dataUrl) }
     } catch { /* the visible screenshot region remains the fallback */ }
   }
   return snapshot
@@ -357,9 +612,7 @@ async function uploadStep(data: Record<string, any>, domSnapshot: Record<string,
 }
 
 async function recordStep(data: Record<string, any>, snapshot: Record<string, any> | undefined, state: Recording, screenshotOverride?: string) {
-  const pageUrl = String(data.page_context?.url || '')
-  const enriched = state.mode === 'html' ? await enrichSnapshot(snapshot, pageUrl) : undefined
-  await uploadStep(data, enriched, screenshotOverride, state)
+  await uploadStep(data, snapshot, screenshotOverride, state)
   state.error = ''
   await persist(state); await notify(state)
 }
@@ -392,14 +645,23 @@ async function captureAndQueueStep(data: Record<string, any>, snapshot: Record<s
     throw error
   }
 
-  // The page can be released as soon as its pixels are captured. DOM asset
-  // enrichment, upload and AI work continue serially in the background.
+  // The page can be released as soon as its pixels are captured. Asset
+  // enrichment and upload continue in the background and never hold the
+  // user's original click behind missing or slow page resources.
   state.steps += 1
   if (state.stepQuotaRemaining !== undefined) state.stepQuotaRemaining = Math.max(0, state.stepQuotaRemaining - 1)
   state.capturing = false; state.phase = ''
   await persist(state); await notify(state)
   const synchronizedSnapshot = state.mode === 'html' ? (captured.snapshot || snapshot) : undefined
-  const task = queue.then(() => recordStep(data, synchronizedSnapshot, state, captured.screenshot))
+  // Start immediately so same-page reads are dispatched before the replayed
+  // click can navigate, but do not await them in the message response.
+  const enrichment = state.mode === 'html'
+    ? enrichSnapshot(synchronizedSnapshot, String(data.page_context?.url || ''), sourceTabId).catch(error => {
+      console.warn('DocFlow snapshot enrichment:', error)
+      return synchronizedSnapshot
+    })
+    : Promise.resolve(undefined)
+  const task = queue.then(async () => recordStep(data, await enrichment, state, captured.screenshot))
   queue = task.catch(async error => {
     console.warn('DocFlow step upload:', error)
     state.steps = Math.max(0, state.steps - 1)
@@ -432,8 +694,7 @@ async function pause() {
 
 async function demoEditorUrl(state: Recording) {
   const auth = await connectedCredentials()
-  const apiUrl = new URL(state.api)
-  return `${auth?.web || state.web || `${apiUrl.protocol}//${apiUrl.hostname}:5173`}/demos/${state.demoId}`
+  return `${auth?.web || state.web || configuredWebUrl}/demos/${state.demoId}`
 }
 
 async function completeRecording(state: Recording, open: boolean) {
@@ -482,7 +743,14 @@ async function stop(open = true) {
     const finalTab = await chrome.tabs.get(state.activeTabId)
     if (finalTab.active) {
       const final = await chrome.tabs.sendMessage(state.activeTabId, { type: 'CAPTURE_FINAL' })
-      if (final?.data) await uploadStep(final.data, state.mode === 'html' ? final.snapshot : undefined, await captureClean(state.activeTabId), state)
+      if (final?.data) {
+        let finalSnapshot = state.mode === 'html' ? final.snapshot : undefined
+        if (finalSnapshot) {
+          try { finalSnapshot = await enrichSnapshot(finalSnapshot, String(final.data.page_context?.url || finalTab.url || ''), state.activeTabId) }
+          catch (error) { console.warn('DocFlow final snapshot enrichment:', error) }
+        }
+        await uploadStep(final.data, finalSnapshot, await captureClean(state.activeTabId), state)
+      }
     }
   } catch (error) { console.warn('DocFlow final slide:', error) }
   try {
@@ -687,7 +955,7 @@ async function selectTargetFromWeb(demoId: string, sender: chrome.runtime.Messag
   const target: RecordingTarget = {
     demoId: demo.id, organizationId: demo.organization_id, title: demo.title,
     contentLocale: demo.content_locale || browserLocale(), aiEnabled: Boolean(demo.ai_enabled),
-    aiContext: String(demo.ai_context || ''),
+    aiContext: String(demo.ai_context || ''), createdAt: new Date().toISOString(),
   }
   const switched = await fetch(`${auth.api}/api/organizations/${target.organizationId}/switch`, {
     method: 'POST', headers: { Authorization: `Bearer ${auth.token}` },
@@ -702,14 +970,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'CONNECT_FROM_WEB') return connectFromWeb(String(message.code || ''), sender)
     if (message.type === 'PING_FROM_WEB') {
       requireWebSender(sender)
+      const identity = packageIdentity()
+      const update = await checkExtensionUpdate(true)
       const auth = await connectedCredentials()
-      if (!auth?.token) return { installed: true, connected: false }
+      if (!auth?.token) return { installed: true, connected: false, ...identity, update }
       const response = await fetch(`${auth.api}/api/extension/config`, { headers: { Authorization: `Bearer ${auth.token}` } }).catch(() => null)
-      if (response?.ok) return { installed: true, connected: true }
+      if (response?.ok) return { installed: true, connected: true, ...identity, update }
       if (response?.status === 401) await chrome.storage.local.remove(['credentials', 'pendingTarget'])
-      return { installed: true, connected: false }
+      return { installed: true, connected: false, ...identity, update }
     }
+    if (message.type === 'CHECK_EXTENSION_UPDATE') return checkExtensionUpdate(Boolean(message.force))
     if (message.type === 'SET_TARGET_FROM_WEB') return selectTargetFromWeb(String(message.demoId || ''), sender)
+    if (message.type === 'CLEAR_RECORDING_TARGET') {
+      await chrome.storage.local.remove('pendingTarget')
+      return { ok: true }
+    }
     if (message.type === 'GET_QUOTA_CAPABILITIES') {
       const auth = await connectedCredentials()
       if (!auth) throw new Error('Extension connection expired')
@@ -721,9 +996,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return loadQuotaSummary(auth, String(message.organizationId || ''))
     }
     if (message.type === 'SAVE_RECORDING_PREFERENCES') {
+      const stored = await chrome.storage.local.get('recordingPreferences')
+      const current = (stored.recordingPreferences || {}) as Record<string, unknown>
       await chrome.storage.local.set({ recordingPreferences: {
-        aiEnabled: Boolean(message.aiEnabled),
-        contentLocale: (message.contentLocale || browserLocale()) as Locale,
+        ...current,
+        ...(typeof message.aiEnabled === 'boolean' ? { aiEnabled: message.aiEnabled } : {}),
+        ...(message.contentLocale ? { contentLocale: message.contentLocale as Locale } : {}),
+        ...(typeof message.privacyEnabled === 'boolean' ? { privacyEnabled: message.privacyEnabled } : {}),
       } })
       return { ok: true }
     }
@@ -735,8 +1014,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const diagnostics = await recordingDiagnostics(tab)
       await sendToRecordableTab(tab.id, {
         type: 'SHOW_RECORDING_SETUP', demoId: message.demoId || undefined,
+        targetTitle: String(message.targetTitle || ''),
         aiAvailable: Boolean(message.aiAvailable), defaultMode: message.defaultMode || 'html',
-        defaultAI: Boolean(message.defaultAI), spaces: Array.isArray(message.spaces) ? message.spaces : [],
+        defaultAI: Boolean(message.defaultAI), defaultPrivacy: Boolean(message.defaultPrivacy), spaces: Array.isArray(message.spaces) ? message.spaces : [],
         organizationId: message.organizationId || '', lockOrganization: Boolean(message.lockOrganization),
         diagnostics,
         locale: message.locale || browserLocale(),
@@ -753,6 +1033,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const aiContext = String(message.aiContext || '').trim().slice(0, 500)
       const uiLocale = (message.locale || browserLocale()) as Locale
       const organizationId = String(message.organizationId || '')
+      const runtimeConfig = await loadExtensionRuntimeConfig(auth)
       await switchRecordingOrganization(auth, organizationId)
       let demoId = String(message.demoId || '')
       const live = await loadCapabilities(auth, organizationId, demoId)
@@ -770,7 +1051,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         sessionId = (await createRecordingSession(auth, demoId, message.mode || 'html', Boolean(message.aiEnabled), autoCreated)).id
         if (!autoCreated) await updateDemoAISettings(auth, demoId, contentLocale, aiContext)
-        await begin(demoId, sessionId, message.mode, Boolean(message.aiEnabled), tab.id, message.locale || browserLocale(), contentLocale, autoCreated, live)
+        await begin(demoId, sessionId, message.mode, Boolean(message.aiEnabled), Boolean(message.privacyEnabled), runtimeConfig.capture_feedback_duration_ms, tab.id, message.locale || browserLocale(), contentLocale, autoCreated, live)
       } catch (error) {
         if (sessionId) {
           await fetch(`${auth.api}/api/recordings/sessions/${sessionId}/cancel`, {
@@ -784,7 +1065,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         throw error
       }
       await chrome.storage.local.remove('pendingTarget')
-      return { ok: true, demoId, sessionId, autoCreated }
+      return { ok: true, demoId, sessionId, autoCreated, captureFeedbackDurationMs: runtimeConfig.capture_feedback_duration_ms }
     }
     if (message.type === 'ATTACH_CURRENT_TAB') {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -798,12 +1079,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'STATUS') {
       const state = await restore()
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale, trackedTabs: state.trackedTabIds.length, currentTabTracked: Boolean(tab?.id && state.trackedTabIds.includes(tab.id)) } : { active: false, steps: 0, trackedTabs: 0, currentTabTracked: false }
+      return state ? { active: state.active, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, demoId: state.demoId, mode: state.mode, aiEnabled: state.aiEnabled, privacyEnabled: state.privacyEnabled, captureFeedbackDurationMs: state.captureFeedbackDurationMs, locale: state.locale, contentLocale: state.contentLocale, trackedTabs: state.trackedTabIds.length, currentTabTracked: Boolean(tab?.id && state.trackedTabIds.includes(tab.id)) } : { active: false, steps: 0, trackedTabs: 0, currentTabTracked: false }
     }
     if (message.type === 'IS_RECORDING') {
       const state = await restore()
       return state?.active && Boolean(sender.tab?.id && state.trackedTabIds.includes(sender.tab.id))
-        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, locale: state.locale, contentLocale: state.contentLocale, trackedTabs: state.trackedTabIds.length }
+        ? { active: true, paused: state.paused, capturing: state.capturing, phase: state.phase, steps: state.steps, mode: state.mode, aiEnabled: state.aiEnabled, privacyEnabled: state.privacyEnabled, captureFeedbackDurationMs: state.captureFeedbackDurationMs, locale: state.locale, contentLocale: state.contentLocale, trackedTabs: state.trackedTabIds.length }
         : { active: false }
     }
     if (message.type === 'MANUAL_STEP' && sender.tab?.id) {
@@ -871,3 +1152,8 @@ chrome.tabs.onRemoved.addListener(async tabId => {
   if (state.activeTabId === tabId) state.activeTabId = state.trackedTabIds[state.trackedTabIds.length - 1]
   await persist(state); await notify(state)
 })
+
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === UPDATE_ALARM) void checkExtensionUpdate(true) })
+chrome.runtime.onInstalled.addListener(() => { void initializeUpdateChecks() })
+chrome.runtime.onStartup.addListener(() => { void initializeUpdateChecks() })
+void initializeUpdateChecks()

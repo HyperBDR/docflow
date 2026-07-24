@@ -246,6 +246,26 @@ class ExtensionToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class ExtensionRelease(Base):
+    __tablename__ = "extension_releases"
+    __table_args__ = (UniqueConstraint("channel", "version", name="uq_extension_release_channel_version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    channel: Mapped[str] = mapped_column(String(20), default="stable", index=True)
+    version: Mapped[str] = mapped_column(String(40), index=True)
+    minimum_version: Mapped[str] = mapped_column(String(40), default="0.0.0")
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    release_notes: Mapped[str] = mapped_column(Text, default="")
+    storage_key: Mapped[str] = mapped_column(String(1500))
+    filename: Mapped[str] = mapped_column(String(320))
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class Demo(Base):
     __tablename__ = "demos"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
@@ -296,6 +316,7 @@ class Step(Base):
     position: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(200), default="")
     body: Mapped[str] = mapped_column(Text, default="")
+    hotspot_mode: Mapped[str] = mapped_column(String(20), default="independent")
     asset_key: Mapped[str] = mapped_column(String(500))
     render_mode: Mapped[str] = mapped_column(String(20), default="image")
     dom_snapshot_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -659,6 +680,16 @@ class GeneralPlatformSettings(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
     help_url: Mapped[str] = mapped_column(String(1000), default="")
     upgrade_url: Mapped[str] = mapped_column(String(1000), default="")
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class ExtensionCaptureSettings(Base):
+    """Runtime-configurable browser-extension capture experience."""
+    __tablename__ = "extension_capture_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    feedback_duration_ms: Mapped[int] = mapped_column(Integer, default=1100)
     updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

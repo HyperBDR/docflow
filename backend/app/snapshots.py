@@ -18,9 +18,16 @@ BLOCKED_ATTRIBUTES = {"srcdoc", "nonce", "integrity", "ping", "autofocus"}
 CSS_IMPORT = re.compile(r"@import\s+[^;]+;?", re.I)
 CSS_URL = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
 CSS_EXPRESSION = re.compile(r"expression\s*\([^)]*\)", re.I)
-SENSITIVE_TEXT = re.compile(
-    r"(?i)(bearer\s+[a-z0-9._~+\-/]+=*|api[_-]?key\s*[:=]\s*\S+|"
-    r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}|(?<!\d)1[3-9]\d{9}(?!\d))"
+CSS_FONT_DATA = re.compile(
+    r"^data:(?:font/(?:woff2?|ttf|otf)|application/(?:font-woff2?|x-font-woff2?|x-font-ttf|x-font-truetype|x-font-otf|vnd\.ms-fontobject));base64,[a-z0-9+/=\s]+$",
+    re.I,
+)
+SECRET_TEXT = re.compile(
+    r"(?i)(bearer\s+[a-z0-9._~+\-/]+=*|"
+    r"(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*\S+)"
+)
+PERSONAL_TEXT = re.compile(
+    r"(?i)([a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}|(?<!\d)1[3-9]\d{9}(?!\d))"
 )
 
 
@@ -58,7 +65,7 @@ def sanitize_css(value: str) -> str:
 
     def replace_url(match: re.Match) -> str:
         target = match.group(2).strip()
-        if target.startswith("data:image/"):
+        if target.lower().startswith("data:image/") or CSS_FONT_DATA.fullmatch(target):
             return f'url("{target}")'
         return "url(\"\")"
 
@@ -69,6 +76,11 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
     if not isinstance(payload, dict) or not isinstance(payload.get("snapshot"), dict):
         raise SnapshotError("snapshot root is missing")
     result = deepcopy(payload)
+    # Older extension versions always masked regular inputs and did not send
+    # this flag. Preserve that behavior while allowing new recordings to opt
+    # out explicitly.
+    privacy_masking = payload.get("privacy_masking") is not False
+    result["privacy_masking"] = privacy_masking
     warnings: list[str] = []
     count = 0
 
@@ -107,7 +119,13 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
                 if name.startswith("on") or name in BLOCKED_ATTRIBUTES:
                     continue
                 if name in URL_ATTRIBUTES:
-                    allowed = safe_url(value, href=name == "href")
+                    # Legacy SVG sprites still use xlink:href="#symbol". It is
+                    # a same-document reference, not a network request, and
+                    # must survive sanitization together with the captured
+                    # <symbol>. External xlink URLs remain blocked unless the
+                    # extension has already converted them to a data image.
+                    local_svg_fragment = tag == "use" and name == "xlink:href" and value.strip().startswith("#")
+                    allowed = value.strip() if local_svg_fragment else safe_url(value, href=name == "href")
                     if allowed is not None:
                         cleaned[original_name] = allowed
                     elif value:
@@ -131,10 +149,12 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
                     allowed = safe_url(value)
                     if allowed is not None:
                         cleaned[original_name] = allowed
-                elif name == "value" and tag == "input" and str(attrs.get("type", "")).lower() == "password":
+                elif name == "value" and privacy_masking and tag in {"input", "textarea", "select", "option"}:
                     cleaned[original_name] = ""
                 else:
-                    cleaned[original_name] = SENSITIVE_TEXT.sub("[REDACTED]", value)
+                    cleaned[original_name] = PERSONAL_TEXT.sub(
+                        "[REDACTED]", SECRET_TEXT.sub("[REDACTED]", value)
+                    ) if privacy_masking else value
             if tag == "form":
                 cleaned.pop("action", None)
                 cleaned["data-docflow-form"] = "disabled"
@@ -142,7 +162,14 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
             parent_tag = tag
         elif node_type == 3:
             text = str(node.get("textContent", ""))
-            node["textContent"] = sanitize_css(text) if node.get("isStyle") or parent_tag == "style" else SENSITIVE_TEXT.sub("[REDACTED]", text)
+            if node.get("isStyle") or parent_tag == "style":
+                node["textContent"] = sanitize_css(text)
+            elif privacy_masking and parent_tag in {"textarea", "option"}:
+                node["textContent"] = ""
+            else:
+                node["textContent"] = PERSONAL_TEXT.sub(
+                    "[REDACTED]", SECRET_TEXT.sub("[REDACTED]", text)
+                ) if privacy_masking else text
 
         children = node.get("childNodes")
         if isinstance(children, list):
@@ -160,6 +187,32 @@ def sanitize_snapshot(payload: dict) -> tuple[dict, list[str]]:
     result["snapshot"] = root
     result["version"] = 1
     return result, list(dict.fromkeys(warnings))[:100]
+
+
+def snapshot_has_renderable_body(payload: dict) -> bool:
+    """Whether a sanitized snapshot contains visible body structure or text."""
+    root = payload.get("snapshot") if isinstance(payload, dict) else None
+    if not isinstance(root, dict):
+        return False
+    stack = [root]
+    body = None
+    while stack:
+        node = stack.pop()
+        if node.get("type") == 2 and str(node.get("tagName", "")).lower() == "body":
+            body = node
+            break
+        stack.extend(child for child in node.get("childNodes", []) if isinstance(child, dict))
+    if not body:
+        return False
+    descendants = [child for child in body.get("childNodes", []) if isinstance(child, dict)]
+    while descendants:
+        node = descendants.pop()
+        if node.get("type") == 2:
+            return True
+        if node.get("type") == 3 and str(node.get("textContent", "")).strip():
+            return True
+        descendants.extend(child for child in node.get("childNodes", []) if isinstance(child, dict))
+    return False
 
 
 def decode_snapshot(content: bytes) -> dict:
@@ -201,6 +254,8 @@ def sanitize_page_context(value: dict) -> dict:
     if not isinstance(value, dict):
         return {}
     result: dict = {}
+    privacy_masking = value.get("privacy_masking") is not False
+    result["privacy_masking"] = privacy_masking
     if value.get("manual_capture") is True:
         result["manual_capture"] = True
     if value.get("sensitive_form") is True:
@@ -208,7 +263,10 @@ def sanitize_page_context(value: dict) -> dict:
     for key in ["page_title", "target_text", "target_role", "target_aria", "nearby_text", "visible_text"]:
         if key in value:
             limit = 6000 if key == "visible_text" else 1500
-            result[key] = SENSITIVE_TEXT.sub("[REDACTED]", str(value[key]))[:limit]
+            text = str(value[key])
+            result[key] = (PERSONAL_TEXT.sub(
+                "[REDACTED]", SECRET_TEXT.sub("[REDACTED]", text)
+            ) if privacy_masking else text)[:limit]
     if value.get("url"):
         try:
             parts = urlsplit(str(value["url"]))

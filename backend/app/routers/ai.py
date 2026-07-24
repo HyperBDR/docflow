@@ -62,10 +62,14 @@ def job_out(job: AIJob, db: Session) -> AIJobOut:
     result = dict(job.result or {})
     if job.status.value == "complete" and "changes" not in result:
         result["changes"] = _legacy_change_report(db, job, result)
+    has_patch = bool(job.applied_patch and any(job.applied_patch.get(key) for key in ["demo", "steps", "hotspots"]))
+    has_inverse = bool(job.inverse_patch and any(job.inverse_patch.get(key) for key in ["demo", "steps", "hotspots"]))
+    reverted = bool(result.get("reverted"))
     return AIJobOut(
         id=job.id, demo_id=job.demo_id, step_id=job.step_id, status=job.status.value,
         progress=job.progress, model=job.model, result=result, error=job.error, error_code=job.error_code,
-        can_revert=bool(job.inverse_patch and any(job.inverse_patch.get(key) for key in ["demo", "steps", "hotspots"])),
+        can_revert=has_patch and has_inverse and not reverted,
+        can_reapply=has_patch and reverted,
     )
 
 
@@ -113,13 +117,16 @@ def revert_ai_job(job_id: str, db: Session = Depends(get_db), user: User = Depen
     job = db.get(AIJob, job_id)
     if not job or job.owner_id != user.id:
         raise HTTPException(status_code=404, detail="AI job not found")
+    result = dict(job.result or {})
     applied = job.applied_patch or {}
     inverse = job.inverse_patch or {}
+    if job.status.value != "complete" or result.get("reverted") or not any(inverse.get(key) for key in ["demo", "steps", "hotspots"]):
+        raise HTTPException(status_code=409, detail="AI changes are not in a revertible state")
     conflicts: list[str] = []
     demo = db.get(Demo, job.demo_id)
     if demo:
         for field, old_value in inverse.get("demo", {}).items():
-            if getattr(demo, field) == applied.get("demo", {}).get(field):
+            if field not in (demo.manual_fields or []) and getattr(demo, field) == applied.get("demo", {}).get(field):
                 setattr(demo, field, old_value)
             else:
                 conflicts.append(f"demo.{field}")
@@ -128,7 +135,7 @@ def revert_ai_job(job_id: str, db: Session = Depends(get_db), user: User = Depen
         if not step:
             continue
         for field, old_value in values.items():
-            if getattr(step, field) == applied.get("steps", {}).get(step_id, {}).get(field):
+            if field not in (step.manual_fields or []) and getattr(step, field) == applied.get("steps", {}).get(step_id, {}).get(field):
                 setattr(step, field, old_value)
             else:
                 conflicts.append(f"step.{step_id}.{field}")
@@ -137,11 +144,107 @@ def revert_ai_job(job_id: str, db: Session = Depends(get_db), user: User = Depen
         if not hotspot:
             continue
         for field, old_value in values.items():
-            if getattr(hotspot, field) == applied.get("hotspots", {}).get(hotspot_id, {}).get(field):
+            if field not in (hotspot.manual_fields or []) and getattr(hotspot, field) == applied.get("hotspots", {}).get(hotspot_id, {}).get(field):
                 setattr(hotspot, field, old_value)
             else:
                 conflicts.append(f"hotspot.{hotspot_id}.{field}")
-    job.inverse_patch = {}
-    job.result = {**(job.result or {}), "reverted": True, "revert_conflicts": conflicts}
+    job.result = {**result, "reverted": True, "revert_conflicts": conflicts}
+    db.commit()
+    return job_out(job, db)
+
+
+def _reported_before(job: AIJob, target: str, target_id: str | None, field: str):
+    changes = (job.result or {}).get("changes")
+    if not isinstance(changes, dict):
+        return None, False
+    if target == "demo":
+        change = ((changes.get("demo") or {}).get("fields") or {}).get(field)
+        return (change.get("before"), True) if isinstance(change, dict) and "before" in change else (None, False)
+    for item in changes.get("steps") or []:
+        if not isinstance(item, dict):
+            continue
+        if target == "step":
+            if str(item.get("id")) != target_id:
+                continue
+            change = (item.get("fields") or {}).get(field)
+            return (change.get("before"), True) if isinstance(change, dict) and "before" in change else (None, False)
+        if target != "hotspot":
+            continue
+        for hotspot in item.get("hotspots") or []:
+            if not isinstance(hotspot, dict) or str(hotspot.get("id")) != target_id:
+                continue
+            change = hotspot.get(field)
+            return (change.get("before"), True) if isinstance(change, dict) and "before" in change else (None, False)
+    return None, False
+
+
+@router.post("/ai/jobs/{job_id}/reapply", response_model=AIJobOut)
+def reapply_ai_job(job_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    job = db.get(AIJob, job_id)
+    if not job or job.owner_id != user.id:
+        raise HTTPException(status_code=404, detail="AI job not found")
+    result = dict(job.result or {})
+    applied = job.applied_patch or {}
+    previous_inverse = job.inverse_patch or {}
+    if job.status.value != "complete" or not result.get("reverted") or not any(applied.get(key) for key in ["demo", "steps", "hotspots"]):
+        raise HTTPException(status_code=409, detail="AI changes are not in a reapplyable state")
+
+    inverse: dict = {"demo": {}, "steps": {}, "hotspots": {}}
+    conflicts: list[str] = []
+    applied_count = 0
+    demo = db.get(Demo, job.demo_id)
+    if demo:
+        for field, ai_value in applied.get("demo", {}).items():
+            expected = previous_inverse.get("demo", {}).get(field)
+            known = field in previous_inverse.get("demo", {})
+            if not known:
+                expected, known = _reported_before(job, "demo", None, field)
+            if known and field not in (demo.manual_fields or []) and getattr(demo, field) == expected:
+                inverse["demo"][field] = getattr(demo, field)
+                setattr(demo, field, ai_value)
+                applied_count += 1
+            else:
+                conflicts.append(f"demo.{field}")
+
+    for step_id, values in applied.get("steps", {}).items():
+        step = db.get(Step, step_id)
+        if not step:
+            continue
+        for field, ai_value in values.items():
+            expected = previous_inverse.get("steps", {}).get(step_id, {}).get(field)
+            known = field in previous_inverse.get("steps", {}).get(step_id, {})
+            if not known:
+                expected, known = _reported_before(job, "step", step_id, field)
+            if known and field not in (step.manual_fields or []) and getattr(step, field) == expected:
+                inverse["steps"].setdefault(step_id, {})[field] = getattr(step, field)
+                setattr(step, field, ai_value)
+                applied_count += 1
+            else:
+                conflicts.append(f"step.{step_id}.{field}")
+
+    for hotspot_id, values in applied.get("hotspots", {}).items():
+        hotspot = db.get(Hotspot, hotspot_id)
+        if not hotspot:
+            continue
+        for field, ai_value in values.items():
+            expected = previous_inverse.get("hotspots", {}).get(hotspot_id, {}).get(field)
+            known = field in previous_inverse.get("hotspots", {}).get(hotspot_id, {})
+            if not known and field == "tooltip":
+                before_content, reported = _reported_before(job, "hotspot", hotspot_id, field)
+                current = dict(hotspot.tooltip or {})
+                known = reported and current.get("content", "") == before_content
+                expected = current if known else None
+            if known and field not in (hotspot.manual_fields or []) and getattr(hotspot, field) == expected:
+                inverse["hotspots"].setdefault(hotspot_id, {})[field] = getattr(hotspot, field)
+                setattr(hotspot, field, ai_value)
+                applied_count += 1
+            else:
+                conflicts.append(f"hotspot.{hotspot_id}.{field}")
+
+    if applied_count:
+        job.inverse_patch = inverse
+        result["reverted"] = False
+    result["reapply_conflicts"] = conflicts
+    job.result = result
     db.commit()
     return job_out(job, db)

@@ -5,6 +5,7 @@ import { isConfiguredWebPage } from './config'
 import { quotaAllowed, quotaEndedText, quotaMessage, type WorkspaceCapabilities, type WorkspaceQuotaSummary } from './quota'
 import { aiSettingsStyles, aiSettingsView, aiText } from './ai-settings'
 import { installCaptureGuard, replayCapturedAction } from './capture-transaction'
+import { CAPTURE_RESPONSE_TIMEOUT_MS, DEFAULT_CAPTURE_FEEDBACK_DURATION_MS, captureFeedbackDuration, captureSuccessDelay } from './capture-feedback'
 
 type RecorderState = {
   active?: boolean
@@ -14,6 +15,8 @@ type RecorderState = {
   steps?: number
   mode?: RecordingMode
   aiEnabled?: boolean
+  privacyEnabled?: boolean
+  captureFeedbackDurationMs?: number
   error?: string
   locale?: Locale
   contentLocale?: Locale
@@ -23,9 +26,12 @@ let active = false
 let paused = false
 let capturing = false
 let phase: '' | 'capturing' | 'uploading' = ''
+let captureFeedback: '' | 'capturing' | 'success' = ''
 let steps = 0
 let mode: RecordingMode = 'html'
 let aiEnabled = false
+let privacyEnabled = false
+let captureFeedbackDurationMs = DEFAULT_CAPTURE_FEEDBACK_DURATION_MS
 let locale: Locale = browserLocale()
 let contentLocale: Locale = locale
 let currentSnapshot: CapturedSnapshot | null = null
@@ -47,6 +53,21 @@ let detachedRecorderUi: { node: HTMLElement; parent: Node; next: ChildNode | nul
 let restoreSensitiveValues: (() => void) | null = null
 let lastPointer = { x: Math.max(0, innerWidth / 2), y: Math.max(0, innerHeight / 2) }
 const captureGuard = installCaptureGuard()
+
+function captureBusy() {
+  return capturing || captureFeedback !== ''
+}
+
+function delay(milliseconds: number) {
+  return new Promise(resolve => window.setTimeout(resolve, milliseconds))
+}
+
+function recorderMessage<T = any>(message: Record<string, unknown>, timeoutMs = CAPTURE_RESPONSE_TIMEOUT_MS): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(tr(locale, 'captureTimeout'))), timeoutMs)
+    chrome.runtime.sendMessage(message).then(resolve, reject).finally(() => window.clearTimeout(timeout))
+  })
+}
 
 function eventId() {
   return typeof crypto.randomUUID === 'function'
@@ -107,9 +128,11 @@ function selectableTarget(raw: Element | null): HTMLElement | null {
 
 function showRecordingSetup(message: {
   demoId?: string
+  targetTitle?: string
   aiAvailable?: boolean
   defaultMode?: RecordingMode
   defaultAI?: boolean
+  defaultPrivacy?: boolean
   spaces?: { id: string; name: string; kind: 'personal' | 'team' }[]
   organizationId?: string
   lockOrganization?: boolean
@@ -135,6 +158,7 @@ function showRecordingSetup(message: {
   setupHost = host
   let selectedMode: RecordingMode = message.defaultMode || 'html'
   let selectedAI = Boolean(message.aiAvailable && message.defaultAI)
+  const selectedPrivacy = Boolean(message.defaultPrivacy)
   let capabilities: WorkspaceCapabilities | null = null
   let quotaSummary: WorkspaceQuotaSummary | null = null
   let quotaSummaryError = ''
@@ -173,6 +197,7 @@ function showRecordingSetup(message: {
     .config-row{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(210px,.75fr);align-items:center;gap:12px;padding-top:2px}.space-field{height:48px;min-width:0;margin:0;padding:0 9px 4px;border:1px solid #d9dee8;border-radius:10px}.space-field legend{margin-left:5px;padding:0 6px;color:#69758a;background:#fff;font-size:10px;font-weight:750;line-height:13px}.space-dropdown{position:relative;height:100%}.space-trigger{width:100%;height:100%;min-height:30px;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:8px;padding:1px;border:0;color:#344054;background:#fff;font:600 12px inherit;text-align:left;cursor:pointer}.space-trigger:disabled{cursor:not-allowed;opacity:.7}.space-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#5c52df;background:#eeedff}.space-icon svg{width:16px;height:16px}.space-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chevron{color:#8a94a6;font-size:11px}.space-menu{position:absolute;z-index:4;left:-9px;right:-9px;bottom:calc(100% + 10px);max-height:210px;overflow:auto;padding:6px;border:1px solid #dfe3eb;border-radius:11px;background:#fff;box-shadow:0 14px 35px #1820332e}.space-menu[hidden]{display:none}.space-option{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px;padding:7px;border:0;border-radius:8px;color:#344054;background:transparent;text-align:left;cursor:pointer}.space-option:hover,.space-option.active{background:#f3f1ff}.space-option.group-start{margin-top:5px;padding-top:10px;border-top:1px solid #edf0f4;border-radius:0 0 8px 8px}.space-option div{min-width:0}.space-option strong,.space-option small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.space-option strong{font-size:11px}.space-option small{margin-top:2px;color:#8a94a6;font-size:9px}
     .ai-setting-button{width:100%;height:48px;min-width:0;display:grid;grid-template-columns:30px minmax(0,1fr) 16px;align-items:center;gap:8px;padding:6px 9px;border:1px solid #dedbf9;border-radius:10px;color:#303a4d;background:linear-gradient(135deg,#fbfaff,#f6f4ff);font-family:inherit;text-align:left;cursor:pointer;transition:border-color .18s,box-shadow .18s,transform .18s}.ai-setting-button:hover{border-color:#aaa3f3;box-shadow:0 7px 18px #635bff12;transform:translateY(-1px)}.ai-setting-button.blocked{border-color:#e4a642;background:linear-gradient(135deg,#fffdf8,#fff6e6)}.ai-setting-button.loading{border-color:#dfe3eb;background:#fafbfc}.ai-icon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:#6658e8;background:#eae7ff}.ai-icon svg{width:16px;height:16px}.ai-setting-button.blocked .ai-icon{color:#a96913;background:#ffedc9}.ai-button-copy{min-width:0;display:flex;align-items:center;gap:7px}.ai-button-copy strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px}.ai-status-tag{flex:0 0 auto;padding:2px 6px;border-radius:999px;color:#69758a;background:#e9edf3;font-size:8px;font-style:normal;font-weight:800;line-height:1.35;letter-spacing:.035em}.ai-status-tag.enabled{color:#4d43ce;background:#e7e4ff}.ai-setting-button.blocked .ai-status-tag{color:#925c0c;background:#ffebc4}.ai-button-chevron{color:#8b94a5;font-size:17px;text-align:right}
     .quota-note{display:flex;align-items:flex-start;gap:8px;margin-top:-7px;padding:10px 12px;border:1px solid #ead9a3;border-radius:10px;color:#72581e;background:#fffaf0;font-size:11px;font-weight:650;line-height:1.45;white-space:pre-line}.quota-note i{width:7px;height:7px;flex:0 0 auto;margin-top:4px;border-radius:50%;background:#d89a24;box-shadow:0 0 0 4px #d89a2418}
+    .recording-target{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;border:1px solid #ddd9ff;border-radius:11px;background:linear-gradient(135deg,#fbfaff,#f4f2ff)}.recording-target>span{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;color:#5a50dc;background:#e7e4ff;font-size:18px}.recording-target>div{min-width:0}.recording-target small,.recording-target strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recording-target small{margin-bottom:2px;color:#7b759a;font-size:9px;font-weight:750}.recording-target strong{font-size:11.5px}.recording-target button{padding:6px 9px;border:1px solid #d5d0ff;border-radius:8px;color:#574dcc;background:#fff;font:700 9.5px inherit;cursor:pointer;white-space:nowrap}.recording-target button:hover{background:#eeebff}
     .actions{display:flex;justify-content:flex-end;gap:9px;padding:16px 32px 22px;border-top:1px solid #edf0f4}.btn{min-width:106px;padding:11px 16px;border:1px solid #d8dde7;border-radius:10px;background:#fff;color:#38445a;font:600 12px inherit;cursor:pointer}.btn.primary{border-color:#635bff;background:#635bff;color:#fff}.btn:hover{filter:brightness(.98)}
     .tutorial{padding:6px 26px 24px}.progress{display:flex;gap:6px;margin:0 0 19px}.progress i{height:4px;flex:1;border-radius:4px;background:#e5e7ec}.progress i.done{background:#635bff}.step-card{min-height:205px;display:grid;place-items:center;align-content:center;gap:14px;padding:28px;border:1px solid #e2e5ec;border-radius:16px;text-align:center;background:linear-gradient(145deg,#fafaff,#f5f6fa);animation:enter .25s ease}.step-icon{width:60px;height:60px;display:grid;place-items:center;border-radius:18px;color:#5b50e5;background:#eae8ff;box-shadow:0 8px 24px #635bff20}.step-icon svg{width:29px;height:29px}.step-card h3{margin:0;font-size:17px}.step-card p{max-width:450px}.step-number{color:#8a94a6;font-size:10px;font-weight:700;letter-spacing:.08em}@keyframes enter{from{opacity:.2;transform:translateY(5px)}}
     @media(max-width:620px){.modes,.config-row{grid-template-columns:1fr}.mode{min-height:178px}.diagnostics-host{width:calc(100% - 48px)}.diagnostic{grid-template-columns:32px 1fr}.diagnostic button{grid-column:2;width:max-content}.modal{border-radius:15px}.head,.body,.tutorial{padding-left:18px;padding-right:18px}.actions{padding-left:18px;padding-right:18px}}
@@ -182,7 +207,7 @@ function showRecordingSetup(message: {
   const diagnosticsView = shadow.querySelector<HTMLDivElement>('#diagnostics-view')!
 
   const startRecording = async () => {
-    const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, organizationId: selectedOrganizationId, mode: selectedMode, aiEnabled: selectedAI, aiContext, locale, contentLocale })
+    const result = await chrome.runtime.sendMessage({ type: 'START', demoId: message.demoId, organizationId: selectedOrganizationId, mode: selectedMode, aiEnabled: selectedAI, privacyEnabled: selectedPrivacy, aiContext, locale, contentLocale })
     if (result?.error) { window.alert(result.error); return }
     closeSetup()
     // START broadcasts state from the background, but that message can arrive
@@ -196,6 +221,8 @@ function showRecordingSetup(message: {
       steps: 0,
       mode: selectedMode,
       aiEnabled: selectedAI,
+      privacyEnabled: selectedPrivacy,
+      captureFeedbackDurationMs: captureFeedbackDuration(result?.captureFeedbackDurationMs),
       locale,
       contentLocale,
     })
@@ -251,7 +278,7 @@ function showRecordingSetup(message: {
     const resizeWarning = Boolean(diagnostics?.width && diagnostics?.height && (Math.abs(diagnostics.width - diagnostics.recommendedWidth) > 48 || Math.abs(diagnostics.height - diagnostics.recommendedHeight) > 48))
     const tabWarning = Boolean(diagnostics && diagnostics.tabCount >= 10)
     const diagnosticCards = `${resizeWarning ? `<article class="diagnostic"><span>${icon('resize')}</span><div><strong>${tr(locale, 'resizeForOptimalRecording')}</strong><p>${tr(locale, 'resizeDescription', { width: diagnostics!.width, height: diagnostics!.height, recommendedWidth: diagnostics!.recommendedWidth, recommendedHeight: diagnostics!.recommendedHeight })}</p></div><button id="resize-window">${tr(locale, 'resize')}</button></article>` : ''}${tabWarning ? `<article class="diagnostic"><span>${icon('tabs')}</span><div><strong>${tr(locale, 'tabsOpen', { count: diagnostics!.tabCount })}</strong><p>${tr(locale, 'tabsDescription')}</p></div><button id="close-tabs" ${diagnostics!.closableTabCount ? '' : 'disabled'}>${tr(locale, 'closeOtherTabs')}</button></article>` : ''}`
-    view.innerHTML = `<div class="head"><div class="brand"><i></i>DOCFLOW RECORDER</div><h2>${tr(locale, 'setupTitle')}</h2><p>${tr(locale, 'setupDescription')}</p></div><div class="body"><div class="modes">
+    view.innerHTML = `<div class="head"><div class="brand"><i></i>DOCFLOW RECORDER</div><h2>${tr(locale, 'setupTitle')}</h2><p>${tr(locale, 'setupDescription')}</p></div><div class="body">${message.demoId ? `<div class="recording-target"><span>↳</span><div><small>${tr(locale, 'continueRecording')}</small><strong>${escapeHtml(message.targetTitle || tr(locale, 'continueRecorder'))}</strong></div><button id="clear-recording-target">${tr(locale, 'startDifferentDemo')}</button></div>` : ''}<div class="modes">
       <button class="mode ${selectedMode === 'html' ? 'active' : ''}" data-mode="html"><span>${icon('clone')}</span><span><strong>${tr(locale, 'htmlTitle')}</strong><small>${tr(locale, 'htmlDescription')}</small></span><em class="badge">${tr(locale, 'htmlBadge')}</em></button>
       <button class="mode ${selectedMode === 'screenshot' ? 'active' : ''}" data-mode="screenshot"><span>${icon('image')}</span><span><strong>${tr(locale, 'screenshotDemoTitle')}</strong><small>${tr(locale, 'screenshotDescription')}</small></span></button></div>
       <div class="config-row"><fieldset class="space-field"><legend>${tr(locale, 'saveTo')}</legend><div class="space-dropdown"><button id="space-trigger" class="space-trigger" ${message.lockOrganization ? 'disabled' : ''}><span class="space-icon">${icon(selectedSpace?.kind === 'personal' ? 'user' : 'team')}</span><strong>${escapeHtml(selectedSpace?.name || tr(locale, 'noAvailableSpace'))}</strong><span class="chevron">⌄</span></button><div id="space-menu" class="space-menu" hidden>${spaceOptions}</div></div></fieldset>
@@ -259,6 +286,16 @@ function showRecordingSetup(message: {
       <div class="actions"><button class="btn" id="cancel">${tr(locale, 'cancel')}</button><button class="btn primary" id="continue" ${recordAllowed ? '' : 'disabled'} title="${escapeHtml(recordQuotaMessage)}">${tr(locale, 'startSetup')}</button></div>`
     diagnosticsView.innerHTML = diagnosticCards ? `<div class="diagnostics">${diagnosticCards}</div>` : ''
     view.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => { selectedMode = button.dataset.mode as RecordingMode; renderConfig() }))
+    view.querySelector<HTMLButtonElement>('#clear-recording-target')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement
+      button.disabled = true
+      const result = await chrome.runtime.sendMessage({ type: 'CLEAR_RECORDING_TARGET' })
+      if (result?.error) { window.alert(result.error); button.disabled = false; return }
+      message.demoId = undefined
+      message.targetTitle = ''
+      message.lockOrganization = false
+      void refreshQuota()
+    })
     diagnosticsView.querySelector<HTMLButtonElement>('#resize-window')?.addEventListener('click', async event => {
       const button = event.currentTarget as HTMLButtonElement
       button.disabled = true; button.textContent = tr(locale, 'resizing')
@@ -365,13 +402,13 @@ function ensureHud() {
     *{box-sizing:border-box}.lock{position:fixed;z-index:1;inset:0;display:none;pointer-events:auto;background:#0f172a17;cursor:progress;backdrop-filter:saturate(.92)}.lock.active{display:block}
     .outline{position:fixed;z-index:2;display:none;border:3px solid #6d5dfc;border-radius:8px;background:#6d5dfc18;box-shadow:0 0 0 2px #fff9;transition:all 55ms linear}
     .hud{position:fixed;z-index:3;left:20px;bottom:20px;display:flex;align-items:center;gap:5px;padding:6px;border:1px solid #ffffff24;border-radius:13px;background:#101725f2;color:#fff;box-shadow:0 14px 38px #0006;pointer-events:auto;backdrop-filter:blur(16px);user-select:none}
-    .capture-status{position:fixed;z-index:4;left:50%;top:18px;display:none;align-items:center;gap:10px;max-width:280px;padding:9px 13px 9px 9px;border:1px solid #d8d4ff;border-radius:13px;color:#383184;background:linear-gradient(135deg,#fffffff8,#f8f7fff5);box-shadow:0 14px 34px #1118272b,0 2px 8px #635bff1f,inset 0 1px #fff;font:750 11px/1.35 system-ui;transform:translateX(-50%);white-space:nowrap;backdrop-filter:blur(14px) saturate(1.12)}.capture-status.active{display:flex;animation:captureStatusIn .18s ease-out}.capture-status-icon{position:relative;width:26px;height:26px;flex:0 0 auto;display:grid;place-items:center;overflow:hidden;border:1px solid #dcd8ff;border-radius:9px;color:#6256e8;background:linear-gradient(145deg,#f0eeff,#e7e4ff);box-shadow:0 4px 10px #635bff20}.capture-status-icon svg{width:17px;height:17px;overflow:visible;animation:spin .78s linear infinite}.capture-status-icon circle{fill:none;stroke:#bdb7f5;stroke-width:2.1}.capture-status-icon path{fill:none;stroke:currentColor;stroke-width:2.35;stroke-linecap:round}.capture-status-icon i{position:absolute;width:4px;height:4px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #7568ed,0 0 9px #635bff;animation:processingPulse .72s ease-in-out infinite alternate}.capture-status-text{letter-spacing:.005em}
+    .capture-status{position:fixed;z-index:4;left:50%;top:18px;display:none;align-items:center;gap:10px;max-width:280px;padding:9px 13px 9px 9px;border:1px solid #d8d4ff;border-radius:13px;color:#383184;background:linear-gradient(135deg,#fffffff8,#f8f7fff5);box-shadow:0 14px 34px #1118272b,0 2px 8px #635bff1f,inset 0 1px #fff;font:750 11px/1.35 system-ui;transform:translateX(-50%);white-space:nowrap;backdrop-filter:blur(14px) saturate(1.12)}.capture-status.active{display:flex;animation:captureStatusIn .18s ease-out}.capture-status-icon{position:relative;width:26px;height:26px;flex:0 0 auto;display:grid;place-items:center;overflow:hidden;border:1px solid #dcd8ff;border-radius:9px;color:#6256e8;background:linear-gradient(145deg,#f0eeff,#e7e4ff);box-shadow:0 4px 10px #635bff20}.capture-status-icon svg{width:17px;height:17px;overflow:visible}.capture-status-icon .capture-spinner{animation:spin .78s linear infinite}.capture-status-icon .capture-check{display:none;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}.capture-status-icon circle{fill:none;stroke:#bdb7f5;stroke-width:2.1}.capture-status-icon path{fill:none;stroke:currentColor;stroke-width:2.35;stroke-linecap:round}.capture-status-icon i{position:absolute;width:4px;height:4px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #7568ed,0 0 9px #635bff;animation:processingPulse .72s ease-in-out infinite alternate}.capture-status.success{border-color:#b9e8cf;color:#17663f;background:linear-gradient(135deg,#fffffffa,#f1fff7f5);box-shadow:0 14px 34px #11182724,0 2px 9px #22a06b20,inset 0 1px #fff}.capture-status.success .capture-status-icon{border-color:#b7e7cb;color:#168154;background:linear-gradient(145deg,#eafff3,#d9f8e7);box-shadow:0 4px 10px #22a06b1f}.capture-status.success .capture-spinner,.capture-status.success .capture-status-icon i{display:none}.capture-status.success .capture-check{display:block;animation:captureCheckIn .2s ease-out}.capture-status-text{letter-spacing:.005em}
     .drag{width:23px;height:34px;display:grid;place-items:center;border:0;color:#7f8ba0;background:transparent;cursor:move}.drag svg{width:18px;height:18px}
     .state{display:grid;gap:2px;min-width:100px;padding:0 8px 0 4px}.state strong{display:flex;align-items:center;gap:7px;font-size:11px;white-space:nowrap}.state strong:before{content:"";width:7px;height:7px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 3px #ef444432}.state small{max-width:145px;overflow:hidden;color:#9da9bb;font-size:8px;white-space:nowrap;text-overflow:ellipsis}.hud.paused .state strong:before{background:#f59e0b;box-shadow:none}.hud.capturing .state strong:before{background:#8b5cf6;animation:pulse .7s infinite alternate}
     button.control,.count{position:relative;height:34px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid #ffffff17;border-radius:8px;color:#d9e0eb;background:#ffffff0b;font:600 10px inherit;cursor:pointer}.control{width:34px}.control:hover{color:#fff;background:#ffffff18}.control.cancel{color:#f3c4c8}.control.cancel:hover{color:#fff;background:#dc3e5030}.control.stop{color:#fff;background:#dc3e50;border-color:#dc3e50}.control:disabled{opacity:.4;cursor:progress}.count{min-width:48px;padding:0 8px;color:#fff}.count svg,.control svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
     [data-tip]:hover:after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 9px);transform:translateX(-50%);width:max-content;max-width:250px;padding:6px 8px;border-radius:6px;color:#fff;background:#080d17;font:10px/1.35 system-ui;box-shadow:0 4px 15px #0005;white-space:nowrap;pointer-events:none}.drag[data-tip]:hover:after{left:0;transform:none}
-    @keyframes pulse{to{transform:scale(1.35);opacity:.65}}@keyframes spin{to{transform:rotate(360deg)}}@keyframes processingPulse{to{transform:scale(.72);opacity:.65}}@keyframes captureStatusIn{from{opacity:0;transform:translateX(-50%) translateY(-3px) scale(.97)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
-  </style><div class="outline"></div><div class="lock"></div><div class="capture-status"><span class="capture-status-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.25"></circle><path d="M10 2.75a7.25 7.25 0 0 1 6.9 5"></path></svg><i></i></span><span class="capture-status-text"></span></div><div class="hud"><button class="drag" data-tip="">${icon('drag')}</button><div class="state"><strong></strong><small></small></div><button class="control pause" data-tip="">${icon('pause')}</button><span class="count">${icon('steps')}<b>0</b></span><button class="control manual" data-tip="">${icon('camera')}</button><button class="control cancel" data-tip="">${icon('cancel')}</button><button class="control stop" data-tip="">${icon('stop')}</button></div>`
+    @keyframes pulse{to{transform:scale(1.35);opacity:.65}}@keyframes spin{to{transform:rotate(360deg)}}@keyframes processingPulse{to{transform:scale(.72);opacity:.65}}@keyframes captureStatusIn{from{opacity:0;transform:translateX(-50%) translateY(-3px) scale(.97)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}@keyframes captureCheckIn{from{opacity:0;transform:scale(.72)}to{opacity:1;transform:scale(1)}}
+  </style><div class="outline"></div><div class="lock"></div><div class="capture-status"><span class="capture-status-icon" aria-hidden="true"><svg class="capture-spinner" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.25"></circle><path d="M10 2.75a7.25 7.25 0 0 1 6.9 5"></path></svg><svg class="capture-check" viewBox="0 0 20 20"><path d="m5.3 10.2 3.1 3.1 6.4-6.6"></path></svg><i></i></span><span class="capture-status-text"></span></div><div class="hud"><button class="drag" data-tip="">${icon('drag')}</button><div class="state"><strong></strong><small></small></div><button class="control pause" data-tip="">${icon('pause')}</button><span class="count">${icon('steps')}<b>0</b></span><button class="control manual" data-tip="">${icon('camera')}</button><button class="control cancel" data-tip="">${icon('cancel')}</button><button class="control stop" data-tip="">${icon('stop')}</button></div>`
   hudHost = host
   highlight = shadow.querySelector('.outline')
   lockLayer = shadow.querySelector('.lock')
@@ -418,22 +455,25 @@ function ensureHud() {
   })
   manual.addEventListener('click', async event => {
     event.stopPropagation()
-    if (!active || paused || capturing) return
-    const snapshot = mode === 'html' ? (captureDom() || currentSnapshot) : undefined
+    if (!active || paused || captureBusy()) return
+    const snapshot = mode === 'html' ? (captureDom(privacyEnabled) || currentSnapshot) : undefined
     const data = {
       event_id: eventId(), title: tr(contentLocale, 'manualTitle'), body: tr(contentLocale, 'manualBody'),
-      viewport_width: innerWidth, viewport_height: innerHeight, page_context: { ...pageContext(), manual_capture: true },
+      viewport_width: innerWidth, viewport_height: innerHeight, page_context: { ...pageContext(undefined, privacyEnabled), manual_capture: true },
       scroll_state: { x: scrollX, y: scrollY }, redactions: redactionRects(),
       capture_warnings: captureWarnings(), duration: 3, terminal: false,
     }
-    captureGuard.lock(); capturing = true; phase = 'capturing'; renderHud()
+    captureGuard.lock(); capturing = true; phase = 'capturing'; captureFeedback = 'capturing'; renderHud()
+    const captureStarted = performance.now()
     try {
-      const result = await chrome.runtime.sendMessage({ type: 'MANUAL_STEP', data, snapshot })
+      const result = await recorderMessage<any>({ type: 'MANUAL_STEP', data, snapshot })
       if (result?.quotaEnded) return
       if (result?.error) throw new Error(result.error)
       if (typeof result?.steps === 'number') steps = result.steps
+      captureFeedback = 'success'; renderHud()
+      await delay(captureSuccessDelay(performance.now() - captureStarted, captureFeedbackDurationMs))
     } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
-    finally { captureGuard.unlock(); capturing = false; phase = ''; renderHud(); scheduleRefresh() }
+    finally { captureGuard.unlock(); capturing = false; phase = ''; captureFeedback = ''; renderHud(); scheduleRefresh() }
   })
   parent.appendChild(host)
   renderHud()
@@ -453,7 +493,7 @@ function renderTargetHighlight(target: HTMLElement | null) {
 }
 
 function renderLastPointerTarget() {
-  if (!active || paused || capturing || mode !== 'html' || window.top !== window) return
+  if (!active || paused || captureBusy() || mode !== 'html' || window.top !== window) return
   renderTargetHighlight(selectableTarget(document.elementFromPoint(lastPointer.x, lastPointer.y)))
 }
 
@@ -464,19 +504,22 @@ function renderHud() {
   }
   ensureHud()
   const hud = statusText?.closest('.hud')
+  const busy = captureBusy()
   hud?.classList.toggle('paused', paused)
-  hud?.classList.toggle('capturing', capturing)
-  lockLayer?.classList.toggle('active', capturing)
-  captureStatus?.classList.toggle('active', capturing && phase === 'capturing')
+  hud?.classList.toggle('capturing', busy)
+  lockLayer?.classList.toggle('active', busy)
+  captureStatus?.classList.toggle('active', captureFeedback !== '' || (capturing && phase === 'capturing'))
+  captureStatus?.classList.toggle('success', captureFeedback === 'success')
   const captureLabel = captureStatus?.querySelector('.capture-status-text')
-  if (captureLabel) captureLabel.textContent = tr(locale, 'capturing')
-  if (statusText) statusText.textContent = lastError || (capturing ? tr(locale, 'capturing') : paused ? tr(locale, 'paused') : tr(locale, 'recording'))
-  if (modeText) modeText.textContent = capturing ? (phase === 'capturing' ? tr(locale, 'capturing') : tr(locale, 'uploading')) : `${mode === 'html' ? tr(locale, 'htmlMode') : tr(locale, 'screenshotMode')}${aiEnabled ? ' · AI' : ''}`
+  const feedbackLabel = captureFeedback === 'success' ? tr(locale, 'captureComplete') : tr(locale, 'capturing')
+  if (captureLabel) captureLabel.textContent = feedbackLabel
+  if (statusText) statusText.textContent = lastError || (busy ? feedbackLabel : paused ? tr(locale, 'paused') : tr(locale, 'recording'))
+  if (modeText) modeText.textContent = busy ? (captureFeedback === 'success' ? tr(locale, 'captureComplete') : phase === 'uploading' ? tr(locale, 'uploading') : tr(locale, 'capturing')) : `${mode === 'html' ? tr(locale, 'htmlMode') : tr(locale, 'screenshotMode')}${aiEnabled ? ' · AI' : ''}`
   if (countText) countText.textContent = String(steps)
   if (pauseButton) {
     pauseButton.innerHTML = icon(paused ? 'play' : 'pause')
     pauseButton.dataset.tip = tr(locale, 'pauseTooltip')
-    pauseButton.disabled = capturing
+    pauseButton.disabled = busy
   }
   const shadow = hudHost?.shadowRoot
   // The shadow root is closed; tooltips are assigned when controls are found
@@ -487,17 +530,19 @@ function renderHud() {
     if (control.classList.contains('manual')) control.dataset.tip = tr(locale, 'manualTooltip')
     if (control.classList.contains('cancel')) control.dataset.tip = tr(locale, 'cancelRecordingTooltip')
     if (control.classList.contains('stop')) control.dataset.tip = tr(locale, 'stopTooltip')
-    if (control instanceof HTMLButtonElement && (control.classList.contains('manual') || control.classList.contains('cancel') || control.classList.contains('stop'))) control.disabled = capturing
+    if (control instanceof HTMLButtonElement && (control.classList.contains('manual') || control.classList.contains('cancel') || control.classList.contains('stop'))) control.disabled = busy
   })
   void shadow
-  if (paused || capturing || mode !== 'html') clearHighlight()
+  if (paused || busy || mode !== 'html') clearHighlight()
 }
 
 function applyState(state: RecorderState) {
   const wasActive = active
   active = Boolean(state.active); paused = Boolean(state.paused); capturing = Boolean(state.capturing)
   phase = state.phase || ''; steps = Number(state.steps || 0); mode = state.mode || 'html'
-  aiEnabled = Boolean(state.aiEnabled); locale = state.locale || locale; contentLocale = state.contentLocale || contentLocale
+  aiEnabled = Boolean(state.aiEnabled); privacyEnabled = Boolean(state.privacyEnabled)
+  captureFeedbackDurationMs = captureFeedbackDuration(state.captureFeedbackDurationMs ?? captureFeedbackDurationMs)
+  locale = state.locale || locale; contentLocale = state.contentLocale || contentLocale
   lastError = state.error ? `${tr(locale, 'captureFailed')}: ${state.error}` : capturing ? lastError : ''
   renderHud()
   if (active && !paused && mode === 'html') {
@@ -509,7 +554,7 @@ function applyState(state: RecorderState) {
 
 function refreshSnapshot() {
   if (!active || paused || mode !== 'html' || window.top !== window) return
-  try { currentSnapshot = captureDom() } catch { currentSnapshot = null }
+  try { currentSnapshot = captureDom(privacyEnabled) } catch { currentSnapshot = null }
 }
 function scheduleRefresh() { window.clearTimeout(refreshTimer); refreshTimer = window.setTimeout(refreshSnapshot, 600) }
 
@@ -541,14 +586,25 @@ function restoreRecorderUi() {
   captureUiHidden = false
 }
 
+function dismissNativeFormOverlays() {
+  const activeElement = document.activeElement
+  if (!(activeElement instanceof HTMLElement)) return
+  if (activeElement.matches('input,textarea,select,[contenteditable="true"]')) {
+    // Browser password managers and autofill menus are native UI and are not
+    // part of the DOM snapshot, but captureVisibleTab still records them.
+    // Blurring before the synchronized screenshot dismisses those overlays.
+    activeElement.blur()
+  }
+}
+
 function onPointerMove(event: PointerEvent) {
   lastPointer = { x: event.clientX, y: event.clientY }
-  if (!active || paused || capturing || mode !== 'html' || window.top !== window || !highlight) return
+  if (!active || paused || captureBusy() || mode !== 'html' || window.top !== window || !highlight) return
   renderTargetHighlight(selectableTarget(event.target as Element | null))
 }
 
 async function onPointer(event: PointerEvent) {
-  if (!active || paused || capturing || event.button !== 0 || window.top !== window) return
+  if (!active || paused || captureBusy() || event.button !== 0 || window.top !== window) return
   const target = selectableTarget(event.target as Element | null)
   if (!target?.getBoundingClientRect) return
   // The authoritative DOM snapshot is requested by the background immediately
@@ -563,30 +619,30 @@ async function onPointer(event: PointerEvent) {
     : (isInput ? `Enter or select a value in “${label}”` : `Click “${label}”`)
   const data = {
     event_id: eventId(), title: body, body, viewport_width: innerWidth, viewport_height: innerHeight,
-    hotspot: normalized(targetRect), target: info, page_context: pageContext(target),
+    hotspot: normalized(targetRect), target: info, page_context: pageContext(target, privacyEnabled),
     scroll_state: { x: scrollX, y: scrollY }, redactions: redactionRects(), capture_warnings: captureWarnings(), duration: 3, terminal: false,
   }
   event.preventDefault()
   event.stopImmediatePropagation()
   captureGuard.lock()
-  capturing = true; phase = 'capturing'; clearHighlight(); renderHud(); positionCaptureStatus(targetRect)
+  capturing = true; phase = 'capturing'; captureFeedback = 'capturing'; clearHighlight(); renderHud(); positionCaptureStatus(targetRect)
   const captureStarted = performance.now()
   let quotaEnded = false
-  let captured = false
   try {
-    const result = await chrome.runtime.sendMessage({ type: 'STEP_EVENT', data, snapshot })
+    const result = await recorderMessage<any>({ type: 'STEP_EVENT', data, snapshot })
     if (result?.quotaEnded) { quotaEnded = true; return }
     if (result?.error) throw new Error(result.error)
     if (result?.ignored) throw new Error(tr(locale, 'captureFailed'))
     if (typeof result?.steps === 'number') steps = result.steps
-    captured = true
+    captureFeedback = 'success'; renderHud()
+    await delay(captureSuccessDelay(performance.now() - captureStarted, captureFeedbackDurationMs))
   } catch (error) { lastError = `${tr(locale, 'captureFailed')}: ${(error as Error).message}` }
   finally {
-    const feedbackDelay = 280 - (performance.now() - captureStarted)
-    if (feedbackDelay > 0) await new Promise(resolve => window.setTimeout(resolve, feedbackDelay))
     captureGuard.unlock()
-    capturing = false; phase = ''; renderHud(); scheduleRefresh()
-    if (captured && !quotaEnded) replayCapturedAction(target)
+    capturing = false; phase = ''; captureFeedback = ''; renderHud(); scheduleRefresh()
+    // Capture failures must not consume the user's original page action. The
+    // quota-ended flow is the only case that intentionally keeps it blocked.
+    if (!quotaEnded) replayCapturedAction(target)
   }
 }
 
@@ -595,10 +651,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'RECORDING_QUOTA_ENDED') { showQuotaEnded(message); sendResponse({ ok: true }); return }
   if (message.type === 'RECORDING_STATE') applyState(message)
   if (message.type === 'RECORDER_UI_VISIBILITY') {
-    let synchronizedSnapshot: CapturedSnapshot | undefined
-    if (message.hidden && message.captureSnapshot && mode === 'html') {
-      try { synchronizedSnapshot = captureDom() || undefined } catch { synchronizedSnapshot = currentSnapshot || undefined }
-    }
     if (!message.hidden) {
       restoreRecorderUi()
       restoreSensitiveValues?.()
@@ -607,9 +659,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return
     }
     restoreSensitiveValues?.()
-    restoreSensitiveValues = concealSensitiveFormValues()
+    dismissNativeFormOverlays()
+    restoreSensitiveValues = concealSensitiveFormValues(privacyEnabled)
     detachRecorderUi()
-    requestAnimationFrame(() => requestAnimationFrame(() => sendResponse({ ok: true, snapshot: synchronizedSnapshot })))
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      let synchronizedSnapshot: CapturedSnapshot | undefined
+      if (message.captureSnapshot && mode === 'html') {
+        try { synchronizedSnapshot = captureDom(privacyEnabled) || undefined } catch { synchronizedSnapshot = currentSnapshot || undefined }
+      }
+      sendResponse({ ok: true, snapshot: synchronizedSnapshot })
+    }))
     return true
   }
   if (message.type === 'CAPTURE_FINAL') {
@@ -618,7 +677,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       snapshot: mode === 'html' ? currentSnapshot : undefined,
       data: {
         event_id: eventId(), title: tr(contentLocale, 'flowComplete'), body: tr(contentLocale, 'flowCompleteBody'),
-        viewport_width: innerWidth, viewport_height: innerHeight, page_context: pageContext(), scroll_state: { x: scrollX, y: scrollY },
+        viewport_width: innerWidth, viewport_height: innerHeight, page_context: pageContext(undefined, privacyEnabled), scroll_state: { x: scrollX, y: scrollY },
         redactions: redactionRects(), capture_warnings: captureWarnings(), duration: 3, terminal: true,
       },
     }); return true

@@ -88,6 +88,7 @@ export default function AdminSidebar({ collapsed, onToggle }: { collapsed: boole
       <SidebarLink collapsed={collapsed} to="/admin/ai/models" icon="ai" label={t('nav.aiModels')} />
       <SidebarLink collapsed={collapsed} to="/admin/ai/usage" icon="analytics" label={t('nav.aiUsage')} />
       <div className="admin-nav-separator"><span>{t('nav.system')}</span></div>
+      <SidebarLink collapsed={collapsed} to="/admin/extensions" icon="device" label={t('nav.extensions')} />
       <SidebarLink collapsed={collapsed} to="/admin/settings" icon="settings" label={t('nav.settings')} />
       <div className="admin-nav-separator"><span>{t('nav.security')}</span></div>
       <SidebarLink collapsed={collapsed} to="/admin/audit" icon="clock" label={t('nav.audit')} />

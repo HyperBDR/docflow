@@ -1,7 +1,7 @@
 {
   "title": "系统设置",
   "subtitle": "统一管理平台级服务配置，修改后立即生效并记录审计日志。",
-  "tabs": { "general": "通用设置", "generalHint": "帮助中心与产品入口", "email": "邮件服务", "emailHint": "SMTP 与发件身份", "login": "登录与注册", "loginHint": "Google 登录与账号策略", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略", "quota":"配额管理", "quotaHint":"方案模板与默认限制" },
+  "tabs": { "general": "通用设置", "generalHint": "帮助中心与产品入口", "capture": "插件采集", "captureHint": "截图反馈与交互节奏", "email": "邮件服务", "emailHint": "SMTP 与发件身份", "login": "登录与注册", "loginHint": "Google 登录与账号策略", "monitoring": "监控与数据", "monitoringHint": "自动采集与保留策略", "quota":"配额管理", "quotaHint":"方案模板与默认限制" },
   "status": { "ready": "配置正常", "inactive": "尚未配置", "enabled": "已启用", "disabled": "已停用", "running": "自动运行中" },
   "general": {
     "statusTitle": "平台通用配置", "configured": "平台公开产品入口已完成配置", "notConfigured": "尚未配置公开产品入口",
@@ -27,6 +27,12 @@
     "allowRegistration": "允许 Google 用户自动注册", "allowRegistrationHint": "关闭后，只有已绑定 Google 的现有账号能够登录。",
     "footerHint": "配置更改会立即生效并写入审计日志。", "testTitle": "验证 Google 服务", "testHint": "检查 Google OpenID 配置服务是否可访问；完整客户端验证将在实际登录授权时完成。", "test": "检查连接", "testing": "正在检查…", "testPassed": "Google OpenID 服务连接正常",
     "linkPolicy": "现有账号需要主动绑定", "linkPolicyHint": "Google 邮箱与已有密码账号相同时不会自动合并。用户需先使用密码登录，再到个人设置的“密码与安全”中绑定，以避免账号被错误接管。"
+  },
+  "capture": {
+    "statusTitle": "插件采集反馈", "statusHint": "统一控制浏览器插件截图完成前的页面锁定和状态提示时长。", "current": "当前 {{value}} 秒",
+    "feedbackTitle": "截图反馈停留时间", "feedbackHint": "设置用户点击后“正在截图”和“截图完成”反馈的最短总时长。", "duration": "反馈时长", "durationHint": "支持 {{min}}～{{max}} 毫秒，推荐 1000～1200 毫秒。",
+    "previewTitle": "录制反馈预览", "previewHint": "用户触发录制后，页面至少保持约 {{value}} 秒的明确操作反馈。", "runtimeTitle": "不阻塞后台任务", "runtimeHint": "此参数只控制用户可见的反馈节奏，不等待字体、背景图、AI 或步骤上传；扩展在每次开始录制时读取最新配置。",
+    "footerHint": "保存后，新开始的录制自动应用；已连接插件无需重新安装。", "saved": "插件采集设置已保存"
   },
   "monitoring": {
     "statusTitle": "自动监控采集", "statusHint": "独立 Monitor 调度器定时下发任务，由 Worker 完成采集和告警判断。",

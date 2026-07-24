@@ -15,9 +15,10 @@ import ExtensionConnect from './pages/ExtensionConnect'
 import AuthPage from './components/auth/AuthPage'
 import WorkspaceShell from './pages/workspace/WorkspaceShell'
 import type { User } from './types'
+import ExtensionUpdateNotice from './components/ExtensionUpdateNotice'
 
 function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserChange: (user: User) => void; logout: () => void }) {
-  return <Routes>
+  return <><ExtensionUpdateNotice /><Routes>
     <Route path="/admin/*" element={user.role === 'admin' ? <AdminShell user={user} onUserChange={onUserChange} logout={logout} /> : <Navigate to="/" />} />
     <Route path="/account/*" element={<Account user={user} onUserChange={onUserChange} onPasswordChanged={logout} />} />
     <Route path="/spaces/:id" element={<TeamSpaceSettings user={user} onUserChange={onUserChange} logout={logout} />} />
@@ -25,7 +26,7 @@ function AuthenticatedApp({ user, onUserChange, logout }: { user: User; onUserCh
     <Route path="/demos/:id/analytics" element={<Analytics />} />
     <Route path="/demos/:id" element={<Editor />} />
     <Route path="/*" element={<WorkspaceShell user={user} onUserChange={onUserChange} logout={logout} />} />
-  </Routes>
+  </Routes></>
 }
 
 export default function App() {

@@ -8,16 +8,24 @@ import uuid
 from typing import Any
 
 import httpx
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from app.ai_models import active_model, ai_chunk_size
 from app.database import SessionLocal
 from app.models import AIJob, AIModelConfig, AIUsageRecord, Demo, Hotspot, JobStatus, Step, now
 from app.storage import storage
+from app.image_annotations import apply_annotations
 
 
 class AIProviderError(RuntimeError):
     pass
+
+
+class AIProviderTimeout(AIProviderError):
+    pass
+
+
+TRANSIENT_HTTP_ERRORS = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.RemoteProtocolError)
 
 
 def _json_from_content(content: Any) -> dict:
@@ -114,22 +122,37 @@ def chat_json(messages: list[dict], model: AIModelConfig, job: AIJob, operation:
     request_id = str(uuid.uuid4())
     detail = _request_summary(messages)
     try:
-        with httpx.Client(timeout=model.timeout_seconds) as client:
+        timeout = httpx.Timeout(
+            connect=min(15.0, float(model.timeout_seconds)),
+            read=float(model.timeout_seconds),
+            write=min(30.0, float(model.timeout_seconds)),
+            pool=min(15.0, float(model.timeout_seconds)),
+        )
+        for attempt in range(3):
             try:
-                content, usage, response_detail, first_token_ms, upstream_id = _stream_completion(client, endpoint, headers, payload)
-            except AIProviderError as exc:
-                # Older compatible providers may reject JSON mode or streaming usage options.
-                if "response_format" not in str(exc) and "stream_options" not in str(exc): raise
-                fallback = {key: value for key, value in payload.items() if key != "response_format"}
-                response = client.post(endpoint, headers=headers, json=fallback)
-                if response.status_code >= 400:
-                    raise AIProviderError(f"AI provider returned {response.status_code}: {response.text[:500]}")
-                body = response.json()
-                content = body["choices"][0]["message"]["content"]
-                usage = body.get("usage") or {}
-                response_detail = {"finish_reason": (body.get("choices") or [{}])[0].get("finish_reason")}
-                first_token_ms = None  # A non-streaming provider cannot expose true first-token latency.
-                upstream_id = str(body.get("id", ""))
+                with httpx.Client(timeout=timeout) as client:
+                    try:
+                        content, usage, response_detail, first_token_ms, upstream_id = _stream_completion(client, endpoint, headers, payload)
+                    except AIProviderError as exc:
+                        # Older compatible providers may reject JSON mode or streaming usage options.
+                        if "response_format" not in str(exc) and "stream_options" not in str(exc): raise
+                        fallback = {key: value for key, value in payload.items() if key != "response_format"}
+                        response = client.post(endpoint, headers=headers, json=fallback)
+                        if response.status_code >= 400:
+                            raise AIProviderError(f"AI provider returned {response.status_code}: {response.text[:500]}")
+                        body = response.json()
+                        content = body["choices"][0]["message"]["content"]
+                        usage = body.get("usage") or {}
+                        response_detail = {"finish_reason": (body.get("choices") or [{}])[0].get("finish_reason")}
+                        first_token_ms = None  # A non-streaming provider cannot expose true first-token latency.
+                        upstream_id = str(body.get("id", ""))
+                break
+            except TRANSIENT_HTTP_ERRORS as exc:
+                if attempt == 2:
+                    raise AIProviderTimeout(
+                        f"AI provider timed out after 3 attempts (read timeout: {model.timeout_seconds}s)"
+                    ) from exc
+                time.sleep(.4 * (2 ** attempt))
         request_id = upstream_id or request_id
         value = _json_from_content(content)
         _save_usage(job, model, request_id=request_id, operation=operation, status="success", started=started,
@@ -145,14 +168,7 @@ def chat_json(messages: list[dict], model: AIModelConfig, job: AIJob, operation:
 def redacted_thumbnail(step: Step, vision_enabled: bool = True) -> str | None:
     if not vision_enabled or not storage.exists(step.asset_key):
         return None
-    image = Image.open(io.BytesIO(storage.read(step.asset_key))).convert("RGB")
-    draw = ImageDraw.Draw(image)
-    for rect in step.redactions or []:
-        x = int(float(rect.get("x", 0)) * image.width)
-        y = int(float(rect.get("y", 0)) * image.height)
-        w = int(float(rect.get("w", 0)) * image.width)
-        h = int(float(rect.get("h", 0)) * image.height)
-        draw.rectangle((x, y, x + w, y + h), fill="#222731")
+    image = apply_annotations(Image.open(io.BytesIO(storage.read(step.asset_key))), step.redactions or [])
     image.thumbnail((768, 768), Image.Resampling.LANCZOS)
     output = io.BytesIO()
     image.save(output, "JPEG", quality=78, optimize=True)
@@ -261,6 +277,27 @@ def _normalized_warnings(values: Any, locale: str) -> list[str]:
 
 def _comparison(before: Any, generated: Any, applied: bool) -> dict:
     return {"before": before if before is not None else "", "after": generated if generated is not None else "", "applied": applied}
+
+
+def missing_hotspot_results(steps: list[Step], generated: list[dict]) -> list[str]:
+    """Return every supplied hotspot that the model omitted or left empty."""
+    generated_steps = {
+        str(item.get("id", "")): item for item in generated
+        if isinstance(item, dict) and item.get("id")
+    }
+    missing: list[str] = []
+    for step in steps:
+        item = generated_steps.get(step.id)
+        results = item.get("hotspots") if isinstance(item, dict) and isinstance(item.get("hotspots"), list) else []
+        returned = {
+            str(value.get("id", "")): value for value in results
+            if isinstance(value, dict) and value.get("id")
+        }
+        for hotspot in step.hotspots:
+            value = returned.get(hotspot.id)
+            if not value or not str(value.get("tooltip", "")).strip():
+                missing.append(f"{step.id}:{hotspot.id}")
+    return missing
 
 
 def apply_results(db, job: AIJob, demo: Demo, outline: dict, generated: list[dict]) -> dict:
@@ -378,8 +415,18 @@ def run_ai_generation(job_id: str) -> None:
         for start in range(0, len(steps), chunk_size):
             chunk = steps[start:start + chunk_size]
             response = chat_json(chunk_prompt(chunk, outline, demo.content_locale, model.vision_enabled, demo.ai_context), model, job, "step_copy")
-            if isinstance(response.get("steps"), list):
-                generated.extend(item for item in response["steps"] if isinstance(item, dict))
+            chunk_generated = [item for item in response.get("steps", []) if isinstance(item, dict)] if isinstance(response.get("steps"), list) else []
+            missing = missing_hotspot_results(chunk, chunk_generated)
+            if missing:
+                # A semantic retry is intentionally separate from transport
+                # retries: partial JSON is valid but must never silently leave
+                # later hotspots without AI copy.
+                retry = chat_json(chunk_prompt(chunk, outline, demo.content_locale, model.vision_enabled, demo.ai_context), model, job, "step_copy_retry")
+                chunk_generated = [item for item in retry.get("steps", []) if isinstance(item, dict)] if isinstance(retry.get("steps"), list) else []
+                missing = missing_hotspot_results(chunk, chunk_generated)
+            if missing:
+                raise AIProviderError(f"AI response omitted {len(missing)} hotspot result(s)")
+            generated.extend(chunk_generated)
             db.refresh(job)
             if job.status == JobStatus.cancelled:
                 return
@@ -406,7 +453,7 @@ def run_ai_generation(job_id: str) -> None:
                 return
             job.status = JobStatus.failed
             job.error = f"{exc}\n{traceback.format_exc()[-1500:]}"
-            job.error_code = "ai.generation_failed"
+            job.error_code = "ai.timeout" if isinstance(exc, AIProviderTimeout) else "ai.generation_failed"
             job.completed_at = now()
             db.commit()
             notify_job_result(db, job, "ai", False)

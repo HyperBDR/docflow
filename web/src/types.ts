@@ -1,4 +1,5 @@
 export type Rect = { x: number; y: number; w: number; h: number }
+export type AnnotationRect = Rect & { kind?: 'cover' | 'mosaic' | 'blur'; color?: string }
 export type Locale = 'zh-CN' | 'en'
 export type UserRole = 'user' | 'admin'
 export type User = {
@@ -187,10 +188,11 @@ export type Step = {
   position: number
   title: string
   body: string
+  hotspot_mode: 'independent' | 'sequence'
   viewport_width: number
   viewport_height: number
   hotspot: Rect
-  redactions: Rect[]
+  redactions: AnnotationRect[]
   duration: number
   image_url: string
   render_mode: 'image' | 'dom'
@@ -263,4 +265,37 @@ export type AIJob = {
   error?: string
   error_code?: string
   can_revert: boolean
+  can_reapply: boolean
+}
+
+export type ExtensionRelease = {
+  id: string
+  channel: 'stable' | 'beta' | 'dev'
+  version: string
+  minimum_version: string
+  status: 'draft' | 'published' | 'retired'
+  is_required: boolean
+  release_notes: string
+  filename: string
+  sha256: string
+  size_bytes: number
+  download_url?: string | null
+  created_by_name: string
+  published_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ExtensionReleaseCheck = {
+  channel: string
+  current_version: string
+  latest_version?: string | null
+  minimum_version?: string | null
+  update_available: boolean
+  required: boolean
+  download_url?: string | null
+  sha256?: string | null
+  size_bytes?: number | null
+  release_notes: string
+  published_at?: string | null
 }

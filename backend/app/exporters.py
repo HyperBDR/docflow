@@ -113,7 +113,14 @@ def markdown_text(snapshot: dict, base_url: str, token: str | None = None, local
     for index, step in enumerate(snapshot["steps"], 1):
         image = f"images/{index:03d}.webp" if local else f"{base_url}/public/{token}/assets/{step['id']}.webp"
         title = step.get("title") or (f"Step {index}" if snapshot.get("content_locale") == "en" else f"步骤 {index}")
-        lines += [f"## {index}. {title}", "", step.get("body", ""), "", f"![{title}]({image})", ""]
+        lines += [f"## {index}. {title}", "", step.get("body", ""), ""]
+        hotspots = sorted(step.get("hotspots") or [], key=lambda item: item.get("position", 0))
+        if len(hotspots) > 1:
+            for hotspot_index, hotspot in enumerate(hotspots, 1):
+                content = str((hotspot.get("tooltip") or {}).get("content", "")).strip()
+                if content:
+                    lines += [f"### {index}.{hotspot_index} {content}", ""]
+        lines += [f"![{title}]({image})", ""]
     return "\n".join(lines)
 
 

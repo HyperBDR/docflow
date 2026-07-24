@@ -5,6 +5,10 @@ __pycache__/
 *.py[cod]
 node_modules/
 dist/
+extension/dist-dev/
+extension/dist-production/
+docflow-extension-*.zip
+extension/docflow-extension-*.zip
 *.tsbuildinfo
 data/
 exports/

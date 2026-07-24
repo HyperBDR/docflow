@@ -5,10 +5,10 @@ import json
 from PIL import Image
 from sqlalchemy import select
 
-from app.ai_service import apply_results
+from app.ai_service import apply_results, missing_hotspot_results
 from app.database import SessionLocal
-from app.models import AIJob, Demo, Hotspot, Step, User
-from app.snapshots import sanitize_page_context, sanitize_snapshot
+from app.models import AIJob, Demo, Hotspot, JobStatus, Step, User
+from app.snapshots import sanitize_page_context, sanitize_snapshot, snapshot_has_renderable_body
 
 
 def screenshot() -> bytes:
@@ -78,7 +78,7 @@ def test_snapshot_sanitizer_only_warns_for_missing_visual_assets():
     assert warnings == ["Stylesheet could not be embedded; preview may differ from the source page"]
 
 
-def test_snapshot_sanitizer_keeps_images_but_drops_embedded_fonts():
+def test_snapshot_sanitizer_keeps_images_and_compressed_icon_fonts():
     payload = rrweb_payload()
     button = payload["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][0]
     button["attributes"]["style"] = (
@@ -88,7 +88,116 @@ def test_snapshot_sanitizer_keeps_images_but_drops_embedded_fonts():
     value, _ = sanitize_snapshot(payload)
     style = value["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][0]["attributes"]["style"]
     assert "data:image/png" in style
-    assert "data:font" not in style
+    assert "data:font/woff2" in style
+
+
+def test_snapshot_sanitizer_rejects_external_fonts_and_keeps_embedded_icon_fonts():
+    payload = rrweb_payload()
+    button = payload["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][0]
+    button["attributes"]["style"] = (
+        'src:url("https://assets.test/fontawesome.woff2");'
+        'src:url("data:font/ttf;base64,AA==");'
+        'src:url("data:font/otf;base64,AA==")'
+    )
+    value, _ = sanitize_snapshot(payload)
+    style = value["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][0]["attributes"]["style"]
+    assert "assets.test" not in style
+    assert "data:font/ttf" in style
+    assert "data:font/otf" in style
+
+
+def test_snapshot_sanitizer_keeps_local_xlink_svg_sprite_references():
+    payload = rrweb_payload()
+    body = payload["snapshot"]["childNodes"][0]["childNodes"][1]
+    body["childNodes"].extend([{
+        "type": 2, "id": 40, "tagName": "svg", "attributes": {"style": "display:none"}, "childNodes": [{
+            "type": 2, "id": 41, "tagName": "symbol", "attributes": {"id": "icon-language", "viewBox": "0 0 24 24"},
+            "childNodes": [{"type": 2, "id": 42, "tagName": "path", "attributes": {"d": "M2 12h20"}, "childNodes": []}],
+        }],
+    }, {
+        "type": 2, "id": 43, "tagName": "svg", "attributes": {"class": "language-icon"}, "childNodes": [{
+            "type": 2, "id": 44, "tagName": "use", "attributes": {"xlink:href": "#icon-language"}, "childNodes": [],
+        }],
+    }])
+
+    value, warnings = sanitize_snapshot(payload)
+    use = value["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][-1]["childNodes"][0]
+    assert use["attributes"]["xlink:href"] == "#icon-language"
+    assert warnings == []
+
+
+def test_snapshot_sanitizer_still_blocks_external_xlink_svg_references():
+    payload = rrweb_payload()
+    body = payload["snapshot"]["childNodes"][0]["childNodes"][1]
+    body["childNodes"].append({
+        "type": 2, "id": 45, "tagName": "svg", "attributes": {}, "childNodes": [{
+            "type": 2, "id": 46, "tagName": "use",
+            "attributes": {"xlink:href": "https://untrusted.test/icons.svg#language"}, "childNodes": [],
+        }],
+    })
+
+    value, warnings = sanitize_snapshot(payload)
+    use = value["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"][-1]["childNodes"][0]
+    assert "xlink:href" not in use["attributes"]
+    assert warnings == ["SVG icon resource could not be embedded; preview may omit some icons"]
+
+
+def test_disabled_privacy_setting_preserves_all_input_content():
+    payload = rrweb_payload()
+    payload["privacy_masking"] = False
+    body = payload["snapshot"]["childNodes"][0]["childNodes"][1]
+    body["childNodes"].extend([{
+        "type": 2, "id": 30, "tagName": "input",
+        "attributes": {"type": "email", "value": "owner@example.com"}, "childNodes": [],
+    }, {
+        "type": 2, "id": 31, "tagName": "input",
+        "attributes": {"type": "password", "value": "visible-secret"}, "childNodes": [],
+    }, {
+        "type": 3, "id": 32, "textContent": "Contact owner@example.com; api_key=never-store-this",
+    }, {
+        "type": 2, "id": 33, "tagName": "input",
+        "attributes": {"type": "text", "name": "access_token", "value": "bare-sensitive-value"}, "childNodes": [],
+    }])
+
+    value, _ = sanitize_snapshot(payload)
+    encoded = json.dumps(value)
+    assert "owner@example.com" in encoded
+    assert "visible-secret" in encoded
+    assert "never-store-this" in encoded
+    assert "bare-sensitive-value" in encoded
+    assert value["privacy_masking"] is False
+
+
+def test_enabled_privacy_setting_hides_regular_input_content():
+    payload = rrweb_payload()
+    payload["privacy_masking"] = True
+    body = payload["snapshot"]["childNodes"][0]["childNodes"][1]
+    body["childNodes"].append({
+        "type": 2, "id": 30, "tagName": "input",
+        "attributes": {"type": "text", "value": "ordinary input"}, "childNodes": [],
+    })
+    value, _ = sanitize_snapshot(payload)
+    assert "ordinary input" not in json.dumps(value)
+
+
+def test_empty_dom_body_is_detected_for_visual_fallback():
+    payload = rrweb_payload()
+    assert snapshot_has_renderable_body(sanitize_snapshot(payload)[0]) is True
+    payload["snapshot"]["childNodes"][0]["childNodes"][1]["childNodes"] = []
+    assert snapshot_has_renderable_body(sanitize_snapshot(payload)[0]) is False
+
+
+def test_page_context_privacy_is_opt_in_for_new_recordings():
+    unmasked = sanitize_page_context({
+        "privacy_masking": False,
+        "visible_text": "owner@example.com api_key=never-store-this",
+    })
+    assert "owner@example.com" in unmasked["visible_text"]
+    assert "never-store-this" in unmasked["visible_text"]
+    assert unmasked["privacy_masking"] is False
+
+    masked = sanitize_page_context({"privacy_masking": True, "visible_text": "owner@example.com"})
+    assert "owner@example.com" not in masked["visible_text"]
 
 
 def test_page_context_keeps_only_safe_raster_fallback_regions():
@@ -175,7 +284,7 @@ def test_dom_slide_hotspot_and_public_playback(authenticated):
     ).status_code == 304
 
 
-def test_sensitive_form_keeps_dom_snapshot_but_defaults_to_exact_image(authenticated):
+def test_sensitive_form_uses_the_same_dom_mode_as_other_pages(authenticated):
     demo = authenticated.post("/api/demos", json={"title": "Login flow"}).json()
     meta = {
         "event_id": "login-1", "viewport_width": 1000, "viewport_height": 700,
@@ -195,7 +304,7 @@ def test_sensitive_form_keeps_dom_snapshot_but_defaults_to_exact_image(authentic
     )
     assert response.status_code == 201, response.text
     step = response.json()
-    assert step["render_mode"] == "image"
+    assert step["render_mode"] == "dom"
     assert step["snapshot_url"]
     assert step["page_context"]["sensitive_form"] is True
     # Simulate an automatic rectangle persisted by an older extension. A new
@@ -258,3 +367,112 @@ def test_ai_application_respects_manual_fields(authenticated):
         assert job.inverse_patch["demo"]["description"] == ""
     finally:
         db.rollback(); db.close()
+
+
+def test_ai_hotspot_completeness_requires_every_hotspot_id_and_copy():
+    step = Step(
+        id="step-completeness", demo_id="demo", event_id="event", position=0,
+        asset_key="assets/missing.webp", viewport_width=1000, viewport_height=700,
+    )
+    step.hotspots = [
+        Hotspot(id="hotspot-one", step_id=step.id, position=0),
+        Hotspot(id="hotspot-two", step_id=step.id, position=1),
+    ]
+    partial = [{"id": step.id, "hotspots": [{"id": "hotspot-one", "tooltip": "First"}]}]
+    assert missing_hotspot_results([step], partial) == [f"{step.id}:hotspot-two"]
+    complete = [{"id": step.id, "hotspots": [
+        {"id": "hotspot-one", "tooltip": "First"},
+        {"id": "hotspot-two", "tooltip": "Second"},
+    ]}]
+    assert missing_hotspot_results([step], complete) == []
+
+
+def test_ai_changes_can_be_reapplied_after_revert_including_legacy_jobs(authenticated):
+    demo_data = authenticated.post("/api/demos", json={"title": "原始演示"}).json()
+    db = SessionLocal()
+    try:
+        user = db.scalar(select(User).where(User.email == "owner@example.com"))
+        demo = db.get(Demo, demo_data["id"])
+        demo.manual_fields = []
+        step = Step(
+            demo_id=demo.id, event_id="reapply-step", position=0, title="原始步骤", body="原始说明",
+            asset_key="assets/missing.webp", viewport_width=1000, viewport_height=700,
+            hotspot={"x": .5, "y": .5, "w": .1, "h": .1}, manual_fields=[],
+        )
+        db.add(step); db.flush()
+        hotspot = Hotspot(
+            step_id=step.id, position=0, fallback_rect=step.hotspot, selector={}, action={"type": "next"},
+            tooltip={"content": "原始提示", "placement": "auto"}, style={},
+        )
+        db.add(hotspot); db.flush()
+        job = AIJob(owner_id=user.id, demo_id=demo.id, model="test", status=JobStatus.complete, progress=100)
+        db.add(job); db.flush()
+        report = apply_results(db, job, demo, {"title": "AI 演示", "description": "AI 简介"}, [{
+            "id": step.id, "title": "AI 步骤", "body": "AI 说明",
+            "hotspots": [{"id": hotspot.id, "tooltip": "AI 提示", "placement": "bottom"}],
+            "warnings": [], "redundant": False,
+        }])
+        job.result = {"changes": report}
+        job_id = job.id
+        step_id = step.id
+        hotspot_id = hotspot.id
+        db.commit()
+    finally:
+        db.close()
+
+    reverted = authenticated.post(f"/api/ai/jobs/{job_id}/revert")
+    assert reverted.status_code == 200
+    assert reverted.json()["can_revert"] is False
+    assert reverted.json()["can_reapply"] is True
+
+    # Older versions cleared inverse_patch during revert. Simulate such a job
+    # and ensure reapply can recover safe expected values from the change report.
+    db = SessionLocal()
+    try:
+        job = db.get(AIJob, job_id)
+        job.inverse_patch = {}
+        db.commit()
+    finally:
+        db.close()
+
+    reapplied = authenticated.post(f"/api/ai/jobs/{job_id}/reapply")
+    assert reapplied.status_code == 200
+    assert reapplied.json()["can_revert"] is True
+    assert reapplied.json()["can_reapply"] is False
+    db = SessionLocal()
+    try:
+        assert db.get(Demo, demo_data["id"]).title == "AI 演示"
+        assert db.get(Step, step_id).title == "AI 步骤"
+        assert db.get(Hotspot, hotspot_id).tooltip == {"content": "AI 提示", "placement": "bottom"}
+    finally:
+        db.close()
+
+    reverted_again = authenticated.post(f"/api/ai/jobs/{job_id}/revert")
+    assert reverted_again.status_code == 200
+    db = SessionLocal()
+    try:
+        assert db.get(Demo, demo_data["id"]).title == "原始演示"
+        assert db.get(Step, step_id).title == "原始步骤"
+        assert db.get(Hotspot, hotspot_id).tooltip == {"content": "原始提示", "placement": "auto"}
+    finally:
+        db.close()
+
+    # A field explicitly touched after undo stays user-owned even when its
+    # value happens to equal the pre-AI value.
+    db = SessionLocal()
+    try:
+        step = db.get(Step, step_id)
+        step.manual_fields = ["title"]
+        db.commit()
+    finally:
+        db.close()
+    reapplied_with_manual_field = authenticated.post(f"/api/ai/jobs/{job_id}/reapply")
+    assert reapplied_with_manual_field.status_code == 200
+    assert f"step.{step_id}.title" in reapplied_with_manual_field.json()["result"]["reapply_conflicts"]
+    db = SessionLocal()
+    try:
+        assert db.get(Demo, demo_data["id"]).title == "AI 演示"
+        assert db.get(Step, step_id).title == "原始步骤"
+        assert db.get(Hotspot, hotspot_id).tooltip == {"content": "AI 提示", "placement": "bottom"}
+    finally:
+        db.close()
